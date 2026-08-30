@@ -1,0 +1,78 @@
+#!/bin/sh
+
+# ============================================================
+# MX4200 默认配置（仅首次启动 / 不保留配置刷入时生效）
+# ============================================================
+
+# 保留配置 sysupgrade 时不覆盖用户既有设置
+if [ -f /sysupgrade.tgz ] || [ -f /tmp/sysupgrade.tar ]; then
+    echo "Keeping existing configuration restored by sysupgrade."
+    exit 0
+fi
+
+
+# ------------------------------------------------------------
+# 按机型设置默认主机名
+# ------------------------------------------------------------
+BOARD="$(cat /tmp/sysinfo/board_name 2>/dev/null || cat /tmp/sysinfo/model 2>/dev/null)"
+case "$BOARD" in
+    *mx4200v2*|*MX4200v2*) HOSTNAME="MX4200v2" ;;
+    *mx4200v1*|*MX4200v1*) HOSTNAME="MX4200v1" ;;
+    *) HOSTNAME="MX4200" ;;
+esac
+uci -q set system.@system[0].hostname="$HOSTNAME"
+
+
+# ------------------------------------------------------------
+# 默认时区：香港
+# ------------------------------------------------------------
+uci -q set system.@system[0].zonename='Asia/Hong_Kong'
+uci -q set system.@system[0].timezone='HKT-8'
+
+
+# ------------------------------------------------------------
+# 默认启用 BBR 拥塞控制（kmod-tcp-bbr 已内置）
+# ------------------------------------------------------------
+
+mkdir -p /etc/sysctl.d
+printf '%s\n' \
+    'net.ipv4.tcp_congestion_control=bbr' \
+    'net.core.default_qdisc=fq' \
+    > /etc/sysctl.d/10-bbr.conf
+sysctl -p /etc/sysctl.d/10-bbr.conf >/dev/null 2>&1 || true
+
+
+# ------------------------------------------------------------
+# 三频 Wi-Fi 默认（radio0=5G低段, radio1=2.4G, radio2=5G高段）
+# ------------------------------------------------------------
+# 5G 高段沿用 5G 低段的 htmode，保持两个 5G 频段模式一致
+MODE5G="$(uci -q get wireless.radio0.htmode || echo 'HE80')"
+
+# radio0 = 5G 低段：信道 48（htmode 保持默认 80MHz），默认禁用，需要时手动开启
+uci -q set wireless.radio0.disabled='1'
+uci -q set wireless.radio0.country='US'
+uci -q set wireless.radio0.channel='48'
+uci -q set wireless.radio0.txpower='23'
+
+# radio1 = 2.4G：信道 11（htmode 保持默认 20MHz）
+uci -q set wireless.radio1.disabled='0'
+uci -q set wireless.radio1.country='US'
+uci -q set wireless.radio1.channel='11'
+uci -q set wireless.radio1.txpower='23'
+
+# radio2 = 5G 高段：信道 149，开启
+uci -q set wireless.radio2.disabled='0'
+uci -q set wireless.radio2.country='US'
+uci -q set wireless.radio2.channel='149'
+uci -q set wireless.radio2.htmode="$MODE5G"
+uci -q set wireless.radio2.txpower='23'
+
+
+# ------------------------------------------------------------
+# 提交
+# ------------------------------------------------------------
+uci commit system
+uci commit wireless
+
+
+exit 0
