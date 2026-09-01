@@ -46,7 +46,7 @@
 | 区域 | US | US | US |
 | 信道 | 11 | 48 | 149 |
 | 加密 | WPA2-PSK | WPA2-PSK | WPA2-PSK |
-| 发射功率 | 23 dBm | 23 dBm | 23 dBm |
+| 发射功率 | 23 dBm | 25 dBm | 25 dBm |
 
 ---
 
