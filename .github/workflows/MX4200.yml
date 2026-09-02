@@ -35,7 +35,6 @@ jobs:
       WRT_SSID: MX4200
       WRT_WORD: 12345678
       WRT_IP: 192.168.10.1
-      WRT_PW: 无
       WRT_REPO: https://github.com/VIKINGYFY/immortalwrt.git
       WRT_BRANCH: main
       WRT_SOURCE: VIKINGYFY/immortalwrt

@@ -25,9 +25,6 @@ on:
       WRT_IP:
         required: true
         type: string
-      WRT_PW:
-        required: true
-        type: string
       WRT_REPO:
         required: true
         type: string
@@ -58,7 +55,6 @@ env:
   WRT_SSID: ${{inputs.WRT_SSID}}
   WRT_WORD: ${{inputs.WRT_WORD}}
   WRT_IP: ${{inputs.WRT_IP}}
-  WRT_PW: ${{inputs.WRT_PW}}
   WRT_REPO: ${{inputs.WRT_REPO}}
   WRT_BRANCH: ${{inputs.WRT_BRANCH}}
   WRT_SOURCE: ${{inputs.WRT_SOURCE}}

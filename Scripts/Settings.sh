@@ -25,6 +25,13 @@ elif [ -f "$WIFI_UC" ]; then
 	sed -i "s/ssid='.*'/ssid='$WRT_SSID'/g" $WIFI_UC
 	#修改WIFI密码
 	sed -i "s/key='.*'/key='$WRT_WORD'/g" $WIFI_UC
+	#验证生效，失败即停（避免上游改格式后静默退回默认 SSID）
+	if grep -Fq "ssid='$WRT_SSID'" "$WIFI_UC" && grep -Fq "key='$WRT_WORD'" "$WIFI_UC"; then
+		echo "wifi default ssid/key has been set!"
+	else
+		echo "ERROR: failed to set wifi default ssid/key in mac80211.uc; stopping build!" >&2
+		exit 1
+	fi
 fi
 
 CFG_FILE="./package/base-files/files/bin/config_generate"
