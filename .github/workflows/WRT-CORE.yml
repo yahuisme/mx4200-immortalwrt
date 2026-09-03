@@ -34,9 +34,6 @@ on:
       WRT_SOURCE:
         required: true
         type: string
-      WRT_PACKAGE:
-        required: false
-        type: string
       WRT_RELEASE_PREFIX:
         required: false
         type: string
@@ -55,7 +52,6 @@ env:
   WRT_REPO: ${{inputs.WRT_REPO}}
   WRT_BRANCH: ${{inputs.WRT_BRANCH}}
   WRT_SOURCE: ${{inputs.WRT_SOURCE}}
-  WRT_PACKAGE: ${{inputs.WRT_PACKAGE}}
   WRT_RELEASE_PREFIX: ${{inputs.WRT_RELEASE_PREFIX}}
   WRT_RELEASE_PRODUCT: ${{inputs.WRT_RELEASE_PRODUCT}}
 
