@@ -200,20 +200,23 @@ if [ -n "$HP_DIR" ]; then
 	fi
 fi
 
-# 修改 Aurora 菜单式样
-if [ -d "$PKG_PATH/luci-app-aurora-config" ]; then
-	echo " "
-	TPL_DIR="$PKG_PATH/luci-app-aurora-config/root/usr/share/aurora/"
-	if ls "$TPL_DIR"/*.template >/dev/null 2>&1; then
-		sed -i "s/nav_type '.*'/nav_type 'sidebar'/g; s/struct_radius_base '.*'/struct_radius_base '0.125rem'/g" "$TPL_DIR"/*.template
-		if grep -q "nav_type 'sidebar'" "$TPL_DIR"/*.template; then
-			echo "theme-aurora has been fixed!"
-		else
-			echo "theme-aurora fix failed; continuing!"
-		fi
-	else
-		echo "theme-aurora fix skipped (no templates); continuing!"
-	fi
+# 修改 Aurora 菜单式样（验证结果，失败即停）
+if [ ! -d "$PKG_PATH/luci-app-aurora-config" ]; then
+	echo "ERROR: luci-app-aurora-config missing" >&2
+	exit 1
+fi
+echo " "
+TPL_DIR="$PKG_PATH/luci-app-aurora-config/root/usr/share/aurora/"
+if ! ls "$TPL_DIR"/*.template >/dev/null 2>&1; then
+	echo "ERROR: aurora templates missing" >&2
+	exit 1
+fi
+sed -i "s/nav_type '.*'/nav_type 'sidebar'/g; s/struct_radius_base '.*'/struct_radius_base '0.125rem'/g" "$TPL_DIR"/*.template
+if grep -q "nav_type 'sidebar'" "$TPL_DIR"/*.template; then
+	echo "theme-aurora has been fixed!"
+else
+	echo "ERROR: theme-aurora fix failed" >&2
+	exit 1
 fi
 
 #修复TailScale配置文件冲突
@@ -241,11 +244,23 @@ if [ -f "$RUST_FILE" ]; then
 	fi
 fi
 
-#移动 ttyd（终端）从 系统 菜单到 服务 菜单，位于 HomeProxy（order 10）下方
+#移动 ttyd（终端）从 系统 菜单到 服务 菜单，位于 HomeProxy（order 10）下方（失败即停）
+TTYD_OVERLAY="$GITHUB_WORKSPACE/files/usr/share/luci/menu.d/luci-app-ttyd.json"
+if [ ! -f "$TTYD_OVERLAY" ]; then
+	echo "ERROR: ttyd menu overlay missing: $TTYD_OVERLAY" >&2
+	exit 1
+fi
 TTYD_MENU="$(find "$PKG_PATH" "$PKG_PATH/../feeds/luci" -type f \
 	-path '*/luci-app-ttyd/root/usr/share/luci/menu.d/luci-app-ttyd.json' \
 	-print -quit 2>/dev/null)"
-if [ -f "$TTYD_MENU" ] && [ -f "$GITHUB_WORKSPACE/files/usr/share/luci/menu.d/luci-app-ttyd.json" ]; then
-	cp -f "$GITHUB_WORKSPACE/files/usr/share/luci/menu.d/luci-app-ttyd.json" "$TTYD_MENU"
+if [ ! -f "$TTYD_MENU" ]; then
+	echo "ERROR: luci-app-ttyd menu.json not found" >&2
+	exit 1
+fi
+cp -f "$TTYD_OVERLAY" "$TTYD_MENU"
+if grep -q '"admin/services/ttyd"' "$TTYD_MENU"; then
 	echo "ttyd menu moved to Services (below HomeProxy)"
+else
+	echo "ERROR: ttyd menu was not moved to Services" >&2
+	exit 1
 fi

@@ -37,7 +37,7 @@ jobs:
       WRT_IP: 192.168.10.1
       WRT_REPO: https://github.com/VIKINGYFY/immortalwrt.git
       WRT_BRANCH: main
-      WRT_SOURCE: VIKINGYFY/immortalwrt
+      WRT_SOURCE: immortalwrt
       WRT_RELEASE_PREFIX: MX4200
       WRT_RELEASE_PRODUCT: ImmortalWrt
       WRT_PACKAGE: ${{ inputs.PACKAGE }}

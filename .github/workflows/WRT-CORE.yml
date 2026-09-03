@@ -65,7 +65,7 @@ env:
 
 jobs:
   core:
-    name: ${{inputs.WRT_SOURCE}}
+    name: ${{inputs.WRT_RELEASE_PRODUCT || 'ImmortalWrt'}}
     runs-on: ubuntu-latest
     outputs:
       cache_prefix: ${{steps.initialize-values.outputs.cache_prefix}}
