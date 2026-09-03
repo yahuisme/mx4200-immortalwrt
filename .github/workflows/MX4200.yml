@@ -5,9 +5,9 @@
 name: MX4200 ImmortalWrt Builds
 
 on:
-  # GitHub Actions 使用 UTC；香港时间每日 17:00 = UTC 09:00
+  # GitHub Actions 使用 UTC；香港时间每日 14:00 = UTC 06:00
   schedule:
-    - cron: '0 9 * * *'
+    - cron: '0 6 * * *'
   workflow_dispatch:
 
 permissions:

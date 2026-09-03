@@ -52,4 +52,4 @@
 
 ## 🔄 自动构建
 
-GitHub Actions 每日 **香港时间 17:00** 自动构建，每个 Release 仅包含 MX4200v1 / MX4200v2 各自的 `factory.bin` 与 `sysupgrade.bin`。
+GitHub Actions 每日 **香港时间 14:00** 自动构建，每个 Release 仅包含 MX4200v1 / MX4200v2 各自的 `factory.bin` 与 `sysupgrade.bin`。
