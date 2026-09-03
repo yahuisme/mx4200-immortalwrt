@@ -37,9 +37,6 @@ on:
       WRT_PACKAGE:
         required: false
         type: string
-      WRT_TEST:
-        required: false
-        type: boolean
       WRT_RELEASE_PREFIX:
         required: false
         type: string
@@ -59,7 +56,6 @@ env:
   WRT_BRANCH: ${{inputs.WRT_BRANCH}}
   WRT_SOURCE: ${{inputs.WRT_SOURCE}}
   WRT_PACKAGE: ${{inputs.WRT_PACKAGE}}
-  WRT_TEST: ${{inputs.WRT_TEST}}
   WRT_RELEASE_PREFIX: ${{inputs.WRT_RELEASE_PREFIX}}
   WRT_RELEASE_PRODUCT: ${{inputs.WRT_RELEASE_PRODUCT}}
 
@@ -149,7 +145,6 @@ jobs:
 
       - name: Restore Build Cache
         id: cache-restore
-        if: ${{ !inputs.WRT_TEST }}
         uses: actions/cache/restore@main
         with:
           key: ${{env.WRT_CACHE_KEY}}
@@ -162,7 +157,7 @@ jobs:
             ./wrt/staging_dir/tool*
 
       - name: Prepare Restored Build Cache
-        if: ${{ !inputs.WRT_TEST && steps.cache-restore.outputs.cache-matched-key != '' }}
+        if: steps.cache-restore.outputs.cache-matched-key != ''
         run: |
           find "./wrt/staging_dir" -type d -name "stamp" -not -path "*target*" | while read -r DIR; do
             find "$DIR" -type f -exec touch {} +
@@ -189,33 +184,21 @@ jobs:
         run: |
           cd ./wrt/
 
-          if [[ "${WRT_CONFIG,,}" == *"test"* ]]; then
-            cat $GITHUB_WORKSPACE/Config/$WRT_CONFIG.txt >> .config
-          else
-            cat $GITHUB_WORKSPACE/Config/$WRT_CONFIG.txt $GITHUB_WORKSPACE/Config/GENERAL.txt >> .config
-          fi
+          cat $GITHUB_WORKSPACE/Config/$WRT_CONFIG.txt $GITHUB_WORKSPACE/Config/GENERAL.txt >> .config
 
           $GITHUB_WORKSPACE/Scripts/Settings.sh
 
           make defconfig -j$(nproc) && make clean -j$(nproc)
 
-      - name: Upload Config (TEST mode)
-        if: ${{ inputs.WRT_TEST }}
-        uses: actions/upload-artifact@main
-        with:
-          name: ${{env.WRT_CONFIG}}-config
-          path: ./wrt/.config
-          if-no-files-found: error
-
       - name: Download Packages
-        if: ${{ !inputs.WRT_TEST && success() }}
+        if: success()
         run: |
           cd ./wrt/
 
           make download -j$(nproc)
 
       - name: Compile Firmware
-        if: ${{ !inputs.WRT_TEST && success() }}
+        if: success()
         run: |
           cd ./wrt/
 
@@ -223,7 +206,7 @@ jobs:
 
       - name: Check Cache Source
         id: cache-source
-        if: ${{ !inputs.WRT_TEST && success() }}
+        if: success()
         run: |
           REMOTE_HASH=$(git ls-remote "$WRT_REPO" "refs/heads/$WRT_BRANCH" | awk 'NR == 1 {print $1}')
           if [ -n "$REMOTE_HASH" ] && [ "$REMOTE_HASH" = "$WRT_HASH" ]; then
@@ -234,7 +217,7 @@ jobs:
           fi
 
       - name: Save Build Cache
-        if: ${{ !inputs.WRT_TEST && success() && steps.cache-source.outputs.current == 'true' && steps.cache-restore.outputs.cache-hit != 'true' }}
+        if: success() && steps.cache-source.outputs.current == 'true' && steps.cache-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@main
         # A concurrent run for the same upstream hash may win the race and
         # save this key first; cache saving is an optimization, not a
@@ -260,28 +243,26 @@ jobs:
           echo "======================="
 
       - name: Package Firmware
-        if: ${{ !inputs.WRT_TEST && success() }}
+        if: success()
         run: |
           cd ./wrt/ && mkdir ./upload/
 
-          if [[ $WRT_TEST != 'true' ]]; then
-            echo "WRT_KVER=$(find ./bin/targets/ -type f -name "*.manifest" -exec grep -oP '^kernel - \K[\d\.]+' {} \;)" >> $GITHUB_ENV
-            echo "WRT_LIST=$(find ./bin/targets/ -type f -name "*.manifest" -exec grep -oP '^luci-(app|theme)[^ ]*' {} \; | tr '\n' ' ')" >> $GITHUB_ENV
+          echo "WRT_KVER=$(find ./bin/targets/ -type f -name "*.manifest" -exec grep -oP '^kernel - \K[\d\.]+' {} \;)" >> $GITHUB_ENV
+          echo "WRT_LIST=$(find ./bin/targets/ -type f -name "*.manifest" -exec grep -oP '^luci-(app|theme)[^ ]*' {} \; | tr '\n' ' ')" >> $GITHUB_ENV
 
-            find ./bin/targets/ -type f \( -iname '*factory*.bin' -o -iname '*sysupgrade*.bin' \) -exec mv -f {} ./upload/ \;
+          find ./bin/targets/ -type f \( -iname '*factory*.bin' -o -iname '*sysupgrade*.bin' \) -exec mv -f {} ./upload/ \;
 
-            # Never publish an empty release: expect v1+v2 × factory+sysupgrade.
-            IMAGE_COUNT="$(find ./upload/ -maxdepth 1 -type f -name '*.bin' | wc -l)"
-            if [ "$IMAGE_COUNT" -lt 4 ]; then
-              echo "::error::expected at least 4 firmware images (v1+v2 × factory+sysupgrade), found $IMAGE_COUNT"
-              exit 1
-            fi
-
-            make clean -j$(nproc)
+          # Never publish an empty release: expect v1+v2 × factory+sysupgrade.
+          IMAGE_COUNT="$(find ./upload/ -maxdepth 1 -type f -name '*.bin' | wc -l)"
+          if [ "$IMAGE_COUNT" -lt 4 ]; then
+            echo "::error::expected at least 4 firmware images (v1+v2 × factory+sysupgrade), found $IMAGE_COUNT"
+            exit 1
           fi
 
+          make clean -j$(nproc)
+
       - name: Release Firmware
-        if: ${{ !inputs.WRT_TEST && success() }}
+        if: success()
         uses: softprops/action-gh-release@master
         with:
           tag_name: ${{env.WRT_RELEASE_NAME}}
@@ -302,7 +283,7 @@ jobs:
             ${{env.WRT_LIST}}
 
       - name: Keep Latest MX4200 Release
-        if: success() && env.WRT_TEST != 'true'
+        if: success()
         env:
           GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
         run: |
@@ -314,7 +295,7 @@ jobs:
   cache-rollover:
     name: Roll cache generations
     needs: core
-    if: ${{ !inputs.WRT_TEST && needs.core.result == 'success' }}
+    if: needs.core.result == 'success'
     runs-on: ubuntu-latest
     concurrency:
       group: wrt-cache-rollover-${{inputs.WRT_SOURCE}}-${{inputs.WRT_BRANCH}}

@@ -14,11 +14,6 @@ on:
         description: '手动调整插件包，多个请用换行符隔开。'
         required: false
         type: string
-      TEST:
-        description: '仅输出配置文件，不编译固件。'
-        default: false
-        required: false
-        type: boolean
 
 permissions:
   actions: write
@@ -41,4 +36,3 @@ jobs:
       WRT_RELEASE_PREFIX: MX4200
       WRT_RELEASE_PRODUCT: ImmortalWrt
       WRT_PACKAGE: ${{ inputs.PACKAGE }}
-      WRT_TEST: ${{ inputs.TEST == true }}
