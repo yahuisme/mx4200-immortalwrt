@@ -2,7 +2,7 @@
 
 适用于 **Linksys MX4200v1 / MX4200v2** 路由器的定制 ImmortalWrt 固件构建项目。
 
-本项目基于 [VIKINGYFY/immortalwrt](https://github.com/VIKINGYFY/immortalwrt) 构建，沿用上游构建逻辑与配置，并针对 MX4200 精简与添加软件包。
+本项目基于 [VIKINGYFY/immortalwrt](https://github.com/VIKINGYFY/immortalwrt) 构建，并针对 MX4200 系列调整软件包和配置。
 
 > ⚠️ **仅适用于 Linksys MX4200v1 / MX4200v2，请勿刷入其他型号设备。**
 
@@ -13,7 +13,7 @@
 - 🎨 LuCI 默认主题：Aurora
 - 🕐 系统时区：香港（UTC+8）
 - 🚀 BBR 拥塞控制默认启用（fq + bbr）
-- ⚡ 开源 NSS 硬件加速（qca-nss-drv / nss-ecm / nss-dp）
+- ⚡ 开源 NSS 硬件加速
 - 🔗 内置 HomeProxy 与 sing-box
 - 📡 三频 Wi-Fi 默认开启 2.4G 与 5.8 GHz
 - 🔄 每日自动构建最新固件
@@ -52,10 +52,4 @@
 
 ## 🔄 自动构建
 
-GitHub Actions 每日 **香港时间 17:00** 自动构建，每个 Release 仅包含 MX4200v1 / MX4200v2 各自的 `factory.bin` 与 `sysupgrade.bin`；Release 名称中的时间为构建开始时间，便于核对上游源码提交。
-
----
-
-## 说明
-
-本项目调整了构建编排与设备选择，并精简和添加了不同的软件包，其余构建逻辑、脚本和基本配置继续沿用上游项目。
+GitHub Actions 每日 **香港时间 17:00** 自动构建，每个 Release 仅包含 MX4200v1 / MX4200v2 各自的 `factory.bin` 与 `sysupgrade.bin`。
