@@ -21,13 +21,6 @@ if ! grep -Fq "$WRT_IP" $FLASH_JS; then
 	echo "ERROR: failed to set default IP in flash.js; abort" >&2
 	exit 1
 fi
-SYSTEM_JS=$(find ./feeds/luci/modules/luci-mod-status/ -type f -name "10_system.js")
-sed -i "s/(\(luciversion || ''\))/(\1) + (' \/ $WRT_DATE')/g" $SYSTEM_JS
-if ! grep -Fq "$WRT_DATE" $SYSTEM_JS; then
-	echo "ERROR: failed to inject build date into 10_system.js; abort" >&2
-	exit 1
-fi
-
 WIFI_SH=$(find ./target/linux/{mediatek/filogic,qualcommax}/base-files/etc/uci-defaults/ -type f -name "*set-wireless.sh" 2>/dev/null)
 WIFI_UC="./package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc"
 if [ -f "$WIFI_SH" ]; then
