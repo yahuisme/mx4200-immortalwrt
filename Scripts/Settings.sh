@@ -22,7 +22,7 @@ if ! grep -Fq "$WRT_IP" $FLASH_JS; then
 	exit 1
 fi
 SYSTEM_JS=$(find ./feeds/luci/modules/luci-mod-status/ -type f -name "10_system.js")
-sed -i "s/(\(luciversion || ''\))/(\1) + (' / $WRT_DATE')/g" $SYSTEM_JS
+sed -i "s/(\(luciversion || ''\))/(\1) + (' \/ $WRT_DATE')/g" $SYSTEM_JS
 if ! grep -Fq "$WRT_DATE" $SYSTEM_JS; then
 	echo "ERROR: failed to inject build date into 10_system.js; abort" >&2
 	exit 1
