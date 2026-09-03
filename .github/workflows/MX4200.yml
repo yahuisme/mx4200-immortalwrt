@@ -15,11 +15,11 @@ permissions:
   contents: write
 
 jobs:
-  config:
+  build:
     name: MX4200v1-v2
-    uses: ./.github/workflows/WRT-CORE.yml
-    with:
-      WRT_CONFIG: MX4200
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
       WRT_THEME: aurora
       WRT_NAME: MX4200
       WRT_SSID: MX4200
@@ -27,6 +27,165 @@ jobs:
       WRT_IP: 192.168.10.1
       WRT_REPO: https://github.com/VIKINGYFY/immortalwrt.git
       WRT_BRANCH: main
-      WRT_SOURCE: immortalwrt
-      WRT_RELEASE_PREFIX: MX4200
-      WRT_RELEASE_PRODUCT: ImmortalWrt
+    steps:
+      - name: Checkout
+        uses: actions/checkout@main
+
+      - name: Initialization Environment
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo -E apt-get -yqq update
+          sudo -E apt-get -yqq install --no-install-recommends \
+            bison build-essential ccache file flex gawk \
+            g++-multilib gcc-multilib gettext libelf-dev libncurses-dev \
+            libssl-dev python3-setuptools rsync swig unzip zlib1g-dev
+          sudo mkdir -p /mnt/build_wrt
+          sudo chown "$USER:$USER" /mnt/build_wrt
+          sudo ln -s /mnt/build_wrt "$GITHUB_WORKSPACE/wrt"
+
+      - name: Clone Code
+        run: |
+          WRT_DATE="$(TZ=Asia/Shanghai date +'%y.%m.%d-%H.%M.%S')"
+          WRT_CACHE_ARCH=$(awk -F= '
+            /^CONFIG_TARGET_[^=]+=y$/ {
+              name=$1
+              sub(/^CONFIG_TARGET_/, "", name)
+              if (name !~ /^DEVICE_/ && name != "ALL_PROFILES") {
+                if (target == "") target=name
+                else if (subtarget == "") subtarget=name
+              }
+            }
+            END {
+              if (target == "" || subtarget == "") exit 1
+              print target "-" subtarget
+            }
+          ' ./Config/MX4200.txt)
+          echo "WRT_DATE=$WRT_DATE" >> "$GITHUB_ENV"
+          echo "WRT_RELEASE_NAME=MX4200_ImmortalWrt_$WRT_DATE" >> "$GITHUB_ENV"
+          echo "WRT_CACHE_PREFIX=wrt-immortalwrt-main-$WRT_CACHE_ARCH" >> "$GITHUB_ENV"
+
+          git clone --depth=1 --single-branch --branch "$WRT_BRANCH" "$WRT_REPO" ./wrt/
+          cd ./wrt/
+          WRT_HASH=$(git rev-parse HEAD)
+          echo "WRT_HASH=$WRT_HASH" >> "$GITHUB_ENV"
+          echo "WRT_CACHE_KEY=wrt-immortalwrt-main-$WRT_CACHE_ARCH-$WRT_HASH" >> "$GITHUB_ENV"
+
+          PROJECT_MIRRORS_FILE="./scripts/projectsmirrors.json"
+          if [ -f "$PROJECT_MIRRORS_FILE" ]; then
+            sed -i '/.cn\//d; /tencent/d; /aliyun/d' "$PROJECT_MIRRORS_FILE"
+          fi
+
+      - name: Restore Build Cache
+        id: cache-restore
+        uses: actions/cache/restore@main
+        with:
+          key: ${{ env.WRT_CACHE_KEY }}
+          restore-keys: |
+            ${{ env.WRT_CACHE_PREFIX }}-
+          path: |
+            ./wrt/.ccache
+            ./wrt/staging_dir/host*
+            ./wrt/staging_dir/tool*
+
+      - name: Prepare Restored Build Cache
+        if: steps.cache-restore.outputs.cache-matched-key != ''
+        run: |
+          find "./wrt/staging_dir" -type d -name "stamp" -not -path "*target*" | while read -r DIR; do
+            find "$DIR" -type f -exec touch {} +
+          done
+          mkdir -p ./wrt/tmp
+          echo "1" > ./wrt/tmp/.build
+          echo "restored build cache: ${{ steps.cache-restore.outputs.cache-matched-key }}"
+
+      - name: Update Feeds
+        run: |
+          cd ./wrt/
+          ./scripts/feeds update -a >/dev/null || { echo "::error::feeds update failed"; exit 1; }
+          ./scripts/feeds install -a >/dev/null || { echo "::error::feeds install failed"; exit 1; }
+
+      - name: Custom Packages
+        run: |
+          cd ./wrt/package/
+          bash "$GITHUB_WORKSPACE/Scripts/Packages.sh"
+          bash "$GITHUB_WORKSPACE/Scripts/Handles.sh"
+
+      - name: Custom Settings
+        run: |
+          cd ./wrt/
+          cat "$GITHUB_WORKSPACE/Config/MX4200.txt" "$GITHUB_WORKSPACE/Config/GENERAL.txt" >> .config
+          bash "$GITHUB_WORKSPACE/Scripts/Settings.sh"
+          make defconfig -j"$(nproc)"
+
+      - name: Download Packages
+        run: |
+          cd ./wrt/
+          make download -j"$(nproc)"
+
+      - name: Compile Firmware
+        run: |
+          cd ./wrt/
+          make -j"$(nproc)" || make -j1 V=s
+
+      - name: Check Cache Source
+        id: cache-source
+        run: |
+          REMOTE_HASH=$(git ls-remote "$WRT_REPO" "refs/heads/$WRT_BRANCH" | awk 'NR == 1 {print $1}')
+          if [ -n "$REMOTE_HASH" ] && [ "$REMOTE_HASH" = "$WRT_HASH" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "current=false" >> "$GITHUB_OUTPUT"
+            echo "skip cache save: source branch is now ${REMOTE_HASH:-unknown}, built $WRT_HASH"
+          fi
+
+      - name: Save Build Cache
+        if: steps.cache-source.outputs.current == 'true' && steps.cache-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@main
+        continue-on-error: true
+        with:
+          key: ${{ env.WRT_CACHE_KEY }}
+          path: |
+            ./wrt/.ccache
+            ./wrt/staging_dir/host*
+            ./wrt/staging_dir/tool*
+
+      - name: Package Firmware
+        run: |
+          cd ./wrt/
+          mkdir ./upload/
+          find ./bin/targets/ -type f \( -iname '*factory*.bin' -o -iname '*sysupgrade*.bin' \) -exec mv -f {} ./upload/ \;
+          IMAGE_COUNT="$(find ./upload/ -maxdepth 1 -type f -name '*.bin' | wc -l)"
+          if [ "$IMAGE_COUNT" -lt 4 ]; then
+            echo "::error::expected at least 4 firmware images (v1+v2 × factory+sysupgrade), found $IMAGE_COUNT"
+            exit 1
+          fi
+
+      - name: Release Firmware
+        env:
+          RELEASE_NOTES: |
+            ## Linksys MX4200 系列 ImmortalWrt 固件
+
+            本 Release 仅包含以下设备的刷机镜像：
+            - Linksys MX4200v1：`factory.bin` / `sysupgrade.bin`
+            - Linksys MX4200v2：`factory.bin` / `sysupgrade.bin`
+
+            `factory.bin` 用于从原厂固件刷入；`sysupgrade.bin` 用于从已有 ImmortalWrt 升级（可保留配置）。
+
+            基于开源 NSS 加速栈（qca-nss-drv / nss-ecm / nss-dp）构建。
+        run: |
+          gh release create "$WRT_RELEASE_NAME" ./wrt/upload/*.bin \
+            --title "$WRT_RELEASE_NAME" --notes "$RELEASE_NOTES"
+          gh release list --json tagName --jq '.[].tagName' |
+            grep '^MX4200_' |
+            grep -Fxv "$WRT_RELEASE_NAME" |
+            xargs -r -n1 gh release delete --cleanup-tag -y || true
+
+      - name: Roll Build Cache
+        if: steps.cache-source.outputs.current == 'true'
+        run: |
+          gh cache list --key "$WRT_CACHE_PREFIX-" --limit 100 --json id,key --jq '.[] | [.id, .key] | @tsv' |
+            while IFS=$'\t' read -r CACHE_ID CACHE_KEY; do
+              [ -n "$CACHE_ID" ] || continue
+              [ "$CACHE_KEY" = "$WRT_CACHE_KEY" ] && continue
+              gh cache delete "$CACHE_ID" || true
+            done
