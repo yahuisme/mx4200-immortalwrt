@@ -65,8 +65,8 @@ jobs:
           echo "WRT_RELEASE_NAME=MX4200_ImmortalWrt_$WRT_DATE" >> "$GITHUB_ENV"
           echo "WRT_CACHE_PREFIX=wrt-immortalwrt-main-$WRT_CACHE_ARCH" >> "$GITHUB_ENV"
 
-          git clone --depth=1 --single-branch --branch "$WRT_BRANCH" "$WRT_REPO" ./wrt/
-          cd ./wrt/
+          git clone --depth=1 --single-branch --branch "$WRT_BRANCH" "$WRT_REPO" /mnt/build_wrt/
+          cd /mnt/build_wrt/
           WRT_HASH=$(git rev-parse HEAD)
           echo "WRT_HASH=$WRT_HASH" >> "$GITHUB_ENV"
           echo "WRT_CACHE_KEY=wrt-immortalwrt-main-$WRT_CACHE_ARCH-$WRT_HASH" >> "$GITHUB_ENV"
@@ -84,74 +84,68 @@ jobs:
           restore-keys: |
             ${{ env.WRT_CACHE_PREFIX }}-
           path: |
-            ./wrt/.ccache
-            ./wrt/staging_dir/host*
-            ./wrt/staging_dir/tool*
+            /mnt/build_wrt/.ccache
+            /mnt/build_wrt/staging_dir/host*
+            /mnt/build_wrt/staging_dir/tool*
 
       - name: Prepare Restored Build Cache
         if: steps.cache-restore.outputs.cache-matched-key != ''
         run: |
-          find "./wrt/staging_dir" -type d -name "stamp" -not -path "*target*" | while read -r DIR; do
+          find "/mnt/build_wrt/staging_dir" -type d -name "stamp" -not -path "*target*" | while read -r DIR; do
             find "$DIR" -type f -exec touch {} +
           done
-          mkdir -p ./wrt/tmp
-          echo "1" > ./wrt/tmp/.build
+          mkdir -p /mnt/build_wrt/tmp
+          echo "1" > /mnt/build_wrt/tmp/.build
           echo "restored build cache: ${{ steps.cache-restore.outputs.cache-matched-key }}"
 
       - name: Update Feeds
         run: |
-          cd ./wrt/
+          cd /mnt/build_wrt/
           ./scripts/feeds update -a >/dev/null || { echo "::error::feeds update failed"; exit 1; }
           ./scripts/feeds install -a >/dev/null || { echo "::error::feeds install failed"; exit 1; }
 
       - name: Custom Packages
         run: |
-          cd ./wrt/package/
+          cd /mnt/build_wrt/package/
           bash "$GITHUB_WORKSPACE/Scripts/Packages.sh"
           bash "$GITHUB_WORKSPACE/Scripts/Handles.sh"
 
       - name: Custom Settings
         run: |
-          cd ./wrt/
+          cd /mnt/build_wrt/
           cat "$GITHUB_WORKSPACE/Config/MX4200.txt" "$GITHUB_WORKSPACE/Config/GENERAL.txt" >> .config
+          echo 'CONFIG_CCACHE_DIR="/mnt/build_wrt/.ccache"' >> .config
           bash "$GITHUB_WORKSPACE/Scripts/Settings.sh"
           make defconfig -j"$(nproc)"
 
       - name: Download Packages
         run: |
-          cd ./wrt/
+          cd /mnt/build_wrt/
           make download -j"$(nproc)"
 
       - name: Compile Firmware
         run: |
-          cd ./wrt/
+          cd /mnt/build_wrt/
+          export CCACHE_DIR="/mnt/build_wrt/.ccache"
+          export CCACHE_SLOPPINESS=file_stat_matches,include_file_mtime,time_macros
+          export CCACHE_NOHASHDIR=true
+          export CCACHE_COMPILERCHECK=content
           make -j"$(nproc)" || make -j1 V=s
 
-      - name: Check Cache Source
-        id: cache-source
-        run: |
-          REMOTE_HASH=$(git ls-remote "$WRT_REPO" "refs/heads/$WRT_BRANCH" | awk 'NR == 1 {print $1}')
-          if [ -n "$REMOTE_HASH" ] && [ "$REMOTE_HASH" = "$WRT_HASH" ]; then
-            echo "current=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "current=false" >> "$GITHUB_OUTPUT"
-            echo "skip cache save: source branch is now ${REMOTE_HASH:-unknown}, built $WRT_HASH"
-          fi
-
       - name: Save Build Cache
-        if: steps.cache-source.outputs.current == 'true' && steps.cache-restore.outputs.cache-hit != 'true'
+        if: success() && steps.cache-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@main
         continue-on-error: true
         with:
           key: ${{ env.WRT_CACHE_KEY }}
           path: |
-            ./wrt/.ccache
-            ./wrt/staging_dir/host*
-            ./wrt/staging_dir/tool*
+            /mnt/build_wrt/.ccache
+            /mnt/build_wrt/staging_dir/host*
+            /mnt/build_wrt/staging_dir/tool*
 
       - name: Package Firmware
         run: |
-          cd ./wrt/
+          cd /mnt/build_wrt/
           mkdir ./upload/
           find ./bin/targets/ -type f \( -iname '*factory*.bin' -o -iname '*sysupgrade*.bin' \) -exec mv -f {} ./upload/ \;
           IMAGE_COUNT="$(find ./upload/ -maxdepth 1 -type f -name '*.bin' | wc -l)"
@@ -173,7 +167,7 @@ jobs:
 
             基于开源 NSS 加速栈（qca-nss-drv / nss-ecm / nss-dp）构建。
         run: |
-          gh release create "$WRT_RELEASE_NAME" ./wrt/upload/*.bin \
+          gh release create "$WRT_RELEASE_NAME" /mnt/build_wrt/upload/*.bin \
             --title "$WRT_RELEASE_NAME" --notes "$RELEASE_NOTES"
           gh release list --json tagName --jq '.[].tagName' |
             grep '^MX4200_' |
@@ -181,7 +175,7 @@ jobs:
             xargs -r -n1 gh release delete --cleanup-tag -y || true
 
       - name: Roll Build Cache
-        if: steps.cache-source.outputs.current == 'true'
+        if: success()
         run: |
           gh cache list --key "$WRT_CACHE_PREFIX-" --limit 100 --json id,key --jq '.[] | [.id, .key] | @tsv' |
             while IFS=$'\t' read -r CACHE_ID CACHE_KEY; do
