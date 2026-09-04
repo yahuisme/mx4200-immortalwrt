@@ -61,13 +61,13 @@ jobs:
               print target "-" subtarget
             }
           ' ./Config/MX4200.txt)
-          echo "WRT_DATE=$WRT_DATE" >> "$GITHUB_ENV"
-          echo "WRT_RELEASE_NAME=MX4200_ImmortalWrt_$WRT_DATE" >> "$GITHUB_ENV"
-          echo "WRT_CACHE_PREFIX=wrt-immortalwrt-main-$WRT_CACHE_ARCH" >> "$GITHUB_ENV"
-
-          git clone --depth=1 --single-branch --branch "$WRT_BRANCH" "$WRT_REPO" /mnt/build_wrt/
+          git clone --single-branch --branch "$WRT_BRANCH" "$WRT_REPO" /mnt/build_wrt/
           cd /mnt/build_wrt/
           WRT_HASH=$(git rev-parse HEAD)
+          WRT_REV=$(./scripts/getver.sh | sed -E 's/^r([0-9]+).*/\1/')
+          echo "WRT_DATE=$WRT_DATE" >> "$GITHUB_ENV"
+          echo "WRT_RELEASE_NAME=MX4200_ImmortalWrt_${WRT_DATE}_r${WRT_REV}" >> "$GITHUB_ENV"
+          echo "WRT_CACHE_PREFIX=wrt-immortalwrt-main-$WRT_CACHE_ARCH" >> "$GITHUB_ENV"
           echo "WRT_HASH=$WRT_HASH" >> "$GITHUB_ENV"
           echo "WRT_CACHE_KEY=wrt-immortalwrt-main-$WRT_CACHE_ARCH-$WRT_HASH" >> "$GITHUB_ENV"
 
