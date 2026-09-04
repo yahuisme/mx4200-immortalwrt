@@ -54,6 +54,10 @@ if ! grep -Fq "$WRT_IP" "$CFG_FILE" || ! grep -Fq "hostname='$WRT_NAME'" "$CFG_F
 	exit 1
 fi
 
+sed -i "s/%D %V %C/%D %C/g" ./package/base-files/files/etc/openwrt_release
+sed -i "s/%D %V %C/%D %C/g" ./package/base-files/files/usr/lib/os-release
+sed -i "s/%D %V, %C/%D %C/g" ./package/base-files/files/etc/banner
+
 mkdir -p ./package/base-files/files/etc/uci-defaults/
 cp "$GITHUB_WORKSPACE/files/etc/uci-defaults/99-mx4200-defaults" ./package/base-files/files/etc/uci-defaults/99-mx4200-defaults
 chmod +x ./package/base-files/files/etc/uci-defaults/99-mx4200-defaults
