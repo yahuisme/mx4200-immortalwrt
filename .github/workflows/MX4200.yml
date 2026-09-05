@@ -21,7 +21,6 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       WRT_THEME: aurora
-      WRT_NAME: MX4200
       WRT_SSID: MX4200
       WRT_WORD: 12345678
       WRT_IP: 192.168.10.1
@@ -162,7 +161,7 @@ jobs:
           gh release list --json tagName --jq '.[].tagName' |
             grep '^MX4200_' |
             grep -Fxv "$WRT_RELEASE_NAME" |
-            xargs -r -n1 gh release delete --cleanup-tag -y || true
+            xargs -r gh release delete --cleanup-tag -y || true
 
       - name: Roll Build Cache
         if: success()

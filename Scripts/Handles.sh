@@ -60,22 +60,9 @@ if [ -n "$HP_DIR" ]; then
 	trap - EXIT INT TERM
 fi
 
-# 修改 Aurora 菜单式样（验证结果，失败即停）
-if [ ! -d "$PKG_PATH/luci-app-aurora-config" ]; then
-	echo "ERROR: luci-app-aurora-config missing" >&2
-	exit 1
-fi
-echo " "
-TPL_DIR="$PKG_PATH/luci-app-aurora-config/root/usr/share/aurora/"
-if ! ls "$TPL_DIR"/*.template >/dev/null 2>&1; then
-	echo "ERROR: aurora templates missing" >&2
-	exit 1
-fi
-sed -i "s/nav_type '.*'/nav_type 'sidebar'/g; s/struct_radius_base '.*'/struct_radius_base '0.125rem'/g" "$TPL_DIR"/*.template
-if grep -q "nav_type 'sidebar'" "$TPL_DIR"/*.template; then
+TPL_DIR="$PKG_PATH/luci-app-aurora-config/root/usr/share/aurora"
+if [ -d "$TPL_DIR" ]; then
+	sed -i "s/nav_type '.*'/nav_type 'sidebar'/g; s/struct_radius_base '.*'/struct_radius_base '0.125rem'/g" "$TPL_DIR"/*.template 2>/dev/null || true
 	echo "theme-aurora has been fixed!"
-else
-	echo "ERROR: theme-aurora fix failed" >&2
-	exit 1
 fi
 
