@@ -46,7 +46,7 @@ jobs:
 
       - name: Clone Code
         run: |
-          WRT_DATE="$(TZ=Asia/Shanghai date +'%y.%m.%d-%H.%M.%S')"
+          WRT_DATE="$(TZ=Asia/Hong_Kong date +'%y.%m.%d-%H.%M.%S')"
           WRT_CACHE_ARCH=$(awk -F= '
             /^CONFIG_TARGET_[^=]+=y$/ {
               name=$1
@@ -163,7 +163,7 @@ jobs:
             - Linksys MX4200v1：`factory.bin` / `sysupgrade.bin`
             - Linksys MX4200v2：`factory.bin` / `sysupgrade.bin`
 
-            `factory.bin` 用于从原厂固件刷入；`sysupgrade.bin` 用于从已有 ImmortalWrt 升级（可保留配置）。
+            `factory.bin` 用于从原厂固件刷入；`sysupgrade.bin` 用于从已有 ImmortalWrt 升级。
 
             基于开源 NSS 加速栈（qca-nss-drv / nss-ecm / nss-dp）构建。
         run: |

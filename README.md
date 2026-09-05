@@ -25,7 +25,7 @@
 | 镜像 | 用途 |
 | --- | --- |
 | `factory.bin` | 从原厂固件刷入时使用 |
-| `sysupgrade.bin` | 从已有 ImmortalWrt 升级时使用，可保留配置 |
+| `sysupgrade.bin` | 从已有 ImmortalWrt 升级时使用 |
 
 ---
 
