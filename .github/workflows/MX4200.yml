@@ -85,6 +85,7 @@ jobs:
             ${{ env.WRT_CACHE_PREFIX }}-
           path: |
             /mnt/build_wrt/.ccache
+            /mnt/build_wrt/dl
             /mnt/build_wrt/staging_dir/host*
             /mnt/build_wrt/staging_dir/tool*
 
@@ -127,10 +128,12 @@ jobs:
         run: |
           cd /mnt/build_wrt/
           export CCACHE_DIR="/mnt/build_wrt/.ccache"
+          export CCACHE_MAXSIZE="15G"
           export CCACHE_SLOPPINESS=file_stat_matches,include_file_mtime,time_macros
           export CCACHE_NOHASHDIR=true
           export CCACHE_COMPILERCHECK=content
           make -j"$(nproc)" || make -j1 V=s
+          staging_dir/host/bin/ccache -s || ccache -s || true
 
       - name: Save Build Cache
         if: success() && steps.cache-restore.outputs.cache-hit != 'true'
@@ -140,6 +143,7 @@ jobs:
           key: ${{ env.WRT_CACHE_KEY }}
           path: |
             /mnt/build_wrt/.ccache
+            /mnt/build_wrt/dl
             /mnt/build_wrt/staging_dir/host*
             /mnt/build_wrt/staging_dir/tool*
 
