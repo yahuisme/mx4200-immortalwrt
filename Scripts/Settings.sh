@@ -21,7 +21,7 @@ if ! grep -Fq "$WRT_IP" $FLASH_JS; then
 	echo "ERROR: failed to set default IP in flash.js; abort" >&2
 	exit 1
 fi
-WIFI_SH=$(find ./target/linux/{mediatek/filogic,qualcommax}/base-files/etc/uci-defaults/ -type f -name "*set-wireless.sh" 2>/dev/null)
+WIFI_SH=$(find ./target/linux/qualcommax/base-files/etc/uci-defaults/ -type f -name "*set-wireless.sh" 2>/dev/null)
 WIFI_UC="./package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc"
 if [ -f "$WIFI_SH" ]; then
 	sed -i "s/BASE_SSID='.*'/BASE_SSID='$WRT_SSID'/g" $WIFI_SH
@@ -48,9 +48,8 @@ fi
 
 CFG_FILE="./package/base-files/files/bin/config_generate"
 sed -i "s/192\.168\.[0-9]*\.[0-9]*/$WRT_IP/g" $CFG_FILE
-sed -i "s/hostname='.*'/hostname='$WRT_NAME'/g" $CFG_FILE
-if ! grep -Fq "$WRT_IP" "$CFG_FILE" || ! grep -Fq "hostname='$WRT_NAME'" "$CFG_FILE"; then
-	echo "ERROR: failed to set default IP/hostname in config_generate; abort" >&2
+if ! grep -Fq "$WRT_IP" "$CFG_FILE"; then
+	echo "ERROR: failed to set default IP in config_generate; abort" >&2
 	exit 1
 fi
 
@@ -63,6 +62,3 @@ if [ -f "./include/version.mk" ]; then
 fi
 find ./package/base-files/files/ -type f -exec sed -i 's/ImmortalWRT/ImmortalWrt/g' {} + 2>/dev/null || true
 
-mkdir -p ./package/base-files/files/etc/uci-defaults/
-cp "$GITHUB_WORKSPACE/files/etc/uci-defaults/99-mx4200-defaults" ./package/base-files/files/etc/uci-defaults/99-mx4200-defaults
-chmod +x ./package/base-files/files/etc/uci-defaults/99-mx4200-defaults

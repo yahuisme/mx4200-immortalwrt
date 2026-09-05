@@ -42,34 +42,19 @@ jobs:
             libssl-dev python3-setuptools rsync swig unzip zlib1g-dev
           sudo mkdir -p /mnt/build_wrt
           sudo chown "$USER:$USER" /mnt/build_wrt
-          sudo ln -s /mnt/build_wrt "$GITHUB_WORKSPACE/wrt"
 
       - name: Clone Code
         run: |
           WRT_DATE="$(TZ=Asia/Hong_Kong date +'%y.%m.%d-%H.%M.%S')"
-          WRT_CACHE_ARCH=$(awk -F= '
-            /^CONFIG_TARGET_[^=]+=y$/ {
-              name=$1
-              sub(/^CONFIG_TARGET_/, "", name)
-              if (name !~ /^DEVICE_/ && name != "ALL_PROFILES") {
-                if (target == "") target=name
-                else if (subtarget == "") subtarget=name
-              }
-            }
-            END {
-              if (target == "" || subtarget == "") exit 1
-              print target "-" subtarget
-            }
-          ' ./Config/MX4200.txt)
           git clone --single-branch --branch "$WRT_BRANCH" "$WRT_REPO" /mnt/build_wrt/
           cd /mnt/build_wrt/
           WRT_HASH=$(git rev-parse HEAD)
           WRT_REV=$(./scripts/getver.sh | sed -E 's/^r([0-9]+).*/\1/')
           echo "WRT_DATE=$WRT_DATE" >> "$GITHUB_ENV"
           echo "WRT_RELEASE_NAME=MX4200_ImmortalWrt_${WRT_DATE}_r${WRT_REV}" >> "$GITHUB_ENV"
-          echo "WRT_CACHE_PREFIX=wrt-immortalwrt-main-$WRT_CACHE_ARCH" >> "$GITHUB_ENV"
+          echo "WRT_CACHE_PREFIX=wrt-immortalwrt-main-qualcommax-ipq807x" >> "$GITHUB_ENV"
           echo "WRT_HASH=$WRT_HASH" >> "$GITHUB_ENV"
-          echo "WRT_CACHE_KEY=wrt-immortalwrt-main-$WRT_CACHE_ARCH-$WRT_HASH" >> "$GITHUB_ENV"
+          echo "WRT_CACHE_KEY=wrt-immortalwrt-main-qualcommax-ipq807x-$WRT_HASH" >> "$GITHUB_ENV"
 
           PROJECT_MIRRORS_FILE="./scripts/projectsmirrors.json"
           if [ -f "$PROJECT_MIRRORS_FILE" ]; then
@@ -116,6 +101,7 @@ jobs:
           cd /mnt/build_wrt/
           cat "$GITHUB_WORKSPACE/Config/MX4200.txt" "$GITHUB_WORKSPACE/Config/GENERAL.txt" >> .config
           echo 'CONFIG_CCACHE_DIR="/mnt/build_wrt/.ccache"' >> .config
+          cp -rf "$GITHUB_WORKSPACE/files" ./
           bash "$GITHUB_WORKSPACE/Scripts/Settings.sh"
           make defconfig -j"$(nproc)"
 
@@ -169,7 +155,7 @@ jobs:
 
             `factory.bin` 用于从原厂固件刷入；`sysupgrade.bin` 用于从已有 ImmortalWrt 升级。
 
-            基于开源 NSS 加速栈（qca-nss-drv / nss-ecm / nss-dp）构建。
+            基于开源 NSS 加速栈构建。
         run: |
           gh release create "$WRT_RELEASE_NAME" /mnt/build_wrt/upload/*.bin \
             --title "$WRT_RELEASE_NAME" --notes "$RELEASE_NOTES"
