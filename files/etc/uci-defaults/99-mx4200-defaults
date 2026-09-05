@@ -4,6 +4,9 @@
 # MX4200 默认配置（仅首次启动 / 不保留配置刷入时生效）
 # ============================================================
 
+# 规范化发行版描述（无论是否保留配置升级均确保为 ImmortalWrt）
+sed -i 's/ImmortalWRT/ImmortalWrt/g' /etc/openwrt_release /etc/os-release /etc/banner /etc/device_info 2>/dev/null || true
+
 # 保留配置 sysupgrade 时不覆盖用户既有设置
 if [ -f /sysupgrade.tgz ] || [ -f /tmp/sysupgrade.tar ]; then
     echo "Keeping existing configuration restored by sysupgrade."
