@@ -37,23 +37,10 @@ if [ -n "$HP_DIR" ]; then
 
 	# 2. 下载 geosite 规则集
 	if curl -fsSL --retry 3 --connect-timeout 10 --max-time 30 \
-		"https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set-unstable/geosite-cn.srs" -o "$HP_RESOURCES/geosite_cn.srs"; then
+		"https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-cn.srs" -o "$HP_RESOURCES/geosite_cn.srs"; then
 		echo "homeproxy resources: geosite_cn updated"
 	else
 		echo "WARNING: failed to fetch geosite_cn, skipping"
-	fi
-
-	# 3. 下载 Web 控制面板
-	if curl -fsSL --retry 3 --connect-timeout 10 --max-time 60 \
-		"https://codeload.github.com/SagerNet/sing-box-dashboard/zip/refs/heads/gh-pages" -o "$HP_TMP/dashboard.zip"; then
-		unzip -qo "$HP_TMP/dashboard.zip" -d "$HP_TMP/"
-		DASHBOARD_SRC="$(find "$HP_TMP" -mindepth 1 -maxdepth 1 -type d -name '*dashboard*' -print -quit)"
-		if [ -n "$DASHBOARD_SRC" ] && [ -f "$DASHBOARD_SRC/index.html" ]; then
-			cp -rf "$DASHBOARD_SRC"/* "$HP_DASHBOARD/"
-			echo "homeproxy dashboard updated"
-		fi
-	else
-		echo "WARNING: failed to fetch dashboard, skipping"
 	fi
 
 	rm -rf "$HP_TMP"
