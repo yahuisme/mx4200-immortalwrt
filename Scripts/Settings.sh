@@ -6,13 +6,21 @@ set -e
 
 COLLECTION_MAKEFILES=$(find ./feeds/luci/collections/ -type f -name "Makefile" 2>/dev/null)
 if [ -n "$COLLECTION_MAKEFILES" ]; then
-	sed -i "/attendedsysupgrade/d" $COLLECTION_MAKEFILES
-	sed -i "s/luci-theme-bootstrap/luci-theme-$WRT_THEME/g" $COLLECTION_MAKEFILES
+	echo "$COLLECTION_MAKEFILES" | while IFS= read -r mkfile; do
+		[ -n "$mkfile" ] || continue
+		sed -i "/attendedsysupgrade/d" "$mkfile"
+		sed -i "s/luci-theme-bootstrap/luci-theme-$WRT_THEME/g" "$mkfile"
+	done
 fi
-FLASH_JS=$(find ./feeds/luci/modules/luci-mod-system/ -type f -name "flash.js")
-sed -i "s/192\.168\.[0-9]*\.[0-9]*/$WRT_IP/g" $FLASH_JS
-if ! grep -Fq "$WRT_IP" $FLASH_JS; then
-	echo "ERROR: failed to set default IP in flash.js; abort" >&2
+FLASH_JS=$(find ./feeds/luci/modules/luci-mod-system/ -type f -name "flash.js" 2>/dev/null)
+if [ -n "$FLASH_JS" ]; then
+	sed -i "s/192\.168\.[0-9]*\.[0-9]*/$WRT_IP/g" "$FLASH_JS"
+	if ! grep -Fq "$WRT_IP" "$FLASH_JS"; then
+		echo "ERROR: failed to set default IP in flash.js; abort" >&2
+		exit 1
+	fi
+else
+	echo "ERROR: flash.js not found; stopping build!" >&2
 	exit 1
 fi
 WIFI_UC="./package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc"

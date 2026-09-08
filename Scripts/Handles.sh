@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
 
+set -e
+
 PKG_PATH="$(pwd)"
 
 TPL_DIR="$PKG_PATH/luci-app-aurora-config/root/usr/share/aurora"
