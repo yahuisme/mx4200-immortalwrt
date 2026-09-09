@@ -26,6 +26,7 @@
 
 | 插件 | 功能说明 |
 | :--- | :--- |
+| [`luci-app-firmwareupgrade`](https://github.com/yahuisme/packages/tree/main/luci-app-firmwareupgrade) | 固件版本检查与在线升级 |
 | [`luci-app-homeproxy`](https://github.com/yahuisme/packages/tree/main/luci-app-homeproxy) | 定制版代理客户端（集成官方最新 `sing-box` 核心） |
 | `luci-app-advanced-reboot` | 高级重启（支持双分区切换与关机） |
 | `luci-app-usteer` | 802.11k/v 智能漫游与弱信号剔除 |
