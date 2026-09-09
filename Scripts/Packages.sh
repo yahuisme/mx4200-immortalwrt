@@ -14,7 +14,7 @@ find ../feeds/luci/ ../feeds/packages/ -maxdepth 3 -type d \
 
 if git clone --depth=1 --single-branch --branch main \
 	https://github.com/yahuisme/packages.git /tmp/yahuisme-packages; then
-	for package_name in luci-app-homeproxy sing-box; do
+	for package_name in luci-app-homeproxy sing-box luci-app-firmwareupgrade; do
 		if [ -d "/tmp/yahuisme-packages/$package_name" ]; then
 			cp -a "/tmp/yahuisme-packages/$package_name" "./$package_name"
 		fi
