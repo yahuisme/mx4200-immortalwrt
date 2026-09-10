@@ -56,11 +56,4 @@ uci -q set wireless.radio2.htmode="$MODE5G"
 uci -q set wireless.radio2.txpower='25'
 
 
-# ------------------------------------------------------------
-# 提交
-# ------------------------------------------------------------
-uci commit system
-uci commit wireless
-
-
 exit 0

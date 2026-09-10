@@ -47,5 +47,5 @@ sed -i "s/%D %V, %C/%D %C/g" ./package/base-files/files/etc/banner
 if [ -f "./include/version.mk" ]; then
 	sed -i 's/ImmortalWRT/ImmortalWrt/g' ./include/version.mk
 fi
-find ./package/base-files/files/ -type f -exec sed -i 's/ImmortalWRT/ImmortalWrt/g' {} + 2>/dev/null || true
+sed -i 's/ImmortalWRT/ImmortalWrt/g' "$CFG_FILE"
 
