@@ -83,7 +83,8 @@ jobs:
         run: |
           python3 Scripts/Prepare.py --sources /mnt/nss-sources --output /mnt/build_wrt
           VERSION=$(python3 -c 'import json; print(json.load(open("/mnt/build_wrt/source-lock.json"))["official_tag"])')
-          echo "WRT_RELEASE_NAME=MX4200_ImmortalWrt_${VERSION}_$(TZ=Asia/Hong_Kong date +'%y.%m.%d-%H.%M.%S')" >> "$GITHUB_ENV"
+          REVISION=$(python3 -c 'import pathlib,re; v=pathlib.Path("/mnt/build_wrt/version").read_text().strip(); m=re.fullmatch(r"(r[0-9]+)-[0-9a-f]+", v); assert m, "Invalid official revision: " + v; print(m[1])')
+          echo "WRT_RELEASE_NAME=MX4200_ImmortalWrt_${VERSION}_${REVISION}_$(TZ=Asia/Hong_Kong date +'%y.%m.%d-%H.%M.%S')" >> "$GITHUB_ENV"
       - name: Restore cache
         id: downloads
         uses: actions/cache/restore@main
