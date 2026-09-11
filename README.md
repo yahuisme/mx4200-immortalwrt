@@ -70,7 +70,7 @@ HomeProxy 与 sing-box 由专属源 [yahuisme/packages](https://github.com/yahui
 
 ## 🔄 自动构建
 
-GitHub Actions 每日香港时间 **14:00** 自动构建，也可手动触发。
+GitHub Actions 每日自动构建，也可手动触发。
 
 ```text
 MX4200_ImmortalWrt_<正式版标签>_<构建时间>
