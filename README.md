@@ -70,12 +70,4 @@ HomeProxy 与 sing-box 由专属源 [yahuisme/packages](https://github.com/yahui
 
 ## 🔄 自动构建
 
-GitHub Actions 每日自动构建，也可手动触发。
-
-```text
-MX4200_ImmortalWrt_<正式版标签>_<构建时间>
-```
-
-源码适配检查通过后才继续构建。Release 仅发布刷机镜像，源码版本与移植记录保存在 Actions 的 `source-lock` 附件中。
-
-源码适配与验证方法见 [NSS 维护说明](docs/NSS-MIGRATION.md)。
+检测到上游更新自动构建。
