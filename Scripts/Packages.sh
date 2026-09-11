@@ -15,7 +15,7 @@ for name in luci-theme-aurora luci-app-aurora-config; do
 done
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
-git clone --depth=1 --single-branch --branch main https://github.com/yahuisme/packages.git "$stage/packages"
+git clone --depth=1 --single-branch --branch main https://github.com/VIKINGYFY/packages.git "$stage/packages"
 for name in luci-app-homeproxy sing-box; do
     test -f "$stage/packages/$name/Makefile"
     test ! -e "./$name"
@@ -37,10 +37,10 @@ from Inputs import record
 lock = pathlib.Path('../source-lock.json')
 data = json.loads(lock.read_text())
 data['custom_packages'] = {name: subprocess.check_output(['git', '-C', path, 'rev-parse', 'HEAD'], text=True).strip()
-                           for name, path in [('aurora', 'luci-theme-aurora'), ('aurora-config', 'luci-app-aurora-config'), ('yahuisme/packages', sys.argv[1])]}
+                           for name, path in [('aurora', 'luci-theme-aurora'), ('aurora-config', 'luci-app-aurora-config'), ('VIKINGYFY/packages', sys.argv[1])]}
 # Record what was actually cloned, not an earlier scheduled probe.
 record(data, {'aurora': pathlib.Path('luci-theme-aurora'),
               'aurora-config': pathlib.Path('luci-app-aurora-config'),
-              'yahuisme/packages': pathlib.Path(sys.argv[1])})
+              'VIKINGYFY/packages': pathlib.Path(sys.argv[1])})
 lock.write_text(json.dumps(data, indent=2) + '\n')
 PY

@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGES = {
     'aurora': ('https://github.com/eamonxg/luci-theme-aurora.git', ('.',)),
     'aurora-config': ('https://github.com/eamonxg/luci-app-aurora-config.git', ('.',)),
-    'yahuisme/packages': ('https://github.com/yahuisme/packages.git', ('luci-app-homeproxy', 'sing-box')),
+    'VIKINGYFY/packages': ('https://github.com/VIKINGYFY/packages.git', ('luci-app-homeproxy', 'sing-box')),
 }
 
 
@@ -66,7 +66,7 @@ def probe(output):
         for i, (key, (url, _)) in enumerate(PACKAGES.items()):
             tree = Path(d) / str(i)
             command = ['git', 'clone', '--depth=1']
-            if key == 'yahuisme/packages':
+            if key == 'VIKINGYFY/packages':
                 command += ['--branch', 'main']
             run(*command, url, str(tree))
             trees[key] = tree

@@ -153,7 +153,7 @@ class PackagesTests(unittest.TestCase):
                 urls = (
                     ("https://github.com/eamonxg/luci-theme-aurora.git", ("luci-theme-aurora",)),
                     ("https://github.com/eamonxg/luci-app-aurora-config.git", ("luci-app-aurora-config",)),
-                    ("https://github.com/yahuisme/packages.git", ("luci-app-homeproxy", "sing-box")),
+                    ("https://github.com/VIKINGYFY/packages.git", ("luci-app-homeproxy", "sing-box")),
                 )
                 commits = []
                 for i, (url, names) in enumerate(urls):
@@ -187,9 +187,9 @@ class PackagesTests(unittest.TestCase):
                 lock = json.loads((root / "source-lock.json").read_text())
                 self.assertEqual(lock["official"], "preserved")
                 self.assertEqual(len(lock["firmware_inputs_sha256"]), 64)
-                self.assertEqual(set(lock["custom_package_sha256"]), {"aurora", "aurora-config", "yahuisme/packages"})
+                self.assertEqual(set(lock["custom_package_sha256"]), {"aurora", "aurora-config", "VIKINGYFY/packages"})
                 self.assertEqual(lock["custom_packages"], dict(zip(
-                    ("aurora", "aurora-config", "yahuisme/packages"), commits)))
+                    ("aurora", "aurora-config", "VIKINGYFY/packages"), commits)))
 
 
 if __name__ == "__main__":

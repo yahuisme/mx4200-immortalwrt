@@ -21,11 +21,11 @@
 
 ## 🧩 预装应用
 
-HomeProxy 与 sing-box 由专属源 [yahuisme/packages](https://github.com/yahuisme/packages) 维护。
+HomeProxy 与 sing-box 由专属源 [VIKINGYFY/packages](https://github.com/VIKINGYFY/packages) 维护。
 
 | 插件 | 功能说明 |
 | :--- | :--- |
-| [`luci-app-homeproxy`](https://github.com/yahuisme/packages/tree/main/luci-app-homeproxy) | 基于 sing-box 的代理管理 |
+| [`luci-app-homeproxy`](https://github.com/VIKINGYFY/packages/tree/main/luci-app-homeproxy) | 基于 sing-box 的代理管理 |
 | `luci-app-advanced-reboot` | 双分区切换与高级重启 |
 | `luci-app-usteer` | AP / Mesh 漫游辅助 |
 | `luci-app-wol` | 网络唤醒 |
