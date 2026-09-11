@@ -14,18 +14,14 @@
 - 🎨 默认 Aurora 主题
 - 🚀 集成 NSS / ECM 与 ath11k 无线加速
 - 📡 集成 802.11s Mesh 与 usteer 漫游辅助
-- 🛡️ 内置 HomeProxy 与 sing-box
 - ⚡ BBR 拥塞控制与 USB 3.0 存储支持
 
 ---
 
 ## 🧩 预装应用
 
-HomeProxy 与 sing-box 由专属源 [VIKINGYFY/packages](https://github.com/VIKINGYFY/packages) 维护。
-
 | 插件 | 功能说明 |
 | :--- | :--- |
-| [`luci-app-homeproxy`](https://github.com/VIKINGYFY/packages/tree/main/luci-app-homeproxy) | 基于 sing-box 的代理管理 |
 | `luci-app-advanced-reboot` | 双分区切换与高级重启 |
 | `luci-app-usteer` | AP / Mesh 漫游辅助 |
 | `luci-app-wol` | 网络唤醒 |
