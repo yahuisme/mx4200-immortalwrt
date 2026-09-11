@@ -18,7 +18,7 @@ jobs:
       WRT_IP: 192.168.10.1
     steps:
       - uses: actions/checkout@main
-      - name: Install build prerequisites
+      - name: Install dependencies
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
@@ -29,12 +29,12 @@ jobs:
             rsync swig unzip zlib1g-dev
           sudo mkdir -p /mnt/build_wrt /mnt/nss-sources
           sudo chown "$USER:$USER" /mnt/build_wrt /mnt/nss-sources
-      - name: Resolve stable releases and prepare reviewed NSS delta
+      - name: Prepare sources
         run: |
           python3 Scripts/Prepare.py --sources /mnt/nss-sources --output /mnt/build_wrt
           VERSION=$(python3 -c 'import json; print(json.load(open("/mnt/build_wrt/source-lock.json"))["official_tag"])')
           echo "WRT_RELEASE_NAME=MX4200_ImmortalWrt_${VERSION}_$(TZ=Asia/Hong_Kong date +'%y.%m.%d-%H.%M.%S')" >> "$GITHUB_ENV"
-      - name: Restore downloads and compiler cache
+      - name: Restore cache
         id: downloads
         uses: actions/cache/restore@main
         with:
@@ -44,14 +44,14 @@ jobs:
           key: mx4200-build-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: mx4200-build-${{ runner.os }}-${{ runner.arch }}-
 
-      - name: Feeds and custom packages
+      - name: Prepare packages
         run: |
           cd /mnt/build_wrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a
           cd package
           bash "$GITHUB_WORKSPACE/Scripts/Packages.sh"
-      - name: Configuration
+      - name: Configure firmware
         run: |
           cd /mnt/build_wrt
           cp "$GITHUB_WORKSPACE/Config/MX4200.txt" .config
@@ -70,7 +70,7 @@ jobs:
           export CCACHE_NOHASHDIR=true
           export CCACHE_COMPILERCHECK=content
           make -j"$(nproc)" || make -j1 V=s
-      - name: Save downloads and compiler cache
+      - name: Save cache
         if: success()
         uses: actions/cache/save@main
         with:
@@ -78,9 +78,9 @@ jobs:
             /mnt/build_wrt/dl
             /mnt/build_wrt/.ccache
           key: ${{ steps.downloads.outputs.cache-primary-key }}
-      - name: Verify exactly four firmware images
+      - name: Verify images
         run: python3 Scripts/Verify.py images /mnt/build_wrt
-      - name: Preserve source provenance in workflow artifact
+      - name: Upload source lock
         uses: actions/upload-artifact@main
         with:
           name: source-lock
