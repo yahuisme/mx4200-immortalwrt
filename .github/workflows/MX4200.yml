@@ -93,7 +93,7 @@ jobs:
           import json
           from pathlib import Path
           d = json.loads(Path('/mnt/build_wrt/source-lock.json').read_text())
-          Path('/mnt/release-notes.md').write_text(
+          Path('/mnt/build_wrt/release-notes.md').write_text(
               '## Linksys MX4200v1 / MX4200v2\n\n'
               '每个硬件版本各一个 factory.bin 和 sysupgrade.bin，共四个镜像。\n'
               'factory 用于原厂刷入；sysupgrade 用于已有兼容固件升级。请先检查设备与镜像，禁止强刷。\n\n'
@@ -103,7 +103,7 @@ jobs:
               '采用第三方 NSS/ECM 与 ath11k 加速补丁，并非官方原版固件。\n')
           PY
           gh release create "$WRT_RELEASE_NAME" /mnt/build_wrt/upload/*.bin \
-            --target "$GITHUB_SHA" --title "$WRT_RELEASE_NAME" --notes-file /mnt/release-notes.md
+            --target "$GITHUB_SHA" --title "$WRT_RELEASE_NAME" --notes-file /mnt/build_wrt/release-notes.md
           gh release list --json tagName --jq '.[].tagName' |
             grep '^MX4200_' | grep -Fxv "$WRT_RELEASE_NAME" |
             xargs -r -n1 gh release delete --cleanup-tag -y || true
