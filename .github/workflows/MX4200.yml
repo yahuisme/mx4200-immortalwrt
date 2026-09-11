@@ -109,17 +109,52 @@ jobs:
           bash "$GITHUB_WORKSPACE/Scripts/Settings.sh"
           make defconfig
           python3 "$GITHUB_WORKSPACE/Scripts/Verify.py" config .
+      - name: Identify toolchain cache
+        id: toolchain-key
+        run: python3 Scripts/Cache.py /mnt/build_wrt
+      - name: Restore toolchain cache
+        id: toolchain
+        uses: actions/cache/restore@main
+        with:
+          path: |
+            /mnt/build_wrt/staging_dir/host
+            /mnt/build_wrt/staging_dir/toolchain-*
+            /mnt/build_wrt/build_dir/host
+            /mnt/build_wrt/build_dir/toolchain-*
+          key: mx4200-toolchain-v1-${{ steps.toolchain-key.outputs.key }}
       - name: Download packages
         run: make -C /mnt/build_wrt download -j"$(nproc)"
       - name: Compile firmware
         run: |
           cd /mnt/build_wrt
           export CCACHE_DIR=/mnt/build_wrt/.ccache
-          export CCACHE_MAXSIZE=15G
+          export CCACHE_MAXSIZE=2G
           export CCACHE_SLOPPINESS=file_stat_matches,include_file_mtime,time_macros
           export CCACHE_NOHASHDIR=true
           export CCACHE_COMPILERCHECK=content
+          if [ -x staging_dir/host/bin/ccache ]; then
+            staging_dir/host/bin/ccache --zero-stats
+          fi
           make -j"$(nproc)" || make -j1 V=s
+      - name: Cache statistics
+        if: always()
+        run: |
+          cd /mnt/build_wrt
+          if [ -x staging_dir/host/bin/ccache ]; then
+            CCACHE_DIR=/mnt/build_wrt/.ccache CCACHE_MAXSIZE=2G staging_dir/host/bin/ccache --cleanup
+            CCACHE_DIR=/mnt/build_wrt/.ccache staging_dir/host/bin/ccache --show-stats
+          fi
+          du -sh dl .ccache staging_dir/host* staging_dir/toolchain* build_dir/host* build_dir/toolchain* 2>/dev/null || true
+      - name: Save toolchain cache
+        if: success() && steps.toolchain.outputs.cache-hit != 'true'
+        uses: actions/cache/save@main
+        with:
+          path: |
+            /mnt/build_wrt/staging_dir/host
+            /mnt/build_wrt/staging_dir/toolchain-*
+            /mnt/build_wrt/build_dir/host
+            /mnt/build_wrt/build_dir/toolchain-*
+          key: ${{ steps.toolchain.outputs.cache-primary-key }}
       - name: Save cache
         if: success()
         uses: actions/cache/save@main
