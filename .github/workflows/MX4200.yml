@@ -101,7 +101,7 @@ jobs:
               'factory 用于原厂刷入；sysupgrade 用于已有兼容固件升级。请先检查设备与镜像，禁止强刷。\n\n'
               f'官方 ImmortalWrt {d["official_tag"]}: `{d["official_commit"]}`\n\n'
               f'LiBwrt NSS {d["donor_tag"]}: `{d["donor_commit"]}`\n\n'
-              f'NSS source: `{d["nss_source"]}`\n\n'
+              f'NSS source: `LiBwrt stable NSS patches; qosmio recipes`\n\n'
               '采用第三方 NSS/ECM 与 ath11k 加速补丁，并非官方原版固件。\n')
           PY
           gh release create "$WRT_RELEASE_NAME" /mnt/build_wrt/upload/*.bin \
