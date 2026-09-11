@@ -22,6 +22,7 @@
 
 | 插件 | 功能说明 |
 | :--- | :--- |
+| `luci-app-homeproxy` | 基于 sing-box 的代理管理 |
 | `luci-app-advanced-reboot` | 双分区切换与高级重启 |
 | `luci-app-usteer` | AP / Mesh 漫游辅助 |
 | `luci-app-wol` | 网络唤醒 |
