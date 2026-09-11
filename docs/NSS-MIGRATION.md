@@ -6,6 +6,7 @@
 - **NSS 适配**：LiBwrt 对应正式版的内核、mac80211 / ath11k 和 hostapd 配套改动。
 - **NSS 软件包**：`package/qca-nss/` 内置 qosmio 配方、补丁及启动脚本，沿用上游源码版本与归档摘要。
 - **设备配置**：`Config/`、`Scripts/Settings.sh` 与 `files/` 管理 MX4200v1 / v2 的应用和默认设置。
+- **HomeProxy 资源**：保留软件包自带规则及版本，dashboard 通过 HomeProxy 资源更新下载，不在固件构建时重复预置。
 
 系统正式版在每次构建时解析；内置 NSS 配方不会自动升级，需单独审查更新。源码版本、移植指纹和定制包提交记录在 Actions 的 `source-lock` 附件中，不混入固件 Release。
 

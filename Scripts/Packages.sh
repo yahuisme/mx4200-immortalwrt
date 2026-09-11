@@ -31,42 +31,7 @@ for name in luci-app-homeproxy sing-box; do
     cp -a "$stage/packages/$name" "./$name"
 done
 
-# Preset HomeProxy resources from the upstream sing-box feeds.
-hp_preset_resources() {
-    local hp_dir="$1" tmp resource version url
-    local resources="$hp_dir/root/etc/homeproxy/resources"
-    local dashboard="$hp_dir/root/etc/homeproxy/dashboard"
-    tmp="$(mktemp -d)"
-    trap 'rm -rf "$tmp"' RETURN
-    mkdir -p "$resources" "$dashboard"
-    for resource in geoip_cn geosite_cn; do
-        case "$resource" in
-            geoip_cn) url=https://cdn.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-cn.srs ;;
-            geosite_cn) url=https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set-unstable/geosite-cn.srs ;;
-        esac
-        curl -fsSL --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 -o "$tmp/$resource.srs" "$url"
-        test "$(head -c 3 "$tmp/$resource.srs")" = SRS
-        test "$(wc -c < "$tmp/$resource.srs")" -gt 4
-        mv "$tmp/$resource.srs" "$resources/$resource.srs"
-        printf '%s\n' "$(date -u +%Y%m%d)" > "$resources/$resource.ver"
-    done
-    curl -fsSL --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 \
-        -o "$tmp/dashboard.zip" https://codeload.github.com/SagerNet/sing-box-dashboard/zip/refs/heads/gh-pages
-    rm -rf "$tmp/dashboard"; mkdir "$tmp/dashboard"
-    unzip -q "$tmp/dashboard.zip" -d "$tmp/dashboard"
-    local index source
-    index="$(find "$tmp/dashboard" -name index.html -type f -print -quit)"
-    test -s "$index"; source="${index%/index.html}"
-    rm -rf "$dashboard.new"; mkdir "$dashboard.new"
-    cp -a "$source/." "$dashboard.new/"
-    rm -f "$dashboard.new/.etag"
-    printf '%s\n' "$(date -u +%Y%m%d%H%M%S)" > "$dashboard.new/dashboard.ver"
-    rm -rf "$dashboard"; mv "$dashboard.new" "$dashboard"
-    chmod -R a+rX "$resources" "$dashboard"
-}
-
-hp_preset_resources ./luci-app-homeproxy
-
+# Keep package-owned rules and versions; HomeProxy manages resource updates.
 python3 - "$stage/packages" "$(dirname "$(readlink -f "$0")")" <<'PY'
 import json, pathlib, subprocess, sys
 sys.path.insert(0, sys.argv[2])

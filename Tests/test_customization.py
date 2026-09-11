@@ -97,9 +97,6 @@ class SettingsTests(unittest.TestCase):
                 "encryption='${defaults?.encryption || encryption}'", "encryption='psk2+ccmp'"
             ).replace("key='${defaults?.key || \"\"}'", "key='test-password'"),
             "package/base-files/files/bin/config_generate": "ip=192.168.8.1\nhostname=ImmortalWrt\n",
-            "package/base-files/files/etc/openwrt_release": "%D %C\n",
-            "package/base-files/files/usr/lib/os-release": "%D %C\n",
-            "package/base-files/files/etc/banner": "%D %C\n",
             "include/version.mk": "VERSION_DIST:=ImmortalWrt\n",
         }
         for name, text in expected.items():
@@ -155,6 +152,19 @@ class PackagesTests(unittest.TestCase):
                     ("https://github.com/eamonxg/luci-app-aurora-config.git", ("luci-app-aurora-config",)),
                     ("https://github.com/VIKINGYFY/packages.git", ("luci-app-homeproxy", "sing-box")),
                 )
+                # Package-owned resources must survive byte-for-byte; no CDN refresh.
+                resources = {
+                    "geoip_cn.srs": b"SRS\x01fixture-geoip",
+                    "geoip_cn.ver": b"20260812\n",
+                    "geosite_cn.srs": b"SRS\x01fixture-geosite",
+                    "geosite_cn.ver": b"20260908094002\n",
+                }
+                tools = Path(tmp) / "bin"
+                tools.mkdir()
+                curl = tools / "curl"
+                curl.write_text("#!/bin/sh\necho 'Unexpected resource download' >&2\nexit 99\n")
+                curl.chmod(0o755)
+                env["PATH"] = str(tools) + os.pathsep + env["PATH"]
                 commits = []
                 for i, (url, names) in enumerate(urls):
                     repo = Path(tmp) / f"remote-{i}"
@@ -163,6 +173,11 @@ class PackagesTests(unittest.TestCase):
                         path = repo / name if i == 2 else repo
                         path.mkdir(exist_ok=True)
                         (path / "Makefile").write_text(f"custom {name}\n")
+                        if name == "luci-app-homeproxy":
+                            bundled = path / "root/etc/homeproxy/resources"
+                            bundled.mkdir(parents=True)
+                            for filename, content in resources.items():
+                                (bundled / filename).write_bytes(content)
                     subprocess.run(["git", "-C", str(repo), "add", "."], check=True, env=env)
                     subprocess.run(["git", "-C", str(repo), "-c", "user.name=Fixture",
                                     "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"],
@@ -182,6 +197,10 @@ class PackagesTests(unittest.TestCase):
                 for _, names in urls:
                     for name in names:
                         self.assertEqual((package / name / "Makefile").read_text(), f"custom {name}\n")
+                homeproxy = package / "luci-app-homeproxy/root/etc/homeproxy"
+                for filename, content in resources.items():
+                    self.assertEqual((homeproxy / "resources" / filename).read_bytes(), content)
+                self.assertFalse((homeproxy / "dashboard").exists())
                 self.assertTrue(other_link.is_symlink())
                 self.assertEqual((other_link / "Makefile").read_text(), "keep me\n")
                 lock = json.loads((root / "source-lock.json").read_text())
