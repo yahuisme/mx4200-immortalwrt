@@ -7,6 +7,27 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 VALUES = dict(WRT_THEME="aurora", WRT_IP="192.168.8.1", WRT_SSID="MX4200", WRT_WORD="test-password")
+WIFI_PATH = "package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc"
+# Official wifi-scripts uses an encryption variable, not a literal UCI default.
+WIFI_TEMPLATE = """\
+        let country, encryption, defaults, num_global_macaddr;
+        if (band_name == '6g') {
+            country = '00';
+            encryption = 'owe';
+        } else {
+            encryption = 'none';
+        }
+        print(`set ${si}=wifi-iface
+set ${si}.device='${name}'
+set ${si}.network='lan'
+set ${si}.mode='ap'
+set ${si}.ssid='${defaults?.ssid || "ImmortalWrt"}'
+set ${si}.encryption='${defaults?.encryption || encryption}'
+set ${si}.key='${defaults?.key || ""}'
+set ${si}.disabled='0'
+
+`);
+"""
 
 
 class SettingsTests(unittest.TestCase):
@@ -17,7 +38,7 @@ class SettingsTests(unittest.TestCase):
         self.files = {
             "feeds/luci/collections/luci/Makefile": "DEPENDS:=+luci-theme-bootstrap\n +luci-app-attendedsysupgrade\n",
             "feeds/luci/modules/luci-mod-system/htdocs/flash.js": "const ip = '192.168.1.1';\n",
-            "package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc": "ssid='OpenWrt'\nkey=''\n",
+            WIFI_PATH: WIFI_TEMPLATE,
             "package/base-files/files/bin/config_generate": "ip=192.168.1.1\nhostname=ImmortalWRT\n",
             "package/base-files/files/etc/openwrt_release": "%D %V %C\n",
             "package/base-files/files/usr/lib/os-release": "%D %V %C\n",
@@ -54,6 +75,15 @@ class SettingsTests(unittest.TestCase):
                     self.assertEqual(self.snapshot(), before)
                     self.assertIn(variable, result.stderr)
 
+    def test_wifi_template_requires_wpa2_ccmp_with_the_configured_key(self):
+        result = self.run_settings(VALUES)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        wifi = (self.root / WIFI_PATH).read_text()
+        self.assertIn("set ${si}.encryption='psk2+ccmp'\n", wifi)
+        self.assertIn("set ${si}.ssid='MX4200'\n", wifi)
+        self.assertIn("set ${si}.key='test-password'\n", wifi)
+        self.assertNotIn("set ${si}.encryption='${", wifi)
+
     def test_normal_settings_preserve_all_customizations(self):
         result = self.run_settings(VALUES)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -61,7 +91,11 @@ class SettingsTests(unittest.TestCase):
             **self.files,
             "feeds/luci/collections/luci/Makefile": "DEPENDS:=+luci-theme-aurora\n",
             "feeds/luci/modules/luci-mod-system/htdocs/flash.js": "const ip = '192.168.8.1';\n",
-            "package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc": "ssid='MX4200'\nkey='test-password'\n",
+            WIFI_PATH: WIFI_TEMPLATE.replace(
+                "ssid='${defaults?.ssid || \"ImmortalWrt\"}'", "ssid='MX4200'"
+            ).replace(
+                "encryption='${defaults?.encryption || encryption}'", "encryption='psk2+ccmp'"
+            ).replace("key='${defaults?.key || \"\"}'", "key='test-password'"),
             "package/base-files/files/bin/config_generate": "ip=192.168.8.1\nhostname=ImmortalWrt\n",
             "package/base-files/files/etc/openwrt_release": "%D %C\n",
             "package/base-files/files/usr/lib/os-release": "%D %C\n",

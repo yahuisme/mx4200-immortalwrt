@@ -139,6 +139,7 @@
     "package/kernel/nat46/patches/122-kernel-6.12.patch",
     "package/kernel/qca-nss-dp/Makefile",
     "package/kernel/qca-ssdk/Makefile",
+    "package/network/services/hostapd/patches/900-hostapd-update-muedca-params.patch",
     "target/linux/qualcommax/config-6.12",
     "target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8074-512m.dtsi",
     "target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8074-nss.dtsi",
@@ -180,6 +181,7 @@
   "watch_patterns": [
     "config/Config-ipq\\.in",
     "package/kernel/mac80211/patches/nss/.*",
+    "package/network/services/hostapd/patches/.*muedca.*",
     "package/kernel/cryptodev-linux/patches/.*nss.*",
     "target/linux/qualcommax/patches-[^/]+/0(?:600|602|603|604|605|606|607|981)-.*",
     "target/linux/qualcommax/files/(?:arch/arm64/boot/dts/qcom/ipq807[^/]*nss[^/]*|(?:include|net)/.*(?:nss|skbuff_(?:recycl|notifier|debug)|dscpremark).*)"
@@ -319,6 +321,7 @@
     "package/kernel/nat46/patches/122-kernel-6.12.patch": "d0f9e95323b5b50440afa0d2fa570479932d58bc0dfe77b5297e076d7686e214",
     "package/kernel/qca-nss-dp/Makefile": "24aeba83cb142fa83fe1131ead1eff4f314745562fa5b6adf6f71deae690108c",
     "package/kernel/qca-ssdk/Makefile": "24aeba83cb142fa83fe1131ead1eff4f314745562fa5b6adf6f71deae690108c",
+    "package/network/services/hostapd/patches/900-hostapd-update-muedca-params.patch": "5c953cd2a8816b790193662b91c97e2cf8df95aeb0e508573efc211c4a719296",
     "target/linux/qualcommax/config-6.12": "ada1b21887b675fedb0365834d3ed081b6ed61abe1c339697c4091335062432d",
     "target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8074-512m.dtsi": "a7dd127ff93b4d3a8e3e6eec383c3c4eb3c929a9a2a485bc677e563e5f0f1cb6",
     "target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8074-nss.dtsi": "f719bcebb181e71eac93dd966679fcc7c86f70dfe8d30a2f63fc0996452e6fb0",

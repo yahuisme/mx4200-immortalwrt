@@ -137,6 +137,16 @@ def nss_packages():
     return source
 
 
+def hostapd_muedca_patch(output):
+    """Native follow-up to the donor companion, matching backports' nl80211 ABI."""
+    source = ROOT / 'patches/hostapd/901-hostapd-muedca-backports-abi.patch'
+    dest = output / 'package/network/services/hostapd/patches' / source.name
+    if dest.exists():
+        raise ValueError('Hostapd MU-EDCA patch collision: ' + str(dest))
+    shutil.copy2(source, dest)
+    return {str(dest.relative_to(output)): hashlib.sha256(dest.read_bytes()).hexdigest()}
+
+
 def prepare(official, donor, output, metadata):
     policy = json.loads((ROOT / 'Config/nss-policy.json').read_text())
     fingerprint, changes = delta(official, donor)
@@ -176,6 +186,7 @@ def prepare(official, donor, output, metadata):
             shutil.copy2(source, dest)
         elif dest.exists():
             dest.unlink()
+    metadata['local_patch_sha256'] = hostapd_muedca_patch(output)
     metadata['transplanted_sha256'] = {
         name: hashlib.sha256((output / name).read_bytes()).hexdigest()
         if (output / name).is_file() else None for name in policy['take']}

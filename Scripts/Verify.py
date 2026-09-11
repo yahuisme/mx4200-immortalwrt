@@ -10,16 +10,20 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def check_config(tree):
     selected = set((tree / '.config').read_text().splitlines())
-    wanted = {line for p in (ROOT / 'Config').glob('*.txt') for line in p.read_text().splitlines()
-              if line.startswith('CONFIG_') and line.endswith('=y')}
+    contract = {line for p in (ROOT / 'Config').glob('*.txt')
+                for line in p.read_text().splitlines() if line.startswith('CONFIG_')}
+    wanted = {line for line in contract if line.endswith('=y')}
+    disabled = {line[:-2] for line in contract if line.endswith('=n')}
+    forbidden = sorted(line for line in selected
+                       if line.endswith(('=y', '=m')) and line[:-2] in disabled)
     # OpenWrt makes VERSIONOPT invisible when release defaults already provide identity.
     wanted.discard('CONFIG_VERSIONOPT=y')
 
     missing = sorted(wanted - selected)
     devices = sorted(x for x in selected if re.fullmatch(r'CONFIG_TARGET_DEVICE_.*=y', x))
     expected = [f'CONFIG_TARGET_DEVICE_qualcommax_ipq807x_DEVICE_linksys_mx4200v{v}=y' for v in (1, 2)]
-    if missing or devices != expected:
-        raise ValueError(f'Configuration contract failed: missing={missing}, devices={devices}')
+    if missing or forbidden or devices != expected:
+        raise ValueError(f'Configuration contract failed: missing={missing}, forbidden={forbidden}, devices={devices}')
     print(f'PASS: {len(wanted)} required selections and exactly MX4200v1/v2')
 
 

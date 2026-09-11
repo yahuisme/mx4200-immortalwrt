@@ -33,7 +33,8 @@ WIFI_UC="./package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc"
 if [ -f "$WIFI_UC" ]; then
 	sed -i "s/ssid='.*'/ssid='$WRT_SSID'/g" "$WIFI_UC"
 	sed -i "s/key='.*'/key='$WRT_WORD'/g" "$WIFI_UC"
-	echo "wifi default ssid/key has been set!"
+	sed -i "s/encryption='.*'/encryption='psk2+ccmp'/g" "$WIFI_UC"
+	echo "wifi default ssid/key/encryption has been set!"
 else
 	echo "ERROR: mac80211.uc not found; stopping build!" >&2
 	exit 1

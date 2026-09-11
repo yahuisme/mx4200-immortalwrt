@@ -34,14 +34,14 @@ jobs:
           python3 Scripts/Prepare.py --sources /mnt/nss-sources --output /mnt/build_wrt
           VERSION=$(python3 -c 'import json; print(json.load(open("/mnt/build_wrt/source-lock.json"))["official_tag"])')
           echo "WRT_RELEASE_NAME=MX4200_ImmortalWrt_${VERSION}_$(TZ=Asia/Hong_Kong date +'%y.%m.%d-%H.%M.%S')" >> "$GITHUB_ENV"
-      - name: Restore downloads only
+      - name: Restore downloads and compiler cache
         id: downloads
         uses: actions/cache/restore@main
         with:
           path: |
             /mnt/build_wrt/dl
             /mnt/build_wrt/.ccache
-          key: mx4200-build-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Config/*.txt', 'Config/nss-policy.json', 'Scripts/*.py', 'Scripts/*.sh', 'files/**', 'package/qca-nss/**') }}
+          key: mx4200-build-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: mx4200-build-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Feeds and custom packages
