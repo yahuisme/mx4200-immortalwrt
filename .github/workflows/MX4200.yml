@@ -133,9 +133,10 @@ jobs:
           export CCACHE_SLOPPINESS=file_stat_matches,include_file_mtime,time_macros
           export CCACHE_NOHASHDIR=true
           export CCACHE_COMPILERCHECK=content
-          if [ -x staging_dir/host/bin/ccache ]; then
-            staging_dir/host/bin/ccache --zero-stats
+          if [ ! -x staging_dir/host/bin/ccache ]; then
+            make tools/ccache/compile -j"$(nproc)"
           fi
+          staging_dir/host/bin/ccache --zero-stats
           make -j"$(nproc)" || make -j1 V=s
       - name: Cache statistics
         if: always()
@@ -143,7 +144,7 @@ jobs:
           cd /mnt/build_wrt
           if [ -x staging_dir/host/bin/ccache ]; then
             CCACHE_DIR=/mnt/build_wrt/.ccache CCACHE_MAXSIZE=2G staging_dir/host/bin/ccache --cleanup
-            CCACHE_DIR=/mnt/build_wrt/.ccache staging_dir/host/bin/ccache --show-stats
+            CCACHE_DIR=/mnt/build_wrt/.ccache CCACHE_MAXSIZE=2G staging_dir/host/bin/ccache --show-stats
           fi
           du -sh dl .ccache staging_dir/host* staging_dir/toolchain* build_dir/host* build_dir/toolchain* 2>/dev/null || true
       - name: Save toolchain cache
