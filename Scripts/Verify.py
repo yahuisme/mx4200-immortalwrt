@@ -14,8 +14,7 @@ def check_config(tree):
               if line.startswith('CONFIG_') and line.endswith('=y')}
     # OpenWrt makes VERSIONOPT invisible when release defaults already provide identity.
     wanted.discard('CONFIG_VERSIONOPT=y')
-    if 'CONFIG_ATH11K_NSS_SUPPORT=y' in wanted:
-        wanted.add('CONFIG_ATH11K_NSS_MESH_SUPPORT=y')
+
     missing = sorted(wanted - selected)
     devices = sorted(x for x in selected if re.fullmatch(r'CONFIG_TARGET_DEVICE_.*=y', x))
     expected = [f'CONFIG_TARGET_DEVICE_qualcommax_ipq807x_DEVICE_linksys_mx4200v{v}=y' for v in (1, 2)]

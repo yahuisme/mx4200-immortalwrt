@@ -41,7 +41,7 @@ jobs:
           path: |
             /mnt/build_wrt/dl
             /mnt/build_wrt/.ccache
-          key: mx4200-build-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ hashFiles('Config/*.txt', 'Config/nss-policy.json', 'Scripts/*.py', 'Scripts/*.sh', 'files/**', 'package/qca-nss/**') }}
+          key: mx4200-build-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Config/*.txt', 'Config/nss-policy.json', 'Scripts/*.py', 'Scripts/*.sh', 'files/**', 'package/qca-nss/**') }}
           restore-keys: mx4200-build-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Feeds and custom packages
