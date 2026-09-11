@@ -88,6 +88,8 @@ jobs:
           if-no-files-found: error
       - name: Release firmware
         if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           python3 - <<'PY'
           import json
