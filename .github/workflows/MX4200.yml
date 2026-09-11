@@ -1,22 +1,14 @@
 # SPDX-License-Identifier: MIT
-# Copyright (C) 2026 VIKINGYFY
-
-# Linksys MX4200v1 / MX4200v2 每日编译
 name: MX4200 ImmortalWrt Builds
-
 on:
-  # GitHub Actions 使用 UTC；香港时间每日 14:00 = UTC 06:00
+  # 香港时间每日 14:00 = UTC 06:00；源码适配不匹配时直接失败。
   schedule:
     - cron: '0 6 * * *'
   workflow_dispatch:
-
 permissions:
-  actions: write
   contents: write
-
 jobs:
   build:
-    name: MX4200v1-v2
     runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ github.token }}
@@ -24,151 +16,94 @@ jobs:
       WRT_SSID: MX4200
       WRT_WORD: 12345678
       WRT_IP: 192.168.10.1
-      WRT_REPO: https://github.com/VIKINGYFY/immortalwrt.git
-      WRT_BRANCH: main
     steps:
-      - name: Checkout
-        uses: actions/checkout@main
-
-      - name: Initialization Environment
+      - uses: actions/checkout@main
+      - name: Install build prerequisites
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo -E apt-get -yqq update
-          sudo -E apt-get -yqq install --no-install-recommends \
-            bison build-essential ccache file flex gawk \
-            g++-multilib gcc-multilib gettext libelf-dev libncurses-dev \
-            libssl-dev python3-setuptools rsync swig unzip zlib1g-dev
-          sudo mkdir -p /mnt/build_wrt
-          sudo chown "$USER:$USER" /mnt/build_wrt
-
-      - name: Clone Code
+          sudo apt-get -yqq update
+          sudo apt-get -yqq install --no-install-recommends \
+            bison build-essential file flex gawk g++-multilib gcc-multilib \
+            gettext libelf-dev libncurses-dev libssl-dev python3-setuptools \
+            rsync swig unzip zlib1g-dev
+          sudo mkdir -p /mnt/build_wrt /mnt/nss-sources
+          sudo chown "$USER:$USER" /mnt/build_wrt /mnt/nss-sources
+      - name: Resolve stable releases and prepare reviewed NSS delta
         run: |
-          WRT_DATE="$(TZ=Asia/Hong_Kong date +'%y.%m.%d-%H.%M.%S')"
-          git clone --single-branch --branch "$WRT_BRANCH" "$WRT_REPO" /mnt/build_wrt/
-          cd /mnt/build_wrt/
-          WRT_HASH=$(git rev-parse HEAD)
-          WRT_REV=$(./scripts/getver.sh | sed -E 's/^r([0-9]+).*/\1/')
-          echo "WRT_DATE=$WRT_DATE" >> "$GITHUB_ENV"
-          echo "WRT_RELEASE_NAME=MX4200_ImmortalWrt_${WRT_DATE}_r${WRT_REV}" >> "$GITHUB_ENV"
-          echo "WRT_CACHE_PREFIX=wrt-immortalwrt-main-qualcommax-ipq807x" >> "$GITHUB_ENV"
-          echo "WRT_HASH=$WRT_HASH" >> "$GITHUB_ENV"
-          echo "WRT_CACHE_KEY=wrt-immortalwrt-main-qualcommax-ipq807x-$WRT_HASH" >> "$GITHUB_ENV"
-
-          PROJECT_MIRRORS_FILE="./scripts/projectsmirrors.json"
-          if [ -f "$PROJECT_MIRRORS_FILE" ]; then
-            sed -i '/.cn\//d; /tencent/d; /aliyun/d' "$PROJECT_MIRRORS_FILE"
-          fi
-
-      - name: Restore Build Cache
-        id: cache-restore
+          python3 Scripts/Prepare.py --sources /mnt/nss-sources --output /mnt/build_wrt
+          VERSION=$(python3 -c 'import json; print(json.load(open("/mnt/build_wrt/source-lock.json"))["official_tag"])')
+          echo "WRT_RELEASE_NAME=MX4200_ImmortalWrt_${VERSION}_$(TZ=Asia/Hong_Kong date +'%y.%m.%d-%H.%M.%S')" >> "$GITHUB_ENV"
+      - name: Restore downloads only
+        id: downloads
         uses: actions/cache/restore@main
         with:
-          key: ${{ env.WRT_CACHE_KEY }}
-          restore-keys: |
-            ${{ env.WRT_CACHE_PREFIX }}-
           path: |
-            /mnt/build_wrt/.ccache
             /mnt/build_wrt/dl
-            /mnt/build_wrt/staging_dir/host*
-            /mnt/build_wrt/staging_dir/tool*
+            /mnt/build_wrt/.ccache
+          key: mx4200-build-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Config/*.txt', 'Config/nss-policy.json', 'Scripts/*.py', 'Scripts/*.sh', 'files/**', 'package/qca-nss/**') }}
+          restore-keys: mx4200-build-${{ runner.os }}-${{ runner.arch }}-
 
-      - name: Prepare Restored Build Cache
-        if: steps.cache-restore.outputs.cache-matched-key != ''
+      - name: Feeds and custom packages
         run: |
-          find "/mnt/build_wrt/staging_dir" -type d -name "stamp" -not -path "*target*" | while read -r DIR; do
-            find "$DIR" -type f -exec touch {} +
-          done
-          mkdir -p /mnt/build_wrt/tmp
-          echo "1" > /mnt/build_wrt/tmp/.build
-          echo "restored build cache: ${{ steps.cache-restore.outputs.cache-matched-key }}"
-
-      - name: Update Feeds
-        run: |
-          cd /mnt/build_wrt/
-          ./scripts/feeds update -a >/dev/null || { echo "::error::feeds update failed"; exit 1; }
-          ./scripts/feeds install -a >/dev/null || { echo "::error::feeds install failed"; exit 1; }
-
-      - name: Custom Packages
-        run: |
-          cd /mnt/build_wrt/package/
+          cd /mnt/build_wrt
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          cd package
           bash "$GITHUB_WORKSPACE/Scripts/Packages.sh"
           bash "$GITHUB_WORKSPACE/Scripts/Handles.sh"
-
-      - name: Custom Settings
+      - name: Configuration
         run: |
-          cd /mnt/build_wrt/
-          cat "$GITHUB_WORKSPACE/Config/MX4200.txt" "$GITHUB_WORKSPACE/Config/GENERAL.txt" >> .config
-          echo 'CONFIG_CCACHE_DIR="/mnt/build_wrt/.ccache"' >> .config
-          cp -rf "$GITHUB_WORKSPACE/files" ./
+          cd /mnt/build_wrt
+          cat "$GITHUB_WORKSPACE"/Config/{MX4200,GENERAL,NSS}.txt > .config
+          cp -a "$GITHUB_WORKSPACE/files" .
           bash "$GITHUB_WORKSPACE/Scripts/Settings.sh"
-          make defconfig -j"$(nproc)"
-
-      - name: Download Packages
+          make defconfig
+          python3 "$GITHUB_WORKSPACE/Scripts/Verify.py" config .
+      - name: Download packages
+        run: make -C /mnt/build_wrt download -j"$(nproc)"
+      - name: Compile firmware
         run: |
-          cd /mnt/build_wrt/
-          make download -j"$(nproc)"
-
-      - name: Compile Firmware
-        run: |
-          cd /mnt/build_wrt/
-          export CCACHE_DIR="/mnt/build_wrt/.ccache"
-          export CCACHE_MAXSIZE="15G"
+          cd /mnt/build_wrt
+          export CCACHE_DIR=/mnt/build_wrt/.ccache
+          export CCACHE_MAXSIZE=15G
           export CCACHE_SLOPPINESS=file_stat_matches,include_file_mtime,time_macros
           export CCACHE_NOHASHDIR=true
           export CCACHE_COMPILERCHECK=content
           make -j"$(nproc)" || make -j1 V=s
-          staging_dir/host/bin/ccache -s || ccache -s || true
-
-      - name: Save Build Cache
-        if: success() && steps.cache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@main
-        continue-on-error: true
-        with:
-          key: ${{ env.WRT_CACHE_KEY }}
-          path: |
-            /mnt/build_wrt/.ccache
-            /mnt/build_wrt/dl
-            /mnt/build_wrt/staging_dir/host*
-            /mnt/build_wrt/staging_dir/tool*
-
-      - name: Package Firmware
-        run: |
-          cd /mnt/build_wrt/
-          mkdir ./upload/
-          find ./bin/targets/ -type f \( -iname '*factory*.bin' -o -iname '*sysupgrade*.bin' \) -exec mv -f {} ./upload/ \;
-          IMAGE_COUNT="$(find ./upload/ -maxdepth 1 -type f -name '*.bin' | wc -l)"
-          if [ "$IMAGE_COUNT" -lt 4 ]; then
-            echo "::error::expected at least 4 firmware images (v1+v2 × factory+sysupgrade), found $IMAGE_COUNT"
-            exit 1
-          fi
-
-      - name: Release Firmware
-        env:
-          RELEASE_NOTES: |
-            ## Linksys MX4200 系列 ImmortalWrt 固件
-
-            本 Release 仅包含以下设备的刷机镜像：
-            - Linksys MX4200v1：`factory.bin` / `sysupgrade.bin`
-            - Linksys MX4200v2：`factory.bin` / `sysupgrade.bin`
-
-            `factory.bin` 用于从原厂固件刷入；`sysupgrade.bin` 用于从已有 ImmortalWrt 升级。
-
-            基于开源 NSS 加速栈构建。
-        run: |
-          gh release create "$WRT_RELEASE_NAME" /mnt/build_wrt/upload/*.bin \
-            --title "$WRT_RELEASE_NAME" --notes "$RELEASE_NOTES"
-          gh release list --json tagName --jq '.[].tagName' |
-            grep '^MX4200_' |
-            grep -Fxv "$WRT_RELEASE_NAME" |
-            xargs -r -n1 gh release delete --cleanup-tag -y || true
-
-      - name: Roll Build Cache
+      - name: Save downloads and compiler cache
         if: success()
+        uses: actions/cache/save@main
+        with:
+          path: |
+            /mnt/build_wrt/dl
+            /mnt/build_wrt/.ccache
+          key: ${{ steps.downloads.outputs.cache-primary-key }}
+      - name: Verify exactly four firmware images
+        run: python3 Scripts/Verify.py images /mnt/build_wrt
+      - name: Preserve source provenance in workflow artifact
+        uses: actions/upload-artifact@main
+        with:
+          name: source-lock
+          path: /mnt/build_wrt/source-lock.json
+          if-no-files-found: error
+      - name: Release firmware
         run: |
-          gh cache list --key "$WRT_CACHE_PREFIX-" --limit 100 --json id,key --jq '.[] | [.id, .key] | @tsv' |
-            while IFS=$'\t' read -r CACHE_ID CACHE_KEY; do
-              [ -n "$CACHE_ID" ] || continue
-              [ "$CACHE_KEY" = "$WRT_CACHE_KEY" ] && continue
-              gh cache delete "$CACHE_ID" || true
-            done
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          d = json.loads(Path('/mnt/build_wrt/source-lock.json').read_text())
+          Path('/mnt/release-notes.md').write_text(
+              '## Linksys MX4200v1 / MX4200v2\n\n'
+              '每个硬件版本各一个 factory.bin 和 sysupgrade.bin，共四个镜像。\n'
+              'factory 用于原厂刷入；sysupgrade 用于已有兼容固件升级。请先检查设备与镜像，禁止强刷。\n\n'
+              f'官方 ImmortalWrt {d["official_tag"]}: `{d["official_commit"]}`\n\n'
+              f'LiBwrt NSS {d["donor_tag"]}: `{d["donor_commit"]}`\n\n'
+              f'NSS source: `{d["nss_source"]}`\n\n'
+              '采用第三方 NSS/ECM 与 ath11k 加速补丁，并非官方原版固件。\n')
+          PY
+          gh release create "$WRT_RELEASE_NAME" /mnt/build_wrt/upload/*.bin \
+            --title "$WRT_RELEASE_NAME" --notes-file /mnt/release-notes.md
+          gh release list --json tagName --jq '.[].tagName' |
+            grep '^MX4200_' | grep -Fxv "$WRT_RELEASE_NAME" |
+            xargs -r -n1 gh release delete --cleanup-tag -y || true

@@ -4,6 +4,12 @@
 
 set -e
 
+# Validate every required value before modifying the buildroot.
+: "${WRT_THEME:?WRT_THEME must be non-empty}"
+: "${WRT_IP:?WRT_IP must be non-empty}"
+: "${WRT_SSID:?WRT_SSID must be non-empty}"
+: "${WRT_WORD:?WRT_WORD must be non-empty}"
+
 COLLECTION_MAKEFILES=$(find ./feeds/luci/collections/ -type f -name "Makefile" 2>/dev/null)
 if [ -n "$COLLECTION_MAKEFILES" ]; then
 	echo "$COLLECTION_MAKEFILES" | while IFS= read -r mkfile; do

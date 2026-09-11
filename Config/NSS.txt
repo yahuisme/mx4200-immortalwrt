@@ -1,0 +1,14 @@
+# LiBwrt NSS/ECM + ath11k Wi-Fi offload; not just the upstream dataplane driver.
+CONFIG_PACKAGE_kmod-qca-nss-drv=y
+CONFIG_PACKAGE_kmod-qca-nss-ecm=y
+CONFIG_PACKAGE_kmod-qca-nss-drv-bridge-mgr=y
+CONFIG_PACKAGE_kmod-qca-nss-drv-vlan-mgr=y
+CONFIG_PACKAGE_kmod-qca-nss-drv-pppoe=y
+CONFIG_PACKAGE_nss-firmware-ipq807x=y
+CONFIG_NSS_FIRMWARE_VERSION_11_4=y
+CONFIG_ATH11K_NSS_SUPPORT=y
+CONFIG_PACKAGE_MAC80211_NSS_SUPPORT=y
+CONFIG_ATH11K_MEM_PROFILE_512M=y
+CONFIG_PACKAGE_wpad-openssl=y
+CONFIG_PACKAGE_sing-box=y
+CONFIG_PACKAGE_default-settings-chn=y
