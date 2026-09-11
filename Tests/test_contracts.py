@@ -13,8 +13,8 @@ spec.loader.exec_module(verify)
 
 class ContractTests(unittest.TestCase):
     def test_disabled_config_contract(self):
-        lines = [line for p in (ROOT / 'Config').glob('*.txt')
-                 for line in p.read_text().splitlines() if line.startswith('CONFIG_')]
+        lines = [line for line in (ROOT / 'Config/MX4200.txt').read_text().splitlines()
+                 if line.startswith('CONFIG_')]
         disabled = [line[:-2] for line in lines if line.endswith('=n')]
         self.assertTrue(disabled)
         with tempfile.TemporaryDirectory() as directory:

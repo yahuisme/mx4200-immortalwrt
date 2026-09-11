@@ -56,3 +56,8 @@ if [ -f "./include/version.mk" ]; then
 fi
 sed -i 's/ImmortalWRT/ImmortalWrt/g' "$CFG_FILE"
 
+TPL_DIR="./package/luci-app-aurora-config/root/usr/share/aurora"
+if [ -d "$TPL_DIR" ]; then
+	sed -i "s/nav_type '.*'/nav_type 'sidebar'/g; s/struct_radius_base '.*'/struct_radius_base '0.125rem'/g" "$TPL_DIR"/*.template 2>/dev/null || true
+	echo "theme-aurora has been fixed!"
+fi

@@ -10,14 +10,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def check_config(tree):
     selected = set((tree / '.config').read_text().splitlines())
-    contract = {line for p in (ROOT / 'Config').glob('*.txt')
-                for line in p.read_text().splitlines() if line.startswith('CONFIG_')}
+    contract = {line for line in (ROOT / 'Config/MX4200.txt').read_text().splitlines()
+                if line.startswith('CONFIG_')}
     wanted = {line for line in contract if line.endswith('=y')}
     disabled = {line[:-2] for line in contract if line.endswith('=n')}
     forbidden = sorted(line for line in selected
                        if line.endswith(('=y', '=m')) and line[:-2] in disabled)
-    # OpenWrt makes VERSIONOPT invisible when release defaults already provide identity.
-    wanted.discard('CONFIG_VERSIONOPT=y')
 
     missing = sorted(wanted - selected)
     devices = sorted(x for x in selected if re.fullmatch(r'CONFIG_TARGET_DEVICE_.*=y', x))

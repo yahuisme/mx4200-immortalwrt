@@ -41,7 +41,7 @@ class PackageTests(unittest.TestCase):
             self.assertIn('CONFIG_NSS_FIRMWARE_VERSION_11_4', config_deps)
 
     def test_mesh_firmware(self):
-        text = (ROOT/'Config/NSS.txt').read_text()
+        text = (ROOT/'Config/MX4200.txt').read_text()
         self.assertIn('CONFIG_NSS_FIRMWARE_VERSION_11_4=y', text)
 
 if __name__ == '__main__':

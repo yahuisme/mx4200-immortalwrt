@@ -78,4 +78,4 @@ MX4200_ImmortalWrt_<正式版标签>_<构建时间>
 
 源码适配检查通过后才继续构建。Release 仅发布刷机镜像，源码版本与移植记录保存在 Actions 的 `source-lock` 附件中。
 
-源码适配与验证记录见 [NSS 迁移说明](docs/NSS-MIGRATION.md)。
+源码适配与验证方法见 [NSS 维护说明](docs/NSS-MIGRATION.md)。

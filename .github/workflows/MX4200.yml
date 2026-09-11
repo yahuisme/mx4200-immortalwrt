@@ -51,11 +51,10 @@ jobs:
           ./scripts/feeds install -a
           cd package
           bash "$GITHUB_WORKSPACE/Scripts/Packages.sh"
-          bash "$GITHUB_WORKSPACE/Scripts/Handles.sh"
       - name: Configuration
         run: |
           cd /mnt/build_wrt
-          cat "$GITHUB_WORKSPACE"/Config/{MX4200,GENERAL,NSS}.txt > .config
+          cp "$GITHUB_WORKSPACE/Config/MX4200.txt" .config
           cp -a "$GITHUB_WORKSPACE/files" .
           bash "$GITHUB_WORKSPACE/Scripts/Settings.sh"
           make defconfig

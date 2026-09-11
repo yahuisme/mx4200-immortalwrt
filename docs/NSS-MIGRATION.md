@@ -1,49 +1,61 @@
-# MX4200 本地迁移交接
+# NSS 维护说明
 
-## 工作区
+## 源码组成
 
-- 待审工作树：`/root/mx4200-official-nss`
-- 分支：`migrate-official-nss`
-- 基线：`5c62b00065e3c81c2335a3a136f61d688b8d6c84`
-- 全部改动未提交；未 push、dispatch 或发布。原有分歧工作树没有重置。
-- 用户要求在新会话独立审查，未经单独授权不提交、推送或构建发布。
+- **系统基线**：ImmortalWrt 最新正式版，保留官方 feeds、设备定义与默认网络策略。
+- **NSS 适配**：LiBwrt 对应正式版的内核、mac80211 / ath11k 和 hostapd 配套改动。
+- **NSS 软件包**：`package/qca-nss/` 内置 qosmio 配方、补丁及启动脚本，沿用上游源码版本与归档摘要。
+- **设备配置**：`Config/`、`Scripts/Settings.sh` 与 `files/` 管理 MX4200v1 / v2 的应用和默认设置。
 
-## 实现范围
+系统正式版在每次构建时解析；内置 NSS 配方不会自动升级，需单独审查更新。源码版本、移植指纹和定制包提交记录在 Actions 的 `source-lock` 附件中，不混入固件 Release。
 
-动态解析官方 ImmortalWrt 最新正式版，以 LiBwrt 对应正式版提供经审查的 NSS 内核/无线差异，借鉴 VIKINGYFY 的 `package/qca-nss/` 内置包配方布局。核心包来自记录的 qosmio 版本；保留 Git 源及 PKG_MIRROR_HASH，firmware 使用 qosmio Release 归档及原 SHA256。不使用自建归档、skip 或修改上游摘要。保留 MX4200v1/v2、现有应用、设置及 dl/ccache。
+## 适配边界
 
-主要审查对象：`Scripts/Prepare.py`、`Scripts/Verify.py`、`Scripts/Packages.sh`、`Config/nss-policy.json`、`Config/NSS.txt`、`package/qca-nss/`、workflow、overlay、Tests、README。
+`Scripts/Prepare.py` 以 `Config/nss-policy.json` 为移植清单。未选中的文件保留官方版本，不引入 LiBwrt 品牌、默认应用或独立 IRQ / 网络调优脚本。
 
-## 已查明并修正的问题
+选中改动的内容、文件类型或权限变化，以及已知 NSS 扩展路径出现新文件时，准备流程会中止。官方与 donor 的正式版标签、内核版本也必须匹配。适配失败应审查实际差异，不应直接刷新指纹绕过检查。
 
-先前把 Git 源码包误称为无需归档校验、把 firmware 11.4 条件分支误判为重复定义，均不正确。drv/clients 合法条件分支已恢复，Mesh 11.4 组合为 drv 53e5863、clients c4049d1、ECM 30fbfa4。
+指纹允许两边共有的上游上下文变化，但不能证明语义兼容。更新后仍需验证补丁应用、配置、完整编译和设备运行。
 
-归档 SHA256 不匹配来自本机 root 执行 GNU tar 时保留 Git archive 的 0664/0775 权限，与普通用户 umask 022 下的 0644/0755 不同。无需新镜像、改变源码或 hash。root 本地复现使用：
+### Mesh 与固件版本
+
+`Config/MX4200.txt` 选择 NSS 11.4，并启用 ath11k NSS Mesh。drv / clients 中的固件版本条件分支负责选择配套源码和补丁，不是重复定义；升级时应保持这一组合完整。
+
+### MU-EDCA 配套
+
+动态 MU-EDCA 需要 ath11k / mac80211 发送事件、hostapd 接收并更新 Beacon。除 donor 的 hostapd `900` 补丁外，还需 `patches/hostapd/901-hostapd-muedca-backports-abi.patch` 对齐两端 nl80211 编号。
+
+更新 backports 或 hostapd 后，必须用实际头文件运行 ABI 测试；同名符号或补丁应用成功不代表编号一致。
+
+## 验证
+
+仓库回归测试：
+
+```sh
+python3 -m unittest discover -s Tests -v
+```
+
+真实源码准备并配置后，在生成的构建树执行 `make defconfig`，再运行仓库中的 `Scripts/Verify.py config <构建树>`，检查必选项、禁用项和设备范围。
+
+MU-EDCA 集成测试需提供已应用补丁的源码目录：
+
+```sh
+MUEDCA_HOSTAPD=/path/to/prepared/hostapd \
+MUEDCA_MAC80211=/path/to/prepared/backports \
+python3 -m unittest Tests.test_muedca -v
+```
+
+未提供路径时，该集成测试会明确跳过。测试中的镜像文件仅为夹具；实际发布由 `Scripts/Verify.py images <构建树>` 收集 v1 / v2 各一份非空 factory 与 sysupgrade 镜像。
+
+### 本地 root 下载验证
+
+GNU tar 在 root 下默认保留 Git archive 权限，可能导致重新打包后的摘要与普通构建用户不同。在生成的构建树中验证时使用：
 
 ```sh
 umask 022
-make <target>/prepare -j1 V=s 'TAR=tar --no-same-permissions'
+make package/qca-nss/qca-nss-drv/prepare -j1 V=s 'TAR=tar --no-same-permissions'
 ```
 
-不要覆盖 TAR_OPTIONS。正常 CI 为非 root 构建，不应为本地权限问题无谓改造下载系统。完整证据见 `docs/nss-prepare-verification.md`。
+其他 prepare 目标同理。保留原有 `PKG_MIRROR_HASH` / `PKG_HASH`，不要覆盖 `TAR_OPTIONS` 或跳过摘要校验。正常非 root CI 无需此参数。
 
-## 真实验证结果
-
-验证源码树：`/root/mx4200-nss-investigation/verified-core`。
-
-- Prepare.py、真实 feeds、定制脚本、overlay、make defconfig 已执行；95 项必需配置及仅 MX4200v1/v2 通过。
-- 删除三个核心包下载缓存并 clean 后，重新下载、原 SHA256 验证及补丁 prepare：drv、ECM、clients 均 exit 0。
-- Linux 6.12.103、mac80211 backports 6.18.39、NSS firmware prepare 均 exit 0。
-- 父会话重新执行 `python3 -m unittest discover -s Tests -q`：14 项通过；`git diff --check` 通过。
-- 测试中的四镜像是合同测试 fixture，不是真实固件产物。
-
-日志与结果位于 `/root/mx4200-nss-investigation/`：`verified-cold-results.json`、`verified-cold-*.log`、`verified-mesh-{kernel,mac80211,nss-firmware}.log`、`mode-probe.json`。
-
-## 新会话必须复核
-
-- 尚未完整编译固件或实机验证；prepare 通过不等于完整可发布。
-- 尚有未选中可选依赖警告及补丁 fuzz/offset，逐项判断是否影响选中功能。
-- 核查动态正式版策略与内置 qosmio 包的更新机制，不能把运行时自动发现官方新版本误称为所有 NSS 组件会自动升级。
-- 审查差异策略是否不必要地阻断无关更新、184 个内置包文件是否均必要、缓存键是否能持续保存新缓存。
-- 核查 firmware 11.4、Mesh/AP、三频无线、代理分流及默认卸载配置。实机功能未验证。
-- 全面审阅 workflow 与 README 的准确性，禁止未经授权发布。
+完整构建结果以对应提交的 Actions 日志和 Release 为准。源码准备、单元测试与编译成功均不能替代实机 Mesh、无线和 NSS 加速验证。
