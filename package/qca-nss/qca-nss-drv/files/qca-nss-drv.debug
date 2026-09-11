@@ -37,9 +37,11 @@ function color(c, s) {
 
 }
 
-current=$(sysctl -q -n dev.nss.stats.non_zero_stats)
+current=$(sysctl -q -n dev.nss.stats.non_zero_stats) || exit 1
+case "$current" in 0|1) ;; *) exit 1 ;; esac
+trap 'sysctl -q dev.nss.stats.non_zero_stats="$current"' EXIT
 
-sysctl -q dev.nss.stats.non_zero_stats=1
+sysctl -q dev.nss.stats.non_zero_stats=1 || exit 1
 
 if [ -n "$1" ] && [[ $1 =~ help ]]; then
   avail=$(ls /sys/kernel/debug/qca-nss-drv/stats | grep -Ev "ppe|project")
@@ -85,5 +87,3 @@ else
   color /sys/kernel/debug/qca-nss-drv/stats/cpu_load_ubi
   echo "________________________________________________________________________________"
 fi
-
-sysctl -q dev.nss.stats.non_zero_stats="$current"

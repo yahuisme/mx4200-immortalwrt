@@ -106,8 +106,10 @@ disable_feature() {
   local cmd
   local current_state
 
-  current_state=$(ethtool -k $interface 2>/dev/null | awk -v feature="^$feature:" '$0 ~ feature {print $2}')
-  
+  local query="$feature"
+  [ "$feature" = gro ] && query=generic-receive-offload
+  current_state=$(ethtool -k $interface 2>/dev/null | awk -v feature="^$query:" '$0 ~ feature {print $2}')
+
   # Only disable and log if the feature is currently enabled
   if [ "$current_state" = "on" ]; then
     # Construct ethtool command line

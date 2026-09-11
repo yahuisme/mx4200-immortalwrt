@@ -169,7 +169,7 @@ def prepare(official, donor, output, metadata):
         raise ValueError('Kernel source versions differ; port review required')
     feeds = (official / 'feeds.conf.default').read_text()
     package_source = nss_packages()
-    metadata.update(nss_source='VIKING-style in-tree packages; LiBwrt stable NSS patches; qosmio recipes',
+    metadata.update(nss_source='LiBwrt stable NSS patches; qosmio in-tree recipes',
                     nss_recipe_origin='qosmio/nss-packages@0d970dbf0185e3f53709bd803e8a466598023c57',
                     official_feeds=feeds.splitlines(),
                     transplanted_files=policy['take'], validation='source-prepared; not firmware-build-tested')
@@ -178,8 +178,6 @@ def prepare(official, donor, output, metadata):
     # A failed copy never leaves a ready marker. Caller must discard incomplete output.
     shutil.copytree(official, output, dirs_exist_ok=True, symlinks=True)
     for name in policy['take']:
-        if name not in changes:
-            raise ValueError('Reviewed change missing: ' + name)
         source, dest = donor / name, output / name
         if source.is_file():
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -202,7 +200,6 @@ def prepare(official, donor, output, metadata):
                 package_files[str(path.relative_to(output))] = hashlib.sha256(path.read_bytes()).hexdigest()
     metadata['nss_package_files'] = package_files
     metadata['viking_reference'] = '90448eeb2b8f5d172caedfe6d96ab3bacb058c09'
-    (output / 'feeds.conf.default').write_text(feeds)
     (output / 'source-lock.json').write_text(json.dumps(metadata, indent=2) + '\n')
     print(json.dumps(metadata, indent=2))
 

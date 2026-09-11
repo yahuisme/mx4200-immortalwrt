@@ -104,9 +104,32 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(prepare.nss_packages(), ROOT/'package/qca-nss')
 
     def test_no_external_feed_in_output(self):
-        source = (ROOT/'Scripts/Prepare.py').read_text()
-        self.assertIn("(output / 'feeds.conf.default').write_text(feeds)", source)
-        self.assertIn("output / 'package/qca-nss'", source)
+        # Exercise real copy/transplant logic using tiny git trees.
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            official, donor, output = (root/name for name in ('official', 'donor', 'output'))
+            for tree in (official, donor):
+                (tree/'target/linux/generic').mkdir(parents=True)
+                (tree/'target/linux/generic/kernel-6.12').write_text('same kernel')
+                (tree/'package/network/services/hostapd/patches').mkdir(parents=True)
+                (tree/'Config.in').write_text('config\n')
+                (tree/'feeds.conf.default').write_bytes(b'src-git official https://example.invalid/feed\r\n')
+                subprocess.run(['git', 'init', '-q', str(tree)], check=True)
+                subprocess.run(['git', '-C', str(tree), 'add', '.'], check=True)
+                subprocess.run(['git', '-C', str(tree), '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture'], check=True)
+            policy = dict(take=[], edit_sha256={}, watch_patterns=[])
+            original = json.loads
+            def loads(text, *args, **kwargs):
+                value = original(text, *args, **kwargs)
+                return policy if 'watch_patterns' in value else value
+            with patch.object(prepare.json, 'loads', side_effect=loads), contextlib.redirect_stdout(io.StringIO()):
+                prepare.prepare(official, donor, output, {})
+            self.assertEqual((output/'feeds.conf.default').read_bytes(), (official/'feeds.conf.default').read_bytes())
+            self.assertTrue((output/'package/qca-nss/qca-nss-drv/Makefile').is_file())
+            lock = json.loads((output/'source-lock.json').read_text())
+            self.assertNotIn('VIKING-style', lock['nss_source'])
 
     def test_exact_four_images(self):
         with tempfile.TemporaryDirectory() as d:

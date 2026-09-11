@@ -19,11 +19,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          sudo apt-get -yqq update
-          sudo apt-get -yqq install --no-install-recommends python3-setuptools rsync unzip
-          sudo mkdir -p /mnt/build_wrt /mnt/nss-sources
-          sudo chown "$USER:$USER" /mnt/build_wrt /mnt/nss-sources
-          python3 Scripts/Prepare.py --sources /mnt/nss-sources --output /mnt/build_wrt
+          sudo mkdir -p /mnt/build_wrt
+          sudo chown "$USER:$USER" /mnt/build_wrt
+          python3 Scripts/Inputs.py --probe /mnt/build_wrt/source-lock.json
       - name: Compare source lock
         id: compare
         env:
@@ -49,7 +47,10 @@ jobs:
                   old['official_commit'] = line.rsplit('`', 2)[1]
               elif line.startswith('LiBwrt NSS '):
                   old['donor_commit'] = line.rsplit('`', 2)[1]
-          changed = old.get('official_commit') != current['official_commit'] or old.get('donor_commit') != current['donor_commit']
+              elif line.startswith('Firmware inputs: `') and line.endswith('`'):
+                  old['firmware_inputs_sha256'] = line.rsplit('`', 2)[1]
+          changed = any(old.get(key) != current[key] for key in
+                        ('official_commit', 'donor_commit', 'firmware_inputs_sha256'))
           Path(os.environ['GITHUB_OUTPUT']).write_text(f"changed={'true' if changed else 'false'}\n")
           print(f"official: {old.get('official_commit')} -> {current['official_commit']}")
           print(f"donor: {old.get('donor_commit')} -> {current['donor_commit']}")
@@ -150,6 +151,7 @@ jobs:
               'factory 用于原厂刷入；sysupgrade 用于已有兼容固件升级。请先检查设备与镜像，禁止强刷。\n\n'
               f'官方 ImmortalWrt {d["official_tag"]}: `{d["official_commit"]}`\n\n'
               f'LiBwrt NSS {d["donor_tag"]}: `{d["donor_commit"]}`\n\n'
+              f'Firmware inputs: `{d["firmware_inputs_sha256"]}`\n\n'
               f'NSS source: `LiBwrt stable NSS patches; qosmio recipes`\n\n'
               '采用第三方 NSS/ECM 与 ath11k 加速补丁，并非官方原版固件。\n')
           PY

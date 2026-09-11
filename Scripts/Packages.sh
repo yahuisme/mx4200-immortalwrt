@@ -30,11 +30,17 @@ done
 for name in luci-app-homeproxy sing-box; do
     cp -a "$stage/packages/$name" "./$name"
 done
-python3 - "$stage/packages" <<'PY'
+python3 - "$stage/packages" "$(dirname "$(readlink -f "$0")")" <<'PY'
 import json, pathlib, subprocess, sys
+sys.path.insert(0, sys.argv[2])
+from Inputs import record
 lock = pathlib.Path('../source-lock.json')
 data = json.loads(lock.read_text())
 data['custom_packages'] = {name: subprocess.check_output(['git', '-C', path, 'rev-parse', 'HEAD'], text=True).strip()
                            for name, path in [('aurora', 'luci-theme-aurora'), ('aurora-config', 'luci-app-aurora-config'), ('yahuisme/packages', sys.argv[1])]}
+# Record what was actually cloned, not an earlier scheduled probe.
+record(data, {'aurora': pathlib.Path('luci-theme-aurora'),
+              'aurora-config': pathlib.Path('luci-app-aurora-config'),
+              'yahuisme/packages': pathlib.Path(sys.argv[1])})
 lock.write_text(json.dumps(data, indent=2) + '\n')
 PY

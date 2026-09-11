@@ -186,6 +186,8 @@ class PackagesTests(unittest.TestCase):
                 self.assertEqual((other_link / "Makefile").read_text(), "keep me\n")
                 lock = json.loads((root / "source-lock.json").read_text())
                 self.assertEqual(lock["official"], "preserved")
+                self.assertEqual(len(lock["firmware_inputs_sha256"]), 64)
+                self.assertEqual(set(lock["custom_package_sha256"]), {"aurora", "aurora-config", "yahuisme/packages"})
                 self.assertEqual(lock["custom_packages"], dict(zip(
                     ("aurora", "aurora-config", "yahuisme/packages"), commits)))
 
