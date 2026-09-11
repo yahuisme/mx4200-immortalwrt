@@ -41,7 +41,7 @@ jobs:
           path: |
             /mnt/build_wrt/dl
             /mnt/build_wrt/.ccache
-          key: mx4200-build-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Config/*.txt', 'Config/nss-policy.json', 'Scripts/*.py', 'Scripts/*.sh', 'files/**', 'package/qca-nss/**') }}
+          key: mx4200-build-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ hashFiles('Config/*.txt', 'Config/nss-policy.json', 'Scripts/*.py', 'Scripts/*.sh', 'files/**', 'package/qca-nss/**') }}
           restore-keys: mx4200-build-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Feeds and custom packages
@@ -88,6 +88,7 @@ jobs:
           path: /mnt/build_wrt/source-lock.json
           if-no-files-found: error
       - name: Release firmware
+        if: github.ref == 'refs/heads/main'
         run: |
           python3 - <<'PY'
           import json
@@ -103,7 +104,7 @@ jobs:
               '采用第三方 NSS/ECM 与 ath11k 加速补丁，并非官方原版固件。\n')
           PY
           gh release create "$WRT_RELEASE_NAME" /mnt/build_wrt/upload/*.bin \
-            --title "$WRT_RELEASE_NAME" --notes-file /mnt/release-notes.md
+            --target "$GITHUB_SHA" --title "$WRT_RELEASE_NAME" --notes-file /mnt/release-notes.md
           gh release list --json tagName --jq '.[].tagName' |
             grep '^MX4200_' | grep -Fxv "$WRT_RELEASE_NAME" |
             xargs -r -n1 gh release delete --cleanup-tag -y || true
