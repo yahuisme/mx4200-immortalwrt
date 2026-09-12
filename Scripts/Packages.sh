@@ -12,7 +12,7 @@ theme_pid=$!
 git clone --depth=1 https://github.com/eamonxg/luci-app-aurora-config.git "$stage/luci-app-aurora-config" &
 config_pid=$!
 git clone --depth=1 --single-branch --branch main \
-	https://github.com/VIKINGYFY/packages.git "$stage/packages" &
+	https://github.com/yahuisme/packages.git "$stage/packages" &
 packages_pid=$!
 failed=0
 for pid in "$theme_pid" "$config_pid" "$packages_pid"; do

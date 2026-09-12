@@ -1,6 +1,6 @@
 # 构建维护
 
-基于 VIKINGYFY/immortalwrt `main`；HomeProxy、sing-box 跟随 VIKING 包源，Aurora 跟随其上游。包替换阶段输出实际提交。保留定制版本显示、MX4200v1/v2、Mesh/AP 和 USB 存储功能。
+基于 VIKINGYFY/immortalwrt `main`；HomeProxy、sing-box 使用 yahuisme/packages 包源，sing-box 仅跟随官方正式版，Aurora 跟随其上游。包替换阶段输出实际提交。保留定制版本显示、MX4200v1/v2、Mesh/AP 和 USB 存储功能。
 
 ## 缓存
 
