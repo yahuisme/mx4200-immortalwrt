@@ -93,6 +93,10 @@ jobs:
           key: mx4200-build-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: mx4200-build-${{ runner.os }}-${{ runner.arch }}-
 
+      - name: Fingerprint restored downloads
+        id: downloads-before
+        run: python3 Scripts/Downloads.py /mnt/build_wrt/dl
+
       - name: Restore ccache
         id: ccache
         uses: actions/cache/restore@main
@@ -108,12 +112,24 @@ jobs:
           ./scripts/feeds install -a
           cd package
           bash "$GITHUB_WORKSPACE/Scripts/Packages.sh"
+      # Use the feed's exact bootstrap release; still build final host Go natively.
+      - name: Identify Go bootstrap
+        id: go-bootstrap
+        run: python3 Scripts/GoBootstrap.py /mnt/build_wrt
+      - name: Install Go bootstrap
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ steps.go-bootstrap.outputs.version }}
+          check-latest: false
+          cache: false
       - name: Configure firmware
         run: |
           cd /mnt/build_wrt
           cp "$GITHUB_WORKSPACE/Config/MX4200.txt" .config
           cp -a "$GITHUB_WORKSPACE/files" .
           bash "$GITHUB_WORKSPACE/Scripts/Settings.sh"
+          echo '# CONFIG_GOLANG_BUILD_BOOTSTRAP is not set' >> .config
+          printf 'CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT="%s"\n' "$(go env GOROOT)" >> .config
           make defconfig
           python3 "$GITHUB_WORKSPACE/Scripts/Verify.py" config .
       - name: Identify toolchain cache
@@ -163,8 +179,12 @@ jobs:
             /mnt/build_wrt/build_dir/host
             /mnt/build_wrt/build_dir/toolchain-*
           key: ${{ steps.toolchain.outputs.cache-primary-key }}
+      # Snapshot after compile too: Go may populate dl/go-mod-cache during build.
+      - name: Fingerprint final downloads
+        id: downloads-after
+        run: python3 Scripts/Downloads.py /mnt/build_wrt/dl
       - name: Save cache
-        if: success()
+        if: success() && steps.downloads-after.outputs.files != '0' && (steps.downloads.outputs.cache-matched-key == '' || steps.downloads-before.outputs.digest != steps.downloads-after.outputs.digest)
         uses: actions/cache/save@main
         with:
           path: /mnt/build_wrt/dl
