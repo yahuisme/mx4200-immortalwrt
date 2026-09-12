@@ -121,14 +121,14 @@ if [[ "$*" == *tools/ccache/compile* ]]; then
 fi
 [ "$FAILURE" != final ] || exit 9
 if [ "$FAILURE" = parallel ] && [[ "$*" != *V=s* ]]; then exit 8; fi
-staging_dir/host/bin/ccache -s
+exit 0
 ''')
                 make.chmod(0o755)
                 result = self.run_block('Compile firmware', root, {
                     'PATH': str(bindir) + ':' + os.environ['PATH'], 'LOG': str(root / 'log'),
                     'FAILURE': failure, 'COUNTER': str(counter)})
                 log = (root / 'log').read_text()
-                self.assertEqual(result.returncode == 0, failure in ('', 'parallel'), log + result.stderr)
+                self.assertEqual(result.returncode == 0, failure in ('', 'parallel', 'stats'), log + result.stderr)
                 if failure == 'bootstrap':
                     self.assertNotIn('ccache -z', log)
                 else:

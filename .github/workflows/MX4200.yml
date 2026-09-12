@@ -132,8 +132,8 @@ jobs:
             make -j"$(nproc)" tools/ccache/compile
           fi
           staging_dir/host/bin/ccache -z
-          # OpenWrt prints successful build statistics; cover failures here.
-          trap 'status=$?; if [ "$status" -ne 0 ]; then staging_dir/host/bin/ccache -s || true; fi; exit "$status"' EXIT
+          # Always report this build's statistics without masking its exit status.
+          trap 'status=$?; staging_dir/host/bin/ccache -s || true; exit "$status"' EXIT
           make -j"$(nproc)" || make -j1 V=s
 
       - name: Collect and verify firmware images
