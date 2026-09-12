@@ -12,7 +12,7 @@
 
 - 🎨 LuCI 默认主题：Aurora
 - 🕐 系统时区：香港（UTC+8）
-- 🚀 BBR 拥塞控制默认启用（fq + bbr）
+- 🚀 BBR 拥塞控制
 - ⚡ 开源 NSS 硬件加速
 - 🔗 内置 HomeProxy 与 sing-box
 - 📡 三频 Wi-Fi 默认开启 2.4G 与 5.8 GHz

@@ -2,26 +2,40 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
 
-# 拉取 Aurora 主题与配置插件
-rm -rf ./luci-theme-aurora ./luci-app-aurora-config
-git clone --depth=1 "https://github.com/eamonxg/luci-theme-aurora.git" ./luci-theme-aurora
-git clone --depth=1 "https://github.com/eamonxg/luci-app-aurora-config.git" ./luci-app-aurora-config
+set -euo pipefail
 
-# 从 VIKINGYFY/packages 拉取定制版 HomeProxy 与 sing-box
-rm -rf ./luci-app-homeproxy ./sing-box /tmp/VIKINGYFY-packages
-find ../feeds/luci/ ../feeds/packages/ -maxdepth 3 -type d \
-	\( -iname '*luci-app-homeproxy*' -o -iname '*sing-box*' \) -exec rm -rf {} + 2>/dev/null
+stage=$(mktemp -d)
+trap 'rm -rf "$stage"' EXIT
 
-if git clone --depth=1 --single-branch --branch main \
-	https://github.com/VIKINGYFY/packages.git /tmp/VIKINGYFY-packages; then
-	for package_name in luci-app-homeproxy sing-box; do
-		if [ -d "/tmp/VIKINGYFY-packages/$package_name" ]; then
-			cp -a "/tmp/VIKINGYFY-packages/$package_name" "./$package_name"
-		fi
-	done
-	rm -rf /tmp/VIKINGYFY-packages
-	echo "HomeProxy and sing-box installed from VIKINGYFY/packages."
-else
-	echo "ERROR: Failed to download VIKINGYFY/packages!" >&2
-	exit 1
-fi
+git clone --depth=1 https://github.com/eamonxg/luci-theme-aurora.git "$stage/luci-theme-aurora" &
+theme_pid=$!
+git clone --depth=1 https://github.com/eamonxg/luci-app-aurora-config.git "$stage/luci-app-aurora-config" &
+config_pid=$!
+git clone --depth=1 --single-branch --branch main \
+	https://github.com/VIKINGYFY/packages.git "$stage/packages" &
+packages_pid=$!
+failed=0
+for pid in "$theme_pid" "$config_pid" "$packages_pid"; do
+	wait "$pid" || failed=1
+done
+[ "$failed" -eq 0 ] || { echo "ERROR: package download failed" >&2; exit 1; }
+
+for name in luci-theme-aurora luci-app-aurora-config luci-app-homeproxy sing-box; do
+	source="$stage/$name"
+	case "$name" in
+		luci-app-homeproxy|sing-box) source="$stage/packages/$name" ;;
+	esac
+	test -s "$source/Makefile" || { echo "ERROR: missing $name/Makefile" >&2; exit 1; }
+done
+
+for name in luci-theme-aurora luci-app-aurora-config luci-app-homeproxy sing-box; do
+	source="$stage/$name"
+	case "$name" in
+		luci-app-homeproxy|sing-box) source="$stage/packages/$name" ;;
+	esac
+	# Remove live and dangling feed links as well as in-tree recipes.
+	find . ../feeds/luci ../feeds/packages -name "$name" \( -type d -o -type l \) -prune -exec rm -rf -- {} +
+	cp -a "$source" "./$name"
+done
+
+echo "Aurora, HomeProxy and sing-box installed."

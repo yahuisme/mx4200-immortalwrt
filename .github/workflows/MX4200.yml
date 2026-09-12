@@ -30,7 +30,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@main
 
-      - name: Initialization Environment
+      - name: Environment
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
@@ -42,7 +42,7 @@ jobs:
           sudo mkdir -p /mnt/build_wrt
           sudo chown "$USER:$USER" /mnt/build_wrt
 
-      - name: Clone Code
+      - name: Source
         run: |
           WRT_DATE="$(TZ=Asia/Hong_Kong date +'%y.%m.%d-%H.%M.%S')"
           git clone --single-branch --branch "$WRT_BRANCH" "$WRT_REPO" /mnt/build_wrt/
@@ -53,14 +53,14 @@ jobs:
           echo "WRT_RELEASE_NAME=MX4200_ImmortalWrt_${WRT_DATE}_r${WRT_REV}" >> "$GITHUB_ENV"
           echo "WRT_CACHE_PREFIX=wrt-immortalwrt-main-qualcommax-ipq807x" >> "$GITHUB_ENV"
           echo "WRT_HASH=$WRT_HASH" >> "$GITHUB_ENV"
-          echo "WRT_CACHE_KEY=wrt-immortalwrt-main-qualcommax-ipq807x-$WRT_HASH" >> "$GITHUB_ENV"
+          echo "WRT_CACHE_KEY=wrt-immortalwrt-main-qualcommax-ipq807x-${WRT_HASH}-${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
 
           PROJECT_MIRRORS_FILE="./scripts/projectsmirrors.json"
           if [ -f "$PROJECT_MIRRORS_FILE" ]; then
             sed -i '/.cn\//d; /tencent/d; /aliyun/d' "$PROJECT_MIRRORS_FILE"
           fi
 
-      - name: Restore Build Cache
+      - name: Restore cache
         id: cache-restore
         uses: actions/cache/restore@main
         with:
@@ -73,54 +73,51 @@ jobs:
             /mnt/build_wrt/staging_dir/host*
             /mnt/build_wrt/staging_dir/tool*
 
-      - name: Prepare Restored Build Cache
+      - name: Cache setup
         if: steps.cache-restore.outputs.cache-matched-key != ''
         run: |
-          find "/mnt/build_wrt/staging_dir" -type d -name "stamp" -not -path "*target*" | while read -r DIR; do
-            find "$DIR" -type f -exec touch {} +
-          done
           mkdir -p /mnt/build_wrt/tmp
           echo "1" > /mnt/build_wrt/tmp/.build
           echo "restored build cache: ${{ steps.cache-restore.outputs.cache-matched-key }}"
 
-      - name: Update Feeds
+      - name: Feeds
         run: |
           cd /mnt/build_wrt/
           ./scripts/feeds update -a >/dev/null || { echo "::error::feeds update failed"; exit 1; }
           ./scripts/feeds install -a >/dev/null || { echo "::error::feeds install failed"; exit 1; }
 
-      - name: Custom Packages
+      - name: Packages
         run: |
           cd /mnt/build_wrt/package/
           bash "$GITHUB_WORKSPACE/Scripts/Packages.sh"
-          bash "$GITHUB_WORKSPACE/Scripts/Handles.sh"
 
-      - name: Custom Settings
+      - name: Configure
         run: |
           cd /mnt/build_wrt/
-          cat "$GITHUB_WORKSPACE/Config/MX4200.txt" "$GITHUB_WORKSPACE/Config/GENERAL.txt" >> .config
+          cat "$GITHUB_WORKSPACE/Config/MX4200.txt" >> .config
           echo 'CONFIG_CCACHE_DIR="/mnt/build_wrt/.ccache"' >> .config
           cp -rf "$GITHUB_WORKSPACE/files" ./
           bash "$GITHUB_WORKSPACE/Scripts/Settings.sh"
           make defconfig -j"$(nproc)"
 
-      - name: Download Packages
+      - name: Download
         run: |
           cd /mnt/build_wrt/
           make download -j"$(nproc)"
 
-      - name: Compile Firmware
+      - name: Build
         run: |
           cd /mnt/build_wrt/
           export CCACHE_DIR="/mnt/build_wrt/.ccache"
-          export CCACHE_MAXSIZE="15G"
+          export CCACHE_MAXSIZE="8G"
           export CCACHE_SLOPPINESS=file_stat_matches,include_file_mtime,time_macros
           export CCACHE_NOHASHDIR=true
           export CCACHE_COMPILERCHECK=content
           make -j"$(nproc)" || make -j1 V=s
           staging_dir/host/bin/ccache -s || ccache -s || true
 
-      - name: Save Build Cache
+      - name: Save cache
+        id: cache-save
         if: success() && steps.cache-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@main
         continue-on-error: true
@@ -132,18 +129,28 @@ jobs:
             /mnt/build_wrt/staging_dir/host*
             /mnt/build_wrt/staging_dir/tool*
 
-      - name: Package Firmware
+      - name: Images
         run: |
           cd /mnt/build_wrt/
           mkdir ./upload/
           find ./bin/targets/ -type f \( -iname '*factory*.bin' -o -iname '*sysupgrade*.bin' \) -exec mv -f {} ./upload/ \;
           IMAGE_COUNT="$(find ./upload/ -maxdepth 1 -type f -name '*.bin' | wc -l)"
-          if [ "$IMAGE_COUNT" -lt 4 ]; then
-            echo "::error::expected at least 4 firmware images (v1+v2 × factory+sysupgrade), found $IMAGE_COUNT"
+          if [ "$IMAGE_COUNT" -ne 4 ]; then
+            echo "::error::expected exactly 4 firmware images (v1+v2 × factory+sysupgrade), found $IMAGE_COUNT"
             exit 1
           fi
+          shopt -s nullglob
+          for device in mx4200v1 mx4200v2; do
+            for kind in factory sysupgrade; do
+              images=(./upload/*linksys_${device}-*${kind}.bin)
+              if [ "${#images[@]}" -ne 1 ] || [ ! -s "${images[0]}" ]; then
+                echo "::error::missing, duplicate or empty $device $kind image"
+                exit 1
+              fi
+            done
+          done
 
-      - name: Release Firmware
+      - name: Release
         env:
           RELEASE_NOTES: |
             ## Linksys MX4200 系列 ImmortalWrt 固件
@@ -157,16 +164,21 @@ jobs:
             基于开源 NSS 加速栈构建。
         run: |
           gh release create "$WRT_RELEASE_NAME" /mnt/build_wrt/upload/*.bin \
-            --title "$WRT_RELEASE_NAME" --notes "$RELEASE_NOTES"
+            --target "$GITHUB_SHA" --title "$WRT_RELEASE_NAME" --notes "$RELEASE_NOTES"
           gh release list --json tagName --jq '.[].tagName' |
             grep '^MX4200_' |
             grep -Fxv "$WRT_RELEASE_NAME" |
             xargs -r -n1 gh release delete --cleanup-tag -y || true
 
-      - name: Roll Build Cache
-        if: success()
+      - name: Prune cache
+        if: success() && (steps.cache-save.outcome == 'success' || steps.cache-restore.outputs.cache-hit == 'true')
         run: |
-          gh cache list --key "$WRT_CACHE_PREFIX-" --limit 100 --json id,key --jq '.[] | [.id, .key] | @tsv' |
+          # The save action may only warn when an upload fails. Read back the
+          # exact main-branch entry before deleting any previous cache.
+          SAVED_ID=$(gh cache list --ref refs/heads/main --key "$WRT_CACHE_KEY" --limit 100 --json id,key \
+            --jq ".[] | select(.key == \"$WRT_CACHE_KEY\") | .id")
+          [ -n "$SAVED_ID" ] || { echo "New cache unavailable; retaining previous caches"; exit 0; }
+          gh cache list --ref refs/heads/main --key "$WRT_CACHE_PREFIX-" --limit 100 --json id,key --jq '.[] | [.id, .key] | @tsv' |
             while IFS=$'\t' read -r CACHE_ID CACHE_KEY; do
               [ -n "$CACHE_ID" ] || continue
               [ "$CACHE_KEY" = "$WRT_CACHE_KEY" ] && continue

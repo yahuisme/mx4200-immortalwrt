@@ -4,6 +4,16 @@
 
 set -e
 
+# Aurora defaults are applied only after the required package is installed.
+shopt -s nullglob
+AURORA_TEMPLATES=(./package/luci-app-aurora-config/root/usr/share/aurora/*.template)
+if [ "${#AURORA_TEMPLATES[@]}" -eq 0 ]; then
+	echo "ERROR: Aurora templates not found" >&2
+	exit 1
+fi
+sed -i "s/nav_type '.*'/nav_type 'sidebar'/g; s/struct_radius_base '.*'/struct_radius_base '0.125rem'/g" "${AURORA_TEMPLATES[@]}"
+shopt -u nullglob
+
 COLLECTION_MAKEFILES=$(find ./feeds/luci/collections/ -type f -name "Makefile" 2>/dev/null)
 if [ -n "$COLLECTION_MAKEFILES" ]; then
 	echo "$COLLECTION_MAKEFILES" | while IFS= read -r mkfile; do
