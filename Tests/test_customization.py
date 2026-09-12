@@ -35,6 +35,8 @@ class SettingsTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
+        from Tests.test_menu_order import install_menu_fixture
+        install_menu_fixture(self.root)
         self.files = {
             "feeds/luci/collections/luci/Makefile": "DEPENDS:=+luci-theme-bootstrap\n +luci-app-attendedsysupgrade\n",
             "feeds/luci/modules/luci-mod-system/htdocs/flash.js": "const ip = '192.168.1.1';\n",

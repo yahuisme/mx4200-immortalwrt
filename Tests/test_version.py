@@ -22,6 +22,8 @@ class VersionTest(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            from Tests.test_menu_order import install_menu_fixture
+            install_menu_fixture(root)
             for name, content in files.items():
                 path = root / name
                 path.parent.mkdir(parents=True, exist_ok=True)

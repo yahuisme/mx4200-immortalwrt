@@ -34,11 +34,17 @@ class ContractTests(unittest.TestCase):
                         with self.assertRaisesRegex(ValueError, 'forbidden'):
                             verify.check_config(tree)
 
-    def test_cache_rotates_and_keeps_restore_prefix(self):
+    def test_cache_rotates_and_selects_exact_freshest_restore(self):
+        import yaml
         workflow = (ROOT / '.github/workflows/MX4200.yml').read_text()
         self.assertIn('${{ github.run_id }}-${{ github.run_attempt }}', workflow)
-        self.assertIn('restore-keys: mx4200-build-${{ runner.os }}-${{ runner.arch }}-', workflow)
-        self.assertIn('key: ${{ steps.downloads.outputs.cache-primary-key }}', workflow)
+        steps = {s.get('id'): s for s in yaml.safe_load(workflow)['jobs']['build']['steps']}
+        self.assertIn('Scripts/CacheSelection.py', steps['cache-selection']['run'])
+        for tier, prefix in [('downloads', 'mx4200-build-'), ('ccache', 'mx4200-ccache-')]:
+            self.assertNotIn('restore-keys', steps[tier]['with'])
+            self.assertIn('steps.cache-selection.outputs.' + tier + '-key', steps[tier]['with']['key'])
+            self.assertTrue(steps['save-' + tier]['with']['key'].startswith(prefix))
+            self.assertIn('${{ github.run_id }}-${{ github.run_attempt }}', steps['save-' + tier]['with']['key'])
 
 
 if __name__ == '__main__':

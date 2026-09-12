@@ -93,29 +93,96 @@ jobs:
           VERSION=$(python3 -c 'import json; print(json.load(open("/mnt/build_wrt/source-lock.json"))["official_tag"])')
           REVISION=$(python3 -c 'import pathlib,re; v=pathlib.Path("/mnt/build_wrt/version").read_text().strip(); m=re.fullmatch(r"(r[0-9]+)-[0-9a-f]+", v); assert m, "Invalid official revision: " + v; print(m[1])')
           echo "WRT_RELEASE_NAME=MX4200_ImmortalWrt_${VERSION}_${REVISION}_$(TZ=Asia/Hong_Kong date +'%y.%m.%d-%H.%M.%S')" >> "$GITHUB_ENV"
-      - name: Restore cache
+      - name: Select freshest caches
+        id: cache-selection
+        env:
+          CACHE_PLATFORM: ${{ runner.os }}-${{ runner.arch }}
+        run: python3 Scripts/CacheSelection.py
+      - name: Restore downloads
         id: downloads
+        uses: actions/cache/restore@main
+        with:
+          path: /mnt/build_wrt/dl
+          key: ${{ steps.cache-selection.outputs.downloads-key || format('mx4200-build-{0}-{1}-{2}-{3}', runner.os, runner.arch, github.run_id, github.run_attempt) }}
+
+      - name: Restore ccache
+        id: ccache
+        uses: actions/cache/restore@main
+        with:
+          path: /mnt/build_wrt/.ccache
+          key: ${{ steps.cache-selection.outputs.ccache-key || format('mx4200-ccache-{0}-{1}-{2}-{3}', runner.os, runner.arch, github.run_id, github.run_attempt) }}
+
+      # Cache version includes the exact path list. Keep the old combined layout
+      # for migration only; move current hits aside so legacy cannot overwrite them.
+      - name: Protect caches
+        id: protect-current
+        if: steps.cache-selection.outputs.restore-legacy == 'true'
+        env:
+          DOWNLOADS_MATCHED: ${{ steps.cache-selection.outputs.legacy-downloads != 'true' && steps.downloads.outputs.cache-matched-key || '' }}
+          CCACHE_MATCHED: ${{ steps.cache-selection.outputs.legacy-ccache != 'true' && steps.ccache.outputs.cache-matched-key || '' }}
+        run: |
+          cd /mnt/build_wrt
+          mkdir .current-cache
+          if [ -d dl ]; then mv dl .current-cache/dl; fi
+          if [ -d .ccache ]; then mv .ccache .current-cache/.ccache; fi
+          if [ -n "$DOWNLOADS_MATCHED" ]; then touch .current-cache/keep-dl; fi
+          if [ -n "$CCACHE_MATCHED" ]; then touch .current-cache/keep-.ccache; fi
+      - name: Restore legacy
+        id: legacy
+        if: steps.cache-selection.outputs.restore-legacy == 'true'
         uses: actions/cache/restore@main
         with:
           path: |
             /mnt/build_wrt/dl
             /mnt/build_wrt/.ccache
-          key: mx4200-build-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: mx4200-build-${{ runner.os }}-${{ runner.arch }}-
+          key: ${{ steps.cache-selection.outputs.legacy-key }}
+      - name: Recover caches
+        if: always() && steps.protect-current.outcome == 'success'
+        env:
+          LEGACY_MATCHED: ${{ steps.legacy.outputs.cache-matched-key }}
+          LEGACY_OUTCOME: ${{ steps.legacy.outcome }}
+        run: |
+          cd /mnt/build_wrt
+          for name in dl .ccache; do
+            if [ -d ".current-cache/$name" ]; then
+              if [ -f ".current-cache/keep-$name" ] || [ -z "$LEGACY_MATCHED" ] || [ "$LEGACY_OUTCOME" != success ]; then
+                rm -rf -- "$name"
+                mv ".current-cache/$name" "$name"
+              else
+                rm -rf -- ".current-cache/$name"
+              fi
+            fi
+            rm -f -- ".current-cache/keep-$name"
+          done
+          rmdir .current-cache
+      - name: Snapshot downloads
+        id: downloads-before
+        run: python3 Scripts/Downloads.py /mnt/build_wrt/dl
 
+      # Use the exact feed bootstrap; final host Go still builds from source.
       - name: Prepare packages
+        id: go-bootstrap
         run: |
           cd /mnt/build_wrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a
           cd package
           bash "$GITHUB_WORKSPACE/Scripts/Packages.sh"
+          python3 "$GITHUB_WORKSPACE/Scripts/GoBootstrap.py" /mnt/build_wrt
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ steps.go-bootstrap.outputs.version }}
+          check-latest: false
+          cache: false
       - name: Configure firmware
         run: |
           cd /mnt/build_wrt
           cp "$GITHUB_WORKSPACE/Config/MX4200.txt" .config
           cp -a "$GITHUB_WORKSPACE/files" .
           bash "$GITHUB_WORKSPACE/Scripts/Settings.sh"
+          echo '# CONFIG_GOLANG_BUILD_BOOTSTRAP is not set' >> .config
+          printf 'CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT="%s"\n' "$(go env GOROOT)" >> .config
           make defconfig
           python3 "$GITHUB_WORKSPACE/Scripts/Verify.py" config .
       - name: Identify toolchain cache
@@ -131,6 +198,20 @@ jobs:
             /mnt/build_wrt/build_dir/host
             /mnt/build_wrt/build_dir/toolchain-*
           key: mx4200-toolchain-v1-${{ steps.toolchain-key.outputs.key }}
+      - name: Hostpkg key
+        id: hostpkg-key
+        env:
+          TOOLCHAIN_KEY: ${{ steps.toolchain-key.outputs.key }}
+        run: python3 Scripts/HostpkgCache.py key /mnt/build_wrt "$TOOLCHAIN_KEY"
+      - name: Restore hostpkg
+        id: hostpkg
+        uses: actions/cache/restore@main
+        with:
+          path: /mnt/build_wrt/hostpkg.tar.zst
+          key: mx4200-hostpkg-v1-${{ steps.hostpkg-key.outputs.key }}
+      - name: Unpack hostpkg
+        if: steps.hostpkg.outputs.cache-hit == 'true'
+        run: python3 Scripts/HostpkgCache.py unpack /mnt/build_wrt /mnt/build_wrt/hostpkg.tar.zst
       - name: Download packages
         run: make -C /mnt/build_wrt download -j"$(nproc)"
       - name: Compile firmware
@@ -141,21 +222,38 @@ jobs:
           export CCACHE_SLOPPINESS=file_stat_matches,include_file_mtime,time_macros
           export CCACHE_NOHASHDIR=true
           export CCACHE_COMPILERCHECK=content
-          if [ -x staging_dir/host/bin/ccache ]; then
-            staging_dir/host/bin/ccache --zero-stats
+          if [ ! -x staging_dir/host/bin/ccache ]; then
+            make tools/ccache/compile -j"$(nproc)" V=s
           fi
-          make -j"$(nproc)" || make -j1 V=s
+          staging_dir/host/bin/ccache --zero-stats
+          make -j"$(nproc)" V=s || make -j1 V=s
       - name: Cache statistics
         if: always()
         run: |
           cd /mnt/build_wrt
           if [ -x staging_dir/host/bin/ccache ]; then
             CCACHE_DIR=/mnt/build_wrt/.ccache CCACHE_MAXSIZE=2G staging_dir/host/bin/ccache --cleanup
-            CCACHE_DIR=/mnt/build_wrt/.ccache staging_dir/host/bin/ccache --show-stats
+            CCACHE_DIR=/mnt/build_wrt/.ccache CCACHE_MAXSIZE=2G staging_dir/host/bin/ccache --show-stats
           fi
           du -sh dl .ccache staging_dir/host* staging_dir/toolchain* build_dir/host* build_dir/toolchain* 2>/dev/null || true
+      # Sequential, read-only admission: denied candidates do not block smaller tiers.
+      # An attempted upload must be read back before any later save; no deletion.
+      # Cache failures are best-effort and must not prevent firmware publication.
+      - name: Admit toolchain cache
+        id: toolchain-admission
+        if: success() && env.CACHE_SAVES_BLOCKED != 'true' && steps.toolchain.outputs.cache-hit != 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CACHE_KEY: ${{ steps.toolchain.outputs.cache-primary-key }}
+        run: |
+          measurement=$(python3 Scripts/CacheAdmission.py measure tools /mnt/build_wrt)
+          bytes=$(printf '%s' "$measurement" | python3 -c 'import json, sys; print(json.load(sys.stdin)["candidate_bytes"])')
+          python3 Scripts/CacheAdmission.py admit --repo "$GITHUB_REPOSITORY" --key "$CACHE_KEY" --ref "$GITHUB_REF" --bytes "$bytes"
       - name: Save toolchain cache
-        if: success() && steps.toolchain.outputs.cache-hit != 'true'
+        id: save-toolchain
+        if: success() && env.CACHE_SAVES_BLOCKED != 'true' && steps.toolchain-admission.outcome == 'success' && steps.toolchain-admission.outputs.allowed == 'true'
+        continue-on-error: true
         uses: actions/cache/save@main
         with:
           path: |
@@ -164,14 +262,120 @@ jobs:
             /mnt/build_wrt/build_dir/host
             /mnt/build_wrt/build_dir/toolchain-*
           key: ${{ steps.toolchain.outputs.cache-primary-key }}
-      - name: Save cache
-        if: success()
+      - name: Verify toolchain cache save
+        id: verify-toolchain
+        if: success() && (steps.save-toolchain.outcome == 'success' || steps.save-toolchain.outcome == 'failure')
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CACHE_KEY: ${{ steps.toolchain.outputs.cache-primary-key }}
+        run: |
+          echo 'CACHE_SAVES_BLOCKED=true' >> "$GITHUB_ENV"
+          python3 Scripts/CacheAdmission.py verify --repo "$GITHUB_REPOSITORY" --key "$CACHE_KEY" --ref "$GITHUB_REF" > "$RUNNER_TEMP/cache-verify.json"
+          if python3 -c 'import json, sys; sys.exit(json.load(open(sys.argv[1]))["verified"] is not True)' "$RUNNER_TEMP/cache-verify.json"; then
+            echo 'CACHE_SAVES_BLOCKED=false' >> "$GITHUB_ENV"
+          fi
+      # Snapshot after compile too: Go may populate dl/go-mod-cache during build.
+      - name: Check downloads
+        id: downloads-after
+        run: python3 Scripts/Downloads.py /mnt/build_wrt/dl
+      - name: Admit downloads
+        id: downloads-admission
+        if: success() && env.CACHE_SAVES_BLOCKED != 'true' && steps.downloads-after.outputs.files != '0' && (steps.downloads.outputs.cache-matched-key == '' || steps.cache-selection.outputs.legacy-downloads == 'true' || steps.downloads-before.outputs.digest != steps.downloads-after.outputs.digest)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CACHE_KEY: mx4200-build-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          measurement=$(python3 Scripts/CacheAdmission.py measure dl /mnt/build_wrt)
+          bytes=$(printf '%s' "$measurement" | python3 -c 'import json, sys; print(json.load(sys.stdin)["candidate_bytes"])')
+          python3 Scripts/CacheAdmission.py admit --repo "$GITHUB_REPOSITORY" --key "$CACHE_KEY" --ref "$GITHUB_REF" --bytes "$bytes"
+      - name: Save downloads
+        id: save-downloads
+        if: success() && env.CACHE_SAVES_BLOCKED != 'true' && steps.downloads-admission.outcome == 'success' && steps.downloads-admission.outputs.allowed == 'true'
+        continue-on-error: true
         uses: actions/cache/save@main
         with:
-          path: |
-            /mnt/build_wrt/dl
-            /mnt/build_wrt/.ccache
-          key: ${{ steps.downloads.outputs.cache-primary-key }}
+          path: /mnt/build_wrt/dl
+          key: mx4200-build-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Verify downloads save
+        id: verify-downloads
+        if: success() && (steps.save-downloads.outcome == 'success' || steps.save-downloads.outcome == 'failure')
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CACHE_KEY: mx4200-build-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          echo 'CACHE_SAVES_BLOCKED=true' >> "$GITHUB_ENV"
+          python3 Scripts/CacheAdmission.py verify --repo "$GITHUB_REPOSITORY" --key "$CACHE_KEY" --ref "$GITHUB_REF" > "$RUNNER_TEMP/cache-verify.json"
+          if python3 -c 'import json, sys; sys.exit(json.load(open(sys.argv[1]))["verified"] is not True)' "$RUNNER_TEMP/cache-verify.json"; then
+            echo 'CACHE_SAVES_BLOCKED=false' >> "$GITHUB_ENV"
+          fi
+      - name: Admit ccache
+        id: ccache-admission
+        if: success() && env.CACHE_SAVES_BLOCKED != 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CACHE_KEY: mx4200-ccache-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          measurement=$(python3 Scripts/CacheAdmission.py measure ccache /mnt/build_wrt)
+          bytes=$(printf '%s' "$measurement" | python3 -c 'import json, sys; print(json.load(sys.stdin)["candidate_bytes"])')
+          python3 Scripts/CacheAdmission.py admit --repo "$GITHUB_REPOSITORY" --key "$CACHE_KEY" --ref "$GITHUB_REF" --bytes "$bytes"
+      - name: Save ccache
+        id: save-ccache
+        if: success() && env.CACHE_SAVES_BLOCKED != 'true' && steps.ccache-admission.outcome == 'success' && steps.ccache-admission.outputs.allowed == 'true'
+        continue-on-error: true
+        uses: actions/cache/save@main
+        with:
+          path: /mnt/build_wrt/.ccache
+          key: mx4200-ccache-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Verify ccache save
+        id: verify-ccache
+        if: success() && (steps.save-ccache.outcome == 'success' || steps.save-ccache.outcome == 'failure')
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CACHE_KEY: mx4200-ccache-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          echo 'CACHE_SAVES_BLOCKED=true' >> "$GITHUB_ENV"
+          python3 Scripts/CacheAdmission.py verify --repo "$GITHUB_REPOSITORY" --key "$CACHE_KEY" --ref "$GITHUB_REF" > "$RUNNER_TEMP/cache-verify.json"
+          if python3 -c 'import json, sys; sys.exit(json.load(open(sys.argv[1]))["verified"] is not True)' "$RUNNER_TEMP/cache-verify.json"; then
+            echo 'CACHE_SAVES_BLOCKED=false' >> "$GITHUB_ENV"
+          fi
+      - name: Admit hostpkg
+        id: hostpkg-admission
+        if: success() && env.CACHE_SAVES_BLOCKED != 'true' && steps.hostpkg.outputs.cache-hit != 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CACHE_KEY: ${{ steps.hostpkg.outputs.cache-primary-key }}
+        run: |
+          python3 Scripts/HostpkgCache.py pack /mnt/build_wrt /mnt/build_wrt/hostpkg.tar.zst
+          measurement=$(python3 Scripts/CacheAdmission.py measure hostpkg /mnt/build_wrt)
+          bytes=$(printf '%s' "$measurement" | python3 -c 'import json, sys; print(json.load(sys.stdin)["candidate_bytes"])')
+          python3 Scripts/CacheAdmission.py admit --repo "$GITHUB_REPOSITORY" --key "$CACHE_KEY" --ref "$GITHUB_REF" --bytes "$bytes"
+      - name: Save hostpkg
+        id: save-hostpkg
+        if: success() && env.CACHE_SAVES_BLOCKED != 'true' && steps.hostpkg-admission.outcome == 'success' && steps.hostpkg-admission.outputs.allowed == 'true'
+        continue-on-error: true
+        uses: actions/cache/save@main
+        with:
+          path: /mnt/build_wrt/hostpkg.tar.zst
+          key: ${{ steps.hostpkg.outputs.cache-primary-key }}
+      - name: Verify hostpkg save
+        id: verify-hostpkg
+        if: success() && (steps.save-hostpkg.outcome == 'success' || steps.save-hostpkg.outcome == 'failure')
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CACHE_KEY: ${{ steps.hostpkg.outputs.cache-primary-key }}
+        run: |
+          echo 'CACHE_SAVES_BLOCKED=true' >> "$GITHUB_ENV"
+          python3 Scripts/CacheAdmission.py verify --repo "$GITHUB_REPOSITORY" --key "$CACHE_KEY" --ref "$GITHUB_REF" > "$RUNNER_TEMP/cache-verify.json"
+          if python3 -c 'import json, sys; sys.exit(json.load(open(sys.argv[1]))["verified"] is not True)' "$RUNNER_TEMP/cache-verify.json"; then
+            echo 'CACHE_SAVES_BLOCKED=false' >> "$GITHUB_ENV"
+          fi
       - name: Verify images
         run: python3 Scripts/Verify.py images /mnt/build_wrt
       - name: Upload source lock

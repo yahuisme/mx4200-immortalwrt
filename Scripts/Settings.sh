@@ -10,6 +10,34 @@ set -e
 : "${WRT_SSID:?WRT_SSID must be non-empty}"
 : "${WRT_WORD:?WRT_WORD must be non-empty}"
 
+# Keep native LuCI titles/actions/ACLs; only separate the three order-90 entries.
+# Validate all required menu paths before any buildroot writes.
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+menus = (
+    ('applications/luci-app-cpufreq', 'admin/system/cpufreq', 89),
+    ('modules/luci-mod-system', 'admin/system/reboot', 90),
+    ('applications/luci-app-advanced-reboot', 'admin/system/advanced-reboot', 91),
+)
+updates = []
+for package, key, order in menus:
+    path = Path('feeds/luci') / package / 'root/usr/share/luci/menu.d' / (Path(package).name + '.json')
+    try:
+        menu = json.loads(path.read_text())
+        previous = menu[key]['order']
+        if type(previous) is not int:
+            raise ValueError('order must be an integer')
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise SystemExit(f'ERROR: invalid required LuCI menu {path}: {error}')
+    if previous != order:
+        menu[key]['order'] = order
+        updates.append((path, json.dumps(menu, ensure_ascii=False, indent='\t') + '\n'))
+for path, text in updates:
+    path.write_text(text)
+PY
+
 COLLECTION_MAKEFILES=$(find ./feeds/luci/collections/ -type f -name "Makefile" 2>/dev/null)
 if [ -n "$COLLECTION_MAKEFILES" ]; then
 	echo "$COLLECTION_MAKEFILES" | while IFS= read -r mkfile; do
