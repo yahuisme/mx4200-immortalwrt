@@ -10,6 +10,10 @@ on:
     - cron: '0 6 * * *'
   workflow_dispatch:
 
+concurrency:
+  group: mx4200-build
+  cancel-in-progress: false
+
 permissions:
   actions: write
   contents: write
@@ -38,9 +42,9 @@ jobs:
           sudo -E apt-get -yqq install --no-install-recommends \
             bison build-essential ccache file flex gawk \
             g++-multilib gcc-multilib gettext libelf-dev libncurses-dev \
-            libssl-dev python3-setuptools rsync swig unzip zlib1g-dev
-          sudo mkdir -p /mnt/build_wrt
-          sudo chown "$USER:$USER" /mnt/build_wrt
+            libssl-dev pigz python3-setuptools rsync swig unzip zlib1g-dev
+          sudo mkdir -p /mnt/build_wrt /mnt/mx4200-cache
+          sudo chown "$USER:$USER" /mnt/build_wrt /mnt/mx4200-cache
 
       - name: Source
         run: |
@@ -49,36 +53,16 @@ jobs:
           cd /mnt/build_wrt/
           WRT_HASH=$(git rev-parse HEAD)
           WRT_REV=$(./scripts/getver.sh | sed -E 's/^r([0-9]+).*/\1/')
-          echo "WRT_DATE=$WRT_DATE" >> "$GITHUB_ENV"
-          echo "WRT_RELEASE_NAME=MX4200_ImmortalWrt_${WRT_DATE}_r${WRT_REV}" >> "$GITHUB_ENV"
-          echo "WRT_CACHE_PREFIX=wrt-immortalwrt-main-qualcommax-ipq807x" >> "$GITHUB_ENV"
-          echo "WRT_HASH=$WRT_HASH" >> "$GITHUB_ENV"
-          echo "WRT_CACHE_KEY=wrt-immortalwrt-main-qualcommax-ipq807x-${WRT_HASH}-${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
+          {
+            echo "WRT_DATE=$WRT_DATE"
+            echo "WRT_RELEASE_NAME=MX4200_ImmortalWrt_${WRT_DATE}_r${WRT_REV}"
+            echo "WRT_HASH=$WRT_HASH"
+          } >> "$GITHUB_ENV"
 
           PROJECT_MIRRORS_FILE="./scripts/projectsmirrors.json"
           if [ -f "$PROJECT_MIRRORS_FILE" ]; then
             sed -i '/.cn\//d; /tencent/d; /aliyun/d' "$PROJECT_MIRRORS_FILE"
           fi
-
-      - name: Restore cache
-        id: cache-restore
-        uses: actions/cache/restore@main
-        with:
-          key: ${{ env.WRT_CACHE_KEY }}
-          restore-keys: |
-            ${{ env.WRT_CACHE_PREFIX }}-
-          path: |
-            /mnt/build_wrt/.ccache
-            /mnt/build_wrt/dl
-            /mnt/build_wrt/staging_dir/host*
-            /mnt/build_wrt/staging_dir/tool*
-
-      - name: Cache setup
-        if: steps.cache-restore.outputs.cache-matched-key != ''
-        run: |
-          mkdir -p /mnt/build_wrt/tmp
-          echo "1" > /mnt/build_wrt/tmp/.build
-          echo "restored build cache: ${{ steps.cache-restore.outputs.cache-matched-key }}"
 
       - name: Feeds
         run: |
@@ -100,6 +84,38 @@ jobs:
           bash "$GITHUB_WORKSPACE/Scripts/Settings.sh"
           make defconfig -j"$(nproc)"
 
+      - name: Cache keys
+        id: keys
+        run: |
+          python3 Scripts/Cache.py --output "$GITHUB_OUTPUT" prepare \
+            --root /mnt/build_wrt --ref "$GITHUB_REF" \
+            --host-id "${ImageOS}-${ImageVersion}-mx4200-env-v1"
+
+      - name: Restore tools
+        id: tools
+        uses: actions/cache/restore@main
+        with:
+          key: ${{ steps.keys.outputs.tc-key }}
+          path: /mnt/mx4200-cache/tc.tar.gz
+
+      - name: Restore downloads
+        id: rolling
+        uses: actions/cache/restore@main
+        with:
+          key: ${{ steps.keys.outputs.rolling-prefix }}${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ${{ steps.keys.outputs.rolling-prefix }}
+          path: /mnt/mx4200-cache/rolling.tar.gz
+
+      - name: Unpack cache
+        run: |
+          for tier in tc rolling; do
+            archive="/mnt/mx4200-cache/$tier.tar.gz"
+            if [ -s "$archive" ]; then
+              python3 Scripts/Cache.py unpack --root /mnt/build_wrt --tier "$tier" --archive "$archive"
+              rm "$archive"
+            fi
+          done
+
       - name: Download
         run: |
           cd /mnt/build_wrt/
@@ -109,25 +125,17 @@ jobs:
         run: |
           cd /mnt/build_wrt/
           export CCACHE_DIR="/mnt/build_wrt/.ccache"
-          export CCACHE_MAXSIZE="8G"
+          export CCACHE_MAXSIZE="2G"
           export CCACHE_SLOPPINESS=file_stat_matches,include_file_mtime,time_macros
           export CCACHE_NOHASHDIR=true
           export CCACHE_COMPILERCHECK=content
+          if [ ! -x staging_dir/host/bin/ccache ]; then
+            make -j"$(nproc)" tools/ccache/compile
+          fi
+          staging_dir/host/bin/ccache -z
+          # OpenWrt prints successful build statistics; cover failures here.
+          trap 'status=$?; if [ "$status" -ne 0 ]; then staging_dir/host/bin/ccache -s || true; fi; exit "$status"' EXIT
           make -j"$(nproc)" || make -j1 V=s
-          staging_dir/host/bin/ccache -s || ccache -s || true
-
-      - name: Save cache
-        id: cache-save
-        if: success() && steps.cache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@main
-        continue-on-error: true
-        with:
-          key: ${{ env.WRT_CACHE_KEY }}
-          path: |
-            /mnt/build_wrt/.ccache
-            /mnt/build_wrt/dl
-            /mnt/build_wrt/staging_dir/host*
-            /mnt/build_wrt/staging_dir/tool*
 
       - name: Images
         run: |
@@ -142,7 +150,7 @@ jobs:
           shopt -s nullglob
           for device in mx4200v1 mx4200v2; do
             for kind in factory sysupgrade; do
-              images=(./upload/*linksys_${device}-*${kind}.bin)
+              images=(./upload/*linksys_"${device}"-*"${kind}".bin)
               if [ "${#images[@]}" -ne 1 ] || [ ! -s "${images[0]}" ]; then
                 echo "::error::missing, duplicate or empty $device $kind image"
                 exit 1
@@ -151,6 +159,7 @@ jobs:
           done
 
       - name: Release
+        if: github.ref == 'refs/heads/main'
         env:
           RELEASE_NOTES: |
             ## Linksys MX4200 系列 ImmortalWrt 固件
@@ -170,17 +179,60 @@ jobs:
             grep -Fxv "$WRT_RELEASE_NAME" |
             xargs -r -n1 gh release delete --cleanup-tag -y || true
 
-      - name: Prune cache
-        if: success() && (steps.cache-save.outcome == 'success' || steps.cache-restore.outputs.cache-hit == 'true')
+      - name: Pack tools
+        id: pack-tc
+        if: success() && github.ref == 'refs/heads/main' && steps.tools.outputs.cache-hit != 'true'
+        continue-on-error: true
+        env:
+          CACHE_KEY: ${{ steps.keys.outputs.tc-key }}
         run: |
-          # The save action may only warn when an upload fails. Read back the
-          # exact main-branch entry before deleting any previous cache.
-          SAVED_ID=$(gh cache list --ref refs/heads/main --key "$WRT_CACHE_KEY" --limit 100 --json id,key \
-            --jq ".[] | select(.key == \"$WRT_CACHE_KEY\") | .id")
-          [ -n "$SAVED_ID" ] || { echo "New cache unavailable; retaining previous caches"; exit 0; }
-          gh cache list --ref refs/heads/main --key "$WRT_CACHE_PREFIX-" --limit 100 --json id,key --jq '.[] | [.id, .key] | @tsv' |
-            while IFS=$'\t' read -r CACHE_ID CACHE_KEY; do
-              [ -n "$CACHE_ID" ] || continue
-              [ "$CACHE_KEY" = "$WRT_CACHE_KEY" ] && continue
-              gh cache delete "$CACHE_ID" || true
-            done
+          python3 Scripts/Cache.py pack --root /mnt/build_wrt --tier tc --archive /mnt/mx4200-cache/tc.tar.gz
+          python3 Scripts/Cache.py --output "$GITHUB_OUTPUT" admit \
+            --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF" --key "$CACHE_KEY" \
+            --archive /mnt/mx4200-cache/tc.tar.gz
+
+      - name: Save tools
+        id: save-tc
+        if: success() && steps.pack-tc.outputs.admitted == 'true'
+        uses: actions/cache/save@main
+        continue-on-error: true
+        with:
+          key: ${{ steps.keys.outputs.tc-key }}
+          path: /mnt/mx4200-cache/tc.tar.gz
+
+      - name: Prune tools
+        if: success() && steps.save-tc.outcome == 'success'
+        continue-on-error: true
+        env:
+          CACHE_KEY: ${{ steps.keys.outputs.tc-key }}
+        run: |
+          python3 Scripts/Cache.py prune --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF" --key "$CACHE_KEY" --delete
+
+      - name: Pack downloads
+        id: pack-rolling
+        if: success() && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        env:
+          CACHE_KEY: ${{ steps.rolling.outputs.cache-primary-key }}
+        run: |
+          python3 Scripts/Cache.py pack --root /mnt/build_wrt --tier rolling --archive /mnt/mx4200-cache/rolling.tar.gz
+          python3 Scripts/Cache.py --output "$GITHUB_OUTPUT" admit \
+            --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF" --key "$CACHE_KEY" \
+            --archive /mnt/mx4200-cache/rolling.tar.gz
+
+      - name: Save downloads
+        id: save-rolling
+        if: success() && steps.pack-rolling.outputs.admitted == 'true'
+        uses: actions/cache/save@main
+        continue-on-error: true
+        with:
+          key: ${{ steps.rolling.outputs.cache-primary-key }}
+          path: /mnt/mx4200-cache/rolling.tar.gz
+
+      - name: Prune downloads
+        if: success() && steps.save-rolling.outcome == 'success'
+        continue-on-error: true
+        env:
+          CACHE_KEY: ${{ steps.rolling.outputs.cache-primary-key }}
+        run: |
+          python3 Scripts/Cache.py prune --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF" --key "$CACHE_KEY" --delete

@@ -20,6 +20,11 @@ for pid in "$theme_pid" "$config_pid" "$packages_pid"; do
 done
 [ "$failed" -eq 0 ] || { echo "ERROR: package download failed" >&2; exit 1; }
 
+echo "source SHAs:"
+for repo in luci-theme-aurora luci-app-aurora-config packages; do
+	printf '%s %s\n' "$repo" "$(git -C "$stage/$repo" rev-parse HEAD)"
+done
+
 for name in luci-theme-aurora luci-app-aurora-config luci-app-homeproxy sing-box; do
 	source="$stage/$name"
 	case "$name" in
