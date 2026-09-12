@@ -21,26 +21,63 @@ class WorkflowTests(unittest.TestCase):
 
     def test_release_scope(self):
         self.assertEqual(WORKFLOW['concurrency'], {'group': 'mx4200-build', 'cancel-in-progress': False})
-        self.assertEqual(STEPS['Release']['if'], "github.ref == 'refs/heads/main'")
+        self.assertEqual(STEPS['Publish firmware release']['if'], "github.ref == 'refs/heads/main'")
         self.assertEqual(WORKFLOW['jobs']['build']['runs-on'], 'ubuntu-24.04')
 
     def test_cache_contract(self):
         ordered = list(STEPS)
-        self.assertLess(ordered.index('Configure'), ordered.index('Cache keys'))
-        self.assertLess(ordered.index('Cache keys'), ordered.index('Restore tools'))
-        self.assertNotIn('restore-keys', STEPS['Restore tools']['with'])
-        self.assertIn('rolling-prefix', STEPS['Restore downloads']['with']['restore-keys'])
-        self.assertNotIn('staging_dir', STEPS['Restore tools']['with']['path'])
-        for label, tier in (('tools', 'tc'), ('downloads', 'rolling')):
-            self.assertLess(ordered.index('Release'), ordered.index('Pack ' + label))
+        self.assertEqual(STEPS['Configure firmware and derive cache keys']['id'], 'keys')
+        self.assertLess(ordered.index('Configure firmware and derive cache keys'), ordered.index('Restore toolchain cache'))
+        self.assertNotIn('restore-keys', STEPS['Restore toolchain cache']['with'])
+        self.assertIn('rolling-prefix', STEPS['Restore downloads and ccache']['with']['restore-keys'])
+        self.assertNotIn('staging_dir', STEPS['Restore toolchain cache']['with']['path'])
+        for label in ('toolchain cache', 'downloads and ccache'):
+            prune = 'Prune obsolete ' + ('toolchain caches' if label == 'toolchain cache' else 'downloads and ccache')
+            self.assertLess(ordered.index('Publish firmware release'), ordered.index('Pack ' + label))
             self.assertLess(ordered.index('Pack ' + label), ordered.index('Save ' + label))
-            self.assertLess(ordered.index('Save ' + label), ordered.index('Prune ' + label))
+            self.assertLess(ordered.index('Save ' + label), ordered.index(prune))
             self.assertIn("github.ref == 'refs/heads/main'", STEPS['Pack ' + label]['if'])
             self.assertIn('admitted', STEPS['Save ' + label]['if'])
-            self.assertIn("outcome == 'success'", STEPS['Prune ' + label]['if'])
+            self.assertIn("outcome == 'success'", STEPS[prune]['if'])
             self.assertEqual(STEPS['Restore ' + label]['with']['path'],
                              STEPS['Save ' + label]['with']['path'])
-        self.assertLess(ordered.index('Prune tools'), ordered.index('Pack downloads'))
+        self.assertLess(ordered.index('Prune obsolete toolchain caches'), ordered.index('Pack downloads and ccache'))
+
+    def test_configuration_cache_key_handoff(self):
+        for failure in ('', 'settings', 'defconfig'):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                workspace = root / 'workspace'
+                for directory in ('Scripts', 'Config', 'files', 'bin'):
+                    (workspace / directory).mkdir(parents=True)
+                (workspace / 'Config/MX4200.txt').write_text('CONFIG_TEST=y\n')
+                (workspace / 'files/marker').write_text('overlay')
+                (workspace / 'Scripts/Settings.sh').write_text(
+                    'echo settings >> "$LOG"\n[ "$FAILURE" != settings ]\n')
+                for command, body in {
+                    'make': 'echo defconfig >> "$LOG"\n[ "$FAILURE" != defconfig ]',
+                    'python3': 'test "$PWD" = "$GITHUB_WORKSPACE"\n'
+                               'test "$1" = Scripts/Cache.py\n'
+                               'echo keys >> "$LOG"\n'
+                               'echo tc-key=fixture >> "$GITHUB_OUTPUT"',
+                }.items():
+                    stub = workspace / 'bin' / command
+                    stub.write_text('#!/bin/bash -e\n' + body + '\n')
+                    stub.chmod(0o755)
+                result = self.run_block('Configure firmware and derive cache keys', root, {
+                    'GITHUB_WORKSPACE': str(workspace), 'GITHUB_OUTPUT': str(root / 'output'),
+                    'PATH': str(workspace / 'bin') + ':' + os.environ['PATH'],
+                    'LOG': str(root / 'log'), 'FAILURE': failure,
+                    'GITHUB_REF': 'refs/heads/main', 'ImageOS': 'ubuntu24', 'ImageVersion': 'fixture'})
+                self.assertEqual(result.returncode == 0, not failure, result.stderr)
+                expected = ['settings'] if failure == 'settings' else ['settings', 'defconfig']
+                if not failure:
+                    expected.append('keys')
+                    self.assertEqual((root / 'output').read_text(), 'tc-key=fixture\n')
+                    self.assertEqual((root / 'files/marker').read_text(), 'overlay')
+                else:
+                    self.assertFalse((root / 'output').exists())
+                self.assertEqual((root / 'log').read_text().splitlines(), expected)
 
     def test_images(self):
         for case in ('valid', 'missing', 'empty', 'extra', 'wrong-device'):
@@ -57,7 +94,7 @@ class WorkflowTests(unittest.TestCase):
                         image.write_bytes(b'' if case == 'empty' else b'fixture, not firmware')
                 if case == 'extra':
                     (images / 'other-sysupgrade.bin').write_bytes(b'fixture')
-                result = self.run_block('Images', root)
+                result = self.run_block('Collect and verify firmware images', root)
                 self.assertEqual(result.returncode == 0, case == 'valid', result.stdout + result.stderr)
 
     def test_build_control_flow(self):
@@ -87,7 +124,7 @@ if [ "$FAILURE" = parallel ] && [[ "$*" != *V=s* ]]; then exit 8; fi
 staging_dir/host/bin/ccache -s
 ''')
                 make.chmod(0o755)
-                result = self.run_block('Build', root, {
+                result = self.run_block('Compile firmware', root, {
                     'PATH': str(bindir) + ':' + os.environ['PATH'], 'LOG': str(root / 'log'),
                     'FAILURE': failure, 'COUNTER': str(counter)})
                 log = (root / 'log').read_text()
@@ -120,7 +157,7 @@ if sys.argv[1:3] == ['release', 'list']:
     print('Other_keep')
 ''')
             gh.chmod(0o755)
-            result = self.run_block('Release', root, {
+            result = self.run_block('Publish firmware release', root, {
                 'PATH': str(root) + ':' + os.environ['PATH'], 'LOG': str(root / 'log'),
                 'WRT_RELEASE_NAME': 'MX4200_current', 'GITHUB_SHA': 'a' * 40,
                 'RELEASE_NOTES': 'fixture notes'})

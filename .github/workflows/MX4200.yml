@@ -31,10 +31,10 @@ jobs:
       WRT_REPO: https://github.com/VIKINGYFY/immortalwrt.git
       WRT_BRANCH: main
     steps:
-      - name: Checkout
+      - name: Check out build repository
         uses: actions/checkout@main
 
-      - name: Environment
+      - name: Install build dependencies
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
@@ -46,7 +46,7 @@ jobs:
           sudo mkdir -p /mnt/build_wrt /mnt/mx4200-cache
           sudo chown "$USER:$USER" /mnt/build_wrt /mnt/mx4200-cache
 
-      - name: Source
+      - name: Clone firmware source
         run: |
           WRT_DATE="$(TZ=Asia/Hong_Kong date +'%y.%m.%d-%H.%M.%S')"
           git clone --single-branch --branch "$WRT_BRANCH" "$WRT_REPO" /mnt/build_wrt/
@@ -64,18 +64,19 @@ jobs:
             sed -i '/.cn\//d; /tencent/d; /aliyun/d' "$PROJECT_MIRRORS_FILE"
           fi
 
-      - name: Feeds
+      - name: Update and install feeds
         run: |
           cd /mnt/build_wrt/
           ./scripts/feeds update -a >/dev/null || { echo "::error::feeds update failed"; exit 1; }
           ./scripts/feeds install -a >/dev/null || { echo "::error::feeds install failed"; exit 1; }
 
-      - name: Packages
+      - name: Prepare custom packages
         run: |
           cd /mnt/build_wrt/package/
           bash "$GITHUB_WORKSPACE/Scripts/Packages.sh"
 
-      - name: Configure
+      - name: Configure firmware and derive cache keys
+        id: keys
         run: |
           cd /mnt/build_wrt/
           cat "$GITHUB_WORKSPACE/Config/MX4200.txt" >> .config
@@ -84,21 +85,19 @@ jobs:
           bash "$GITHUB_WORKSPACE/Scripts/Settings.sh"
           make defconfig -j"$(nproc)"
 
-      - name: Cache keys
-        id: keys
-        run: |
+          cd "$GITHUB_WORKSPACE"
           python3 Scripts/Cache.py --output "$GITHUB_OUTPUT" prepare \
             --root /mnt/build_wrt --ref "$GITHUB_REF" \
             --host-id "${ImageOS}-${ImageVersion}-mx4200-env-v1"
 
-      - name: Restore tools
+      - name: Restore toolchain cache
         id: tools
         uses: actions/cache/restore@main
         with:
           key: ${{ steps.keys.outputs.tc-key }}
           path: /mnt/mx4200-cache/tc.tar.gz
 
-      - name: Restore downloads
+      - name: Restore downloads and ccache
         id: rolling
         uses: actions/cache/restore@main
         with:
@@ -106,7 +105,7 @@ jobs:
           restore-keys: ${{ steps.keys.outputs.rolling-prefix }}
           path: /mnt/mx4200-cache/rolling.tar.gz
 
-      - name: Unpack cache
+      - name: Unpack build caches
         run: |
           for tier in tc rolling; do
             archive="/mnt/mx4200-cache/$tier.tar.gz"
@@ -116,12 +115,12 @@ jobs:
             fi
           done
 
-      - name: Download
+      - name: Download source archives
         run: |
           cd /mnt/build_wrt/
           make download -j"$(nproc)"
 
-      - name: Build
+      - name: Compile firmware
         run: |
           cd /mnt/build_wrt/
           export CCACHE_DIR="/mnt/build_wrt/.ccache"
@@ -137,7 +136,7 @@ jobs:
           trap 'status=$?; if [ "$status" -ne 0 ]; then staging_dir/host/bin/ccache -s || true; fi; exit "$status"' EXIT
           make -j"$(nproc)" || make -j1 V=s
 
-      - name: Images
+      - name: Collect and verify firmware images
         run: |
           cd /mnt/build_wrt/
           mkdir ./upload/
@@ -158,7 +157,7 @@ jobs:
             done
           done
 
-      - name: Release
+      - name: Publish firmware release
         if: github.ref == 'refs/heads/main'
         env:
           RELEASE_NOTES: |
@@ -179,7 +178,7 @@ jobs:
             grep -Fxv "$WRT_RELEASE_NAME" |
             xargs -r -n1 gh release delete --cleanup-tag -y || true
 
-      - name: Pack tools
+      - name: Pack toolchain cache
         id: pack-tc
         if: success() && github.ref == 'refs/heads/main' && steps.tools.outputs.cache-hit != 'true'
         continue-on-error: true
@@ -191,7 +190,7 @@ jobs:
             --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF" --key "$CACHE_KEY" \
             --archive /mnt/mx4200-cache/tc.tar.gz
 
-      - name: Save tools
+      - name: Save toolchain cache
         id: save-tc
         if: success() && steps.pack-tc.outputs.admitted == 'true'
         uses: actions/cache/save@main
@@ -200,7 +199,7 @@ jobs:
           key: ${{ steps.keys.outputs.tc-key }}
           path: /mnt/mx4200-cache/tc.tar.gz
 
-      - name: Prune tools
+      - name: Prune obsolete toolchain caches
         if: success() && steps.save-tc.outcome == 'success'
         continue-on-error: true
         env:
@@ -208,7 +207,7 @@ jobs:
         run: |
           python3 Scripts/Cache.py prune --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF" --key "$CACHE_KEY" --delete
 
-      - name: Pack downloads
+      - name: Pack downloads and ccache
         id: pack-rolling
         if: success() && github.ref == 'refs/heads/main'
         continue-on-error: true
@@ -220,7 +219,7 @@ jobs:
             --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF" --key "$CACHE_KEY" \
             --archive /mnt/mx4200-cache/rolling.tar.gz
 
-      - name: Save downloads
+      - name: Save downloads and ccache
         id: save-rolling
         if: success() && steps.pack-rolling.outputs.admitted == 'true'
         uses: actions/cache/save@main
@@ -229,7 +228,7 @@ jobs:
           key: ${{ steps.rolling.outputs.cache-primary-key }}
           path: /mnt/mx4200-cache/rolling.tar.gz
 
-      - name: Prune downloads
+      - name: Prune obsolete downloads and ccache
         if: success() && steps.save-rolling.outcome == 'success'
         continue-on-error: true
         env:

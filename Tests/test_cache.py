@@ -39,8 +39,7 @@ class CacheTests(unittest.TestCase):
         (self.root / '.gitignore').write_text('*.o\nconf\n')
 
     def prepare(self):
-        with patch.object(cache, 'run', wraps=cache.run) as run:
-            return cache.prepare(self.root, REF, 'fixed-host')['tc-key']
+        return cache.prepare(self.root, REF, 'fixed-host')['tc-key']
 
     def trees(self):
         for name in ['build_dir/host/flock/.built', 'staging_dir/host/bin/flock',
