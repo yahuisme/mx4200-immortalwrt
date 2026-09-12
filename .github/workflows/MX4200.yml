@@ -7,6 +7,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+  actions: read
 # Avoid overlapping builds and cache uploads without cancelling an active build.
 concurrency:
   group: mx4200-build-cache
@@ -181,6 +182,20 @@ jobs:
             /mnt/build_wrt/build_dir/host
             /mnt/build_wrt/build_dir/toolchain-*
           key: mx4200-toolchain-v1-${{ steps.toolchain-key.outputs.key }}
+      - name: Hostpkg key
+        id: hostpkg-key
+        env:
+          TOOLCHAIN_KEY: ${{ steps.toolchain-key.outputs.key }}
+        run: python3 Scripts/HostpkgCache.py key /mnt/build_wrt "$TOOLCHAIN_KEY"
+      - name: Restore hostpkg
+        id: hostpkg
+        uses: actions/cache/restore@main
+        with:
+          path: /mnt/build_wrt/hostpkg.tar.zst
+          key: mx4200-hostpkg-v1-${{ steps.hostpkg-key.outputs.key }}
+      - name: Unpack hostpkg
+        if: steps.hostpkg.outputs.cache-hit == 'true'
+        run: python3 Scripts/HostpkgCache.py unpack /mnt/build_wrt /mnt/build_wrt/hostpkg.tar.zst
       - name: Download
         run: make -C /mnt/build_wrt download -j"$(nproc)"
       - name: Compile
@@ -231,6 +246,21 @@ jobs:
         with:
           path: /mnt/build_wrt/.ccache
           key: ${{ steps.ccache.outputs.cache-primary-key }}
+      # Admit last: inventory includes this run's other successful cache saves.
+      # No pre-save deletion: retain known-good generations if quota cannot fit.
+      - name: Pack hostpkg
+        if: success() && steps.hostpkg.outputs.cache-hit != 'true'
+        run: python3 Scripts/HostpkgCache.py pack /mnt/build_wrt /mnt/build_wrt/hostpkg.tar.zst
+      - name: Admit hostpkg
+        id: hostpkg-admission
+        if: success() && steps.hostpkg.outputs.cache-hit != 'true'
+        run: python3 Scripts/HostpkgCache.py admit /mnt/build_wrt /mnt/build_wrt/hostpkg.tar.zst
+      - name: Save hostpkg
+        if: success() && steps.hostpkg-admission.outputs.allowed == 'true'
+        uses: actions/cache/save@main
+        with:
+          path: /mnt/build_wrt/hostpkg.tar.zst
+          key: ${{ steps.hostpkg.outputs.cache-primary-key }}
       - name: Verify images
         run: python3 Scripts/Verify.py images /mnt/build_wrt
       - name: Upload lock
