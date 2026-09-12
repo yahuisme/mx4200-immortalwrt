@@ -25,6 +25,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import time
 
 # Bump whenever prepare/inputs fingerprint or timestamp rules change: old
 # toolchains must never be accepted under a new interpretation of their inputs.
@@ -242,9 +243,17 @@ def admission(rows, size, key, ref):
 
 def prune(repo, ref, key, delete=False):
     prefix = owned_prefix(key, ref)
-    rows = inventory(repo)
-    matches = [r for r in rows if r['key'] == key and r['ref'] == ref
-               and r['size_in_bytes'] > 0]
+    # A successful save may briefly be absent or report zero bytes in the API.
+    # Retry only confirmation, never API errors or any deletion/readback.
+    attempt = 0
+    while True:
+        rows = inventory(repo)
+        matches = [r for r in rows if r['key'] == key and r['ref'] == ref
+                   and r['size_in_bytes'] > 0]
+        if matches or attempt == 2:
+            break
+        attempt += 1
+        time.sleep(2)
     if len(matches) != 1:
         raise ValueError('exact nonempty replacement not uniquely confirmed; no deletion')
     replacement = matches[0]

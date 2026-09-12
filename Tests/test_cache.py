@@ -7,7 +7,7 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 spec = importlib.util.spec_from_file_location('cache', Path(__file__).resolve().parents[1] / 'Scripts/Cache.py')
 assert spec is not None and spec.loader is not None
@@ -208,6 +208,22 @@ class CacheTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             cache.admission([], 100, 'legacy-key', REF)
 
+    def test_prune_waits_for_visible_nonempty_replacement(self):
+        old = row(2, key=cache.scope(REF) + 'tc-old', created='2026-01-01')
+        events = []
+        snapshots = iter([[old], [old, row(1, size=0)], [old, row(1)], [row(1)]])
+
+        def inventory(repo):
+            events.append('list')
+            return next(snapshots)
+
+        with patch.object(cache, 'inventory', side_effect=inventory), \
+                patch('time.sleep', side_effect=lambda delay: events.append(('sleep', delay))), \
+                patch.object(cache.subprocess, 'run', side_effect=lambda *a, **k: events.append('delete')):
+            self.assertEqual([2], cache.prune('owner/repo', REF, KEY, True)['deleted'])
+        self.assertEqual(['list', ('sleep', 2), 'list', ('sleep', 2),
+                          'list', 'delete', 'list'], events)
+
     def test_prune_scope_confirmation_readback(self):
         old = row(2, key=cache.scope(REF) + 'tc-old', created='2026-01-01')
         other = [row(3, key='old-cache'), row(4, ref='refs/heads/test'),
@@ -218,13 +234,58 @@ class CacheTests(unittest.TestCase):
             self.assertEqual([2], cache.prune('owner/repo', REF, KEY, True)['deleted'])
             self.assertEqual(1, delete.call_count)
         for bad in [[], [row(1, size=0)], [row(1, ref='refs/heads/test')]]:
-            with patch.object(cache, 'inventory', return_value=bad), patch.object(cache.subprocess, 'run') as delete:
+            with patch.object(cache, 'inventory', return_value=bad) as inventory, \
+                    patch.object(cache.time, 'sleep') as sleep, \
+                    patch.object(cache.subprocess, 'run') as delete:
                 with self.assertRaises(ValueError):
                     cache.prune('owner/repo', REF, KEY, True)
+                self.assertEqual(3, inventory.call_count)
+                self.assertEqual([call(2), call(2)], sleep.call_args_list)
                 delete.assert_not_called()
         with patch.object(cache, 'inventory', side_effect=[rows, rows]), patch.object(cache.subprocess, 'run'):
             with self.assertRaises(ValueError):
                 cache.prune('owner/repo', REF, KEY, True)
+
+    def test_prune_confirmation_failures_do_not_retry_or_delete(self):
+        failures = [[row(1), row(2)], ValueError('invalid inventory'),
+                    subprocess.CalledProcessError(1, 'gh')]
+        for failure in failures:
+            with self.subTest(failure=failure), \
+                    patch.object(cache, 'inventory', side_effect=[failure]) as inventory, \
+                    patch.object(cache.time, 'sleep') as sleep, \
+                    patch.object(cache.subprocess, 'run') as delete:
+                with self.assertRaises((ValueError, subprocess.CalledProcessError)):
+                    cache.prune('owner/repo', REF, KEY, True)
+                inventory.assert_called_once_with('owner/repo')
+                sleep.assert_not_called()
+                delete.assert_not_called()
+
+    def test_prune_delete_and_readback_failures_are_not_retried(self):
+        old = row(2, key=cache.scope(REF) + 'tc-old', created='2026-01-01')
+        rows = [row(1), old]
+        error = subprocess.CalledProcessError(1, 'gh')
+        for delete_error, after in [(error, [row(1)]), (None, rows),
+                                    (None, []), (None, error)]:
+            with self.subTest(delete_error=delete_error, after=after), \
+                    patch.object(cache, 'inventory', side_effect=[rows, after]) as inventory, \
+                    patch.object(cache.time, 'sleep') as sleep, \
+                    patch.object(cache.subprocess, 'run', side_effect=delete_error) as delete:
+                with self.assertRaises((ValueError, subprocess.CalledProcessError)):
+                    cache.prune('owner/repo', REF, KEY, True)
+                self.assertEqual(1 if delete_error else 2, inventory.call_count)
+                delete.assert_called_once()
+                sleep.assert_not_called()
+
+    def test_prune_immediate_confirmation_and_dry_run_do_not_wait(self):
+        old = row(2, key=cache.scope(REF) + 'tc-old', created='2026-01-01')
+        with patch.object(cache, 'inventory', return_value=[row(1), old]) as inventory, \
+                patch.object(cache.time, 'sleep') as sleep, \
+                patch.object(cache.subprocess, 'run') as delete:
+            self.assertEqual({'confirmed': True, 'delete-ids': [2], 'deleted': []},
+                             cache.prune('owner/repo', REF, KEY))
+            inventory.assert_called_once_with('owner/repo')
+            sleep.assert_not_called()
+            delete.assert_not_called()
 
     def test_inventory_pagination_and_errors(self):
         import json
