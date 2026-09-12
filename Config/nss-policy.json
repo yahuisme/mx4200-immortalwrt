@@ -140,6 +140,8 @@
     "package/kernel/qca-nss-dp/Makefile",
     "package/kernel/qca-ssdk/Makefile",
     "package/network/services/hostapd/patches/900-hostapd-update-muedca-params.patch",
+    "package/network/utils/iproute2/patches/400-add-nss-qdisc.patch",
+    "package/network/utils/iproute2/patches/500-add-nssmirred.patch",
     "target/linux/qualcommax/config-6.12",
     "target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8074-512m.dtsi",
     "target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8074-nss.dtsi",
@@ -179,6 +181,7 @@
     "target/linux/qualcommax/patches-6.12/0981-1-qca-skb_recycler-support.patch"
   ],
   "watch_patterns": [
+    "package/network/utils/iproute2/.*",
     "config/Config-ipq\\.in",
     "package/kernel/mac80211/patches/nss/.*",
     "package/network/services/hostapd/patches/.*muedca.*",
@@ -187,6 +190,8 @@
     "target/linux/qualcommax/files/(?:arch/arm64/boot/dts/qcom/ipq807[^/]*nss[^/]*|(?:include|net)/.*(?:nss|skbuff_(?:recycl|notifier|debug)|dscpremark).*)"
   ],
   "edit_sha256": {
+    "package/network/utils/iproute2/patches/500-add-nssmirred.patch": "0bff0a5595caa43dd4ac8d4e94260e8f63cb3908d234b5fbe4d68f7143fcfcc6",
+    "package/network/utils/iproute2/patches/400-add-nss-qdisc.patch": "717d9ad5a91a702d6de45951b1fa9581747738fa9ac19c4713aef9fd8a4aad5a",
     "config/Config-ipq.in": "05f4a98509a53f078fea5fd95b76af414bcf32da788ed895ced9a037f4276cd4",
     "package/firmware/ath11k-firmware/Makefile": "bb6564d77aad07067d276fff1a6775c77948cfff66a8984a42345faeb20b494e",
     "package/kernel/cryptodev-linux/Makefile": "02496b505a14862743c550c3dd16c28344d56b8da544ba1b23832ffa6fa4fed1",

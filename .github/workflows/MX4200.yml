@@ -8,9 +8,9 @@ on:
 permissions:
   contents: write
   actions: read
-# Avoid overlapping builds and cache uploads without cancelling an active build.
+# One writer for this product; freshness checks also reject old manual reruns.
 concurrency:
-  group: mx4200-build-cache
+  group: mx4200-immortalwrt-release
   cancel-in-progress: false
 jobs:
   check:
@@ -19,7 +19,7 @@ jobs:
       changed: ${{ steps.compare.outputs.changed }}
     steps:
       - uses: actions/checkout@main
-      - name: Check sources
+      - name: Check release sources
         if: github.event_name == 'schedule'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -27,7 +27,7 @@ jobs:
           sudo mkdir -p /mnt/build_wrt
           sudo chown "$USER:$USER" /mnt/build_wrt
           python3 Scripts/Inputs.py --probe /mnt/build_wrt/source-lock.json
-      - name: Compare sources
+      - name: Compare source lock
         id: compare
         env:
           GH_TOKEN: ${{ github.token }}
@@ -73,54 +73,28 @@ jobs:
       WRT_IP: 192.168.10.1
     steps:
       - uses: actions/checkout@main
-      - name: Install deps
+      - name: Install dependencies
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
           sudo apt-get -yqq update
           sudo apt-get -yqq install --no-install-recommends \
             bison build-essential file flex gawk g++-multilib gcc-multilib \
-            gettext libelf-dev libncurses-dev libssl-dev python3-setuptools \
+            gettext libelf-dev libncurses-dev libssl-dev python3-setuptools python3-venv \
             rsync swig unzip zlib1g-dev
           sudo mkdir -p /mnt/build_wrt /mnt/nss-sources
           sudo chown "$USER:$USER" /mnt/build_wrt /mnt/nss-sources
+          python3 -m venv "$RUNNER_TEMP/image-tools"
+          "$RUNNER_TEMP/image-tools/bin/pip" install 'ubi-reader==0.8.16'
+          echo "$RUNNER_TEMP/image-tools/bin" >> "$GITHUB_PATH"
       - name: Prepare sources
         run: |
           python3 Scripts/Prepare.py --sources /mnt/nss-sources --output /mnt/build_wrt
           VERSION=$(python3 -c 'import json; print(json.load(open("/mnt/build_wrt/source-lock.json"))["official_tag"])')
           REVISION=$(python3 -c 'import pathlib,re; v=pathlib.Path("/mnt/build_wrt/version").read_text().strip(); m=re.fullmatch(r"(r[0-9]+)-[0-9a-f]+", v); assert m, "Invalid official revision: " + v; print(m[1])')
           echo "WRT_RELEASE_NAME=MX4200_ImmortalWrt_${VERSION}_${REVISION}_$(TZ=Asia/Hong_Kong date +'%y.%m.%d-%H.%M.%S')" >> "$GITHUB_ENV"
-      - name: Restore downloads
+      - name: Restore cache
         id: downloads
-        uses: actions/cache/restore@main
-        with:
-          path: /mnt/build_wrt/dl
-          key: mx4200-build-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: mx4200-build-${{ runner.os }}-${{ runner.arch }}-
-
-      - name: Restore ccache
-        id: ccache
-        uses: actions/cache/restore@main
-        with:
-          path: /mnt/build_wrt/.ccache
-          key: mx4200-ccache-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: mx4200-ccache-${{ runner.os }}-${{ runner.arch }}-
-
-      # Cache version includes the exact path list. Keep the old combined layout
-      # for migration only; move current hits aside so legacy cannot overwrite them.
-      - name: Protect caches
-        id: protect-current
-        if: steps.downloads.outputs.cache-matched-key == '' || steps.ccache.outputs.cache-matched-key == ''
-        env:
-          DOWNLOADS_MATCHED: ${{ steps.downloads.outputs.cache-matched-key }}
-          CCACHE_MATCHED: ${{ steps.ccache.outputs.cache-matched-key }}
-        run: |
-          cd /mnt/build_wrt
-          mkdir .current-cache
-          if [ -n "$DOWNLOADS_MATCHED" ]; then mv dl .current-cache/dl; fi
-          if [ -n "$CCACHE_MATCHED" ]; then mv .ccache .current-cache/.ccache; fi
-      - name: Restore legacy
-        if: steps.downloads.outputs.cache-matched-key == '' || steps.ccache.outputs.cache-matched-key == ''
         uses: actions/cache/restore@main
         with:
           path: |
@@ -128,51 +102,26 @@ jobs:
             /mnt/build_wrt/.ccache
           key: mx4200-build-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: mx4200-build-${{ runner.os }}-${{ runner.arch }}-
-      - name: Recover caches
-        if: always() && steps.protect-current.outcome == 'success'
-        run: |
-          cd /mnt/build_wrt
-          for name in dl .ccache; do
-            if [ -d ".current-cache/$name" ]; then
-              rm -rf -- "$name"
-              mv ".current-cache/$name" "$name"
-            fi
-          done
-          rmdir .current-cache
-      - name: Snapshot downloads
-        id: downloads-before
-        run: python3 Scripts/Downloads.py /mnt/build_wrt/dl
 
-      # Use the feed's exact bootstrap release; still build final host Go natively.
       - name: Prepare packages
-        id: go-bootstrap
         run: |
           cd /mnt/build_wrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a
           cd package
           bash "$GITHUB_WORKSPACE/Scripts/Packages.sh"
-          python3 "$GITHUB_WORKSPACE/Scripts/GoBootstrap.py" /mnt/build_wrt
-      - name: Setup Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: ${{ steps.go-bootstrap.outputs.version }}
-          check-latest: false
-          cache: false
-      - name: Configure
+      - name: Configure firmware
         run: |
           cd /mnt/build_wrt
           cp "$GITHUB_WORKSPACE/Config/MX4200.txt" .config
           cp -a "$GITHUB_WORKSPACE/files" .
           bash "$GITHUB_WORKSPACE/Scripts/Settings.sh"
-          echo '# CONFIG_GOLANG_BUILD_BOOTSTRAP is not set' >> .config
-          printf 'CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT="%s"\n' "$(go env GOROOT)" >> .config
           make defconfig
           python3 "$GITHUB_WORKSPACE/Scripts/Verify.py" config .
-      - name: Toolchain key
+      - name: Identify toolchain cache
         id: toolchain-key
         run: python3 Scripts/Cache.py /mnt/build_wrt
-      - name: Restore toolchain
+      - name: Restore toolchain cache
         id: toolchain
         uses: actions/cache/restore@main
         with:
@@ -182,23 +131,9 @@ jobs:
             /mnt/build_wrt/build_dir/host
             /mnt/build_wrt/build_dir/toolchain-*
           key: mx4200-toolchain-v1-${{ steps.toolchain-key.outputs.key }}
-      - name: Hostpkg key
-        id: hostpkg-key
-        env:
-          TOOLCHAIN_KEY: ${{ steps.toolchain-key.outputs.key }}
-        run: python3 Scripts/HostpkgCache.py key /mnt/build_wrt "$TOOLCHAIN_KEY"
-      - name: Restore hostpkg
-        id: hostpkg
-        uses: actions/cache/restore@main
-        with:
-          path: /mnt/build_wrt/hostpkg.tar.zst
-          key: mx4200-hostpkg-v1-${{ steps.hostpkg-key.outputs.key }}
-      - name: Unpack hostpkg
-        if: steps.hostpkg.outputs.cache-hit == 'true'
-        run: python3 Scripts/HostpkgCache.py unpack /mnt/build_wrt /mnt/build_wrt/hostpkg.tar.zst
-      - name: Download
+      - name: Download packages
         run: make -C /mnt/build_wrt download -j"$(nproc)"
-      - name: Compile
+      - name: Compile firmware
         run: |
           cd /mnt/build_wrt
           export CCACHE_DIR=/mnt/build_wrt/.ccache
@@ -206,21 +141,20 @@ jobs:
           export CCACHE_SLOPPINESS=file_stat_matches,include_file_mtime,time_macros
           export CCACHE_NOHASHDIR=true
           export CCACHE_COMPILERCHECK=content
-          if [ ! -x staging_dir/host/bin/ccache ]; then
-            make tools/ccache/compile -j"$(nproc)"
+          if [ -x staging_dir/host/bin/ccache ]; then
+            staging_dir/host/bin/ccache --zero-stats
           fi
-          staging_dir/host/bin/ccache --zero-stats
-          make -j"$(nproc)" V=s
-      - name: Cache stats
+          make -j"$(nproc)" || make -j1 V=s
+      - name: Cache statistics
         if: always()
         run: |
           cd /mnt/build_wrt
           if [ -x staging_dir/host/bin/ccache ]; then
             CCACHE_DIR=/mnt/build_wrt/.ccache CCACHE_MAXSIZE=2G staging_dir/host/bin/ccache --cleanup
-            CCACHE_DIR=/mnt/build_wrt/.ccache CCACHE_MAXSIZE=2G staging_dir/host/bin/ccache --show-stats
+            CCACHE_DIR=/mnt/build_wrt/.ccache staging_dir/host/bin/ccache --show-stats
           fi
           du -sh dl .ccache staging_dir/host* staging_dir/toolchain* build_dir/host* build_dir/toolchain* 2>/dev/null || true
-      - name: Save toolchain
+      - name: Save toolchain cache
         if: success() && steps.toolchain.outputs.cache-hit != 'true'
         uses: actions/cache/save@main
         with:
@@ -230,49 +164,27 @@ jobs:
             /mnt/build_wrt/build_dir/host
             /mnt/build_wrt/build_dir/toolchain-*
           key: ${{ steps.toolchain.outputs.cache-primary-key }}
-      # Snapshot after compile too: Go may populate dl/go-mod-cache during build.
-      - name: Check downloads
-        id: downloads-after
-        run: python3 Scripts/Downloads.py /mnt/build_wrt/dl
-      - name: Save downloads
-        if: success() && steps.downloads-after.outputs.files != '0' && (steps.downloads.outputs.cache-matched-key == '' || steps.downloads-before.outputs.digest != steps.downloads-after.outputs.digest)
-        uses: actions/cache/save@main
-        with:
-          path: /mnt/build_wrt/dl
-          key: ${{ steps.downloads.outputs.cache-primary-key }}
-      - name: Save ccache
+      - name: Save cache
         if: success()
         uses: actions/cache/save@main
         with:
-          path: /mnt/build_wrt/.ccache
-          key: ${{ steps.ccache.outputs.cache-primary-key }}
-      # Admit last: inventory includes this run's other successful cache saves.
-      # No pre-save deletion: retain known-good generations if quota cannot fit.
-      - name: Pack hostpkg
-        if: success() && steps.hostpkg.outputs.cache-hit != 'true'
-        run: python3 Scripts/HostpkgCache.py pack /mnt/build_wrt /mnt/build_wrt/hostpkg.tar.zst
-      - name: Admit hostpkg
-        id: hostpkg-admission
-        if: success() && steps.hostpkg.outputs.cache-hit != 'true'
-        run: python3 Scripts/HostpkgCache.py admit /mnt/build_wrt /mnt/build_wrt/hostpkg.tar.zst
-      - name: Save hostpkg
-        if: success() && steps.hostpkg-admission.outputs.allowed == 'true'
-        uses: actions/cache/save@main
-        with:
-          path: /mnt/build_wrt/hostpkg.tar.zst
-          key: ${{ steps.hostpkg.outputs.cache-primary-key }}
+          path: |
+            /mnt/build_wrt/dl
+            /mnt/build_wrt/.ccache
+          key: ${{ steps.downloads.outputs.cache-primary-key }}
       - name: Verify images
         run: python3 Scripts/Verify.py images /mnt/build_wrt
-      - name: Upload lock
+      - name: Upload source lock
         uses: actions/upload-artifact@main
         with:
           name: source-lock
           path: /mnt/build_wrt/source-lock.json
           if-no-files-found: error
-      - name: Release
+      - name: Release firmware
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GH_READ_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
           import json
@@ -288,8 +200,4 @@ jobs:
               f'NSS source: `LiBwrt stable NSS patches; qosmio recipes`\n\n'
               '采用第三方 NSS/ECM 与 ath11k 加速补丁，并非官方原版固件。\n')
           PY
-          gh release create "$WRT_RELEASE_NAME" /mnt/build_wrt/upload/*.bin \
-            --target "$GITHUB_SHA" --title "$WRT_RELEASE_NAME" --notes-file /mnt/build_wrt/release-notes.md
-          gh release list --json tagName --jq '.[].tagName' |
-            grep '^MX4200_' | grep -Fxv "$WRT_RELEASE_NAME" |
-            xargs -r -n1 gh release delete --cleanup-tag -y || true
+          python3 Scripts/Release.py /mnt/build_wrt

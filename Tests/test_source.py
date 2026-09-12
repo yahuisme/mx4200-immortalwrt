@@ -131,7 +131,7 @@ class PolicyTests(unittest.TestCase):
             lock = json.loads((output/'source-lock.json').read_text())
             self.assertNotIn('VIKING-style', lock['nss_source'])
 
-    def test_exact_four_images(self):
+    def test_four_fake_images_rejected(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             images = root / 'bin/targets/qualcommax/ipq807x'
@@ -139,8 +139,9 @@ class PolicyTests(unittest.TestCase):
             for v in (1, 2):
                 for kind in ('factory', 'sysupgrade'):
                     (images / f'immortalwrt-qualcommax-ipq807x-linksys_mx4200v{v}-squashfs-{kind}.bin').write_bytes(b'TEST FIXTURE ONLY')
-            verify.images(root)
-            self.assertEqual(len(list((root/'upload').iterdir())), 4)
+            with self.assertRaises(ValueError):
+                verify.images(root)
+            self.assertFalse((root/'upload').exists())
 
     def test_missing_image_fails(self):
         with tempfile.TemporaryDirectory() as d:
