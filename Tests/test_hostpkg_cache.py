@@ -37,6 +37,54 @@ class HostpkgCacheTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 cache.cache_key(root, 'tc', 'go')
 
+    def test_feed_scan_pid_metadata_does_not_invalidate_sources(self):
+        cache = self.load()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'package').mkdir()
+            (root / 'feeds/demo').mkdir(parents=True)
+            recipe = root / 'feeds/demo/Makefile'
+            recipe.write_text('host recipe')
+            metadata = root / 'feeds/demo.tmp'
+            (metadata / 'info').mkdir(parents=True)
+            (metadata / '.packageinfo').write_text('generated package index')
+            (metadata / '.targetinfo').touch()
+            (root / 'feeds/demo.index').symlink_to('demo.tmp/.packageinfo')
+            (root / 'feeds/demo.targetindex').symlink_to('demo.tmp/.targetinfo')
+            cookie = metadata / 'info/.files-packageinfo-1234'
+            cookie.write_text('same source list')
+            stamp = cookie.stat().st_mtime_ns
+            key = cache.cache_key(root, 'tc', 'go')
+            self.assertEqual(stamp, cookie.stat().st_mtime_ns)
+            cookie.rename(cookie.with_name('.files-packageinfo-5678'))
+            (metadata / '.packageinfo').write_text('regenerated index')
+            self.assertEqual(key, cache.cache_key(root, 'tc', 'go'))
+            recipe.write_text('changed host recipe')
+            self.assertNotEqual(key, cache.cache_key(root, 'tc', 'go'))
+
+    def test_metadata_exclusion_does_not_hide_source_or_bootstrap(self):
+        cache = self.load()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'package').mkdir()
+            (root / 'feeds/demo/nested.tmp').mkdir(parents=True)
+            (root / 'feeds/orphan.tmp').mkdir()
+            for relative in ('feeds/demo/nested.tmp/input', 'feeds/orphan.tmp/input',
+                             'feeds/demo/source.index'):
+                path = root / relative
+                key = cache.cache_key(root, 'tc', 'go')
+                path.write_text('real source')
+                self.assertNotEqual(key, cache.cache_key(root, 'tc', 'go'))
+            metadata = root / 'feeds/demo.tmp'
+            metadata.mkdir()
+            (metadata / 'input').write_text('scan output')
+            bootstrap = cache.fingerprint(root, ('feeds',))
+            (metadata / 'input').write_text('changed')
+            self.assertNotEqual(bootstrap, cache.fingerprint(root, ('feeds',)))
+            (root / 'package/unsafe').symlink_to('../feeds/demo.tmp/input')
+            with self.assertRaises(ValueError):
+                cache.cache_key(root, 'tc', 'go')
+
     def test_workflow_has_exact_paired_hostpkg_tier(self):
         import yaml
         workflow = yaml.safe_load((SCRIPT.parents[1] / '.github/workflows/MX4200.yml').read_text())

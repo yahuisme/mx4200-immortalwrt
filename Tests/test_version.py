@@ -11,6 +11,7 @@ class VersionTest(unittest.TestCase):
     def test_settings_preserve_official_version_templates(self):
         # Minimal filesystem fixture exercises the entire settings script.
         files = {
+            'feeds/luci/applications/luci-app-advanced-reboot/root/usr/share/luci/menu.d/luci-app-advanced-reboot.json': '{"order": 90}\n',
             'feeds/luci/collections/luci/Makefile': 'luci-theme-bootstrap\n',
             'feeds/luci/modules/luci-mod-system/flash.js': '192.168.1.1\n',
             'package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc':

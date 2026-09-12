@@ -8,6 +8,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 VALUES = dict(WRT_THEME="aurora", WRT_IP="192.168.8.1", WRT_SSID="MX4200", WRT_WORD="test-password")
 WIFI_PATH = "package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc"
+REBOOT_MENU = "feeds/luci/applications/luci-app-advanced-reboot/root/usr/share/luci/menu.d/luci-app-advanced-reboot.json"
 # Official wifi-scripts uses an encryption variable, not a literal UCI default.
 WIFI_TEMPLATE = """\
         let country, encryption, defaults, num_global_macaddr;
@@ -36,6 +37,7 @@ class SettingsTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.files = {
+            REBOOT_MENU: '{"order": 90}\n',
             "feeds/luci/collections/luci/Makefile": "DEPENDS:=+luci-theme-bootstrap\n +luci-app-attendedsysupgrade\n",
             "feeds/luci/modules/luci-mod-system/htdocs/flash.js": "const ip = '192.168.1.1';\n",
             WIFI_PATH: WIFI_TEMPLATE,
@@ -89,6 +91,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         expected = {
             **self.files,
+            REBOOT_MENU: '{"order": 91}\n',
             "feeds/luci/collections/luci/Makefile": "DEPENDS:=+luci-theme-aurora\n",
             "feeds/luci/modules/luci-mod-system/htdocs/flash.js": "const ip = '192.168.8.1';\n",
             WIFI_PATH: WIFI_TEMPLATE.replace(

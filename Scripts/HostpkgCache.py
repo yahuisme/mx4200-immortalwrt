@@ -9,26 +9,28 @@ import sys
 
 EPOCH = 946684800
 ARTIFACTS = ('build_dir/hostpkg', 'staging_dir/hostpkg')
-SCHEMA = 'mx4200-hostpkg-v1'
+SCHEMA = 'mx4200-hostpkg-v2'
 
 
-def fingerprint(root, names, normalize=False):
+def fingerprint(root, names, normalize=False, excluded=()):
     digest = hashlib.sha256()
     for name in names:
         base = root / name
         if not base.is_dir() or base.is_symlink():
             raise ValueError('Missing or linked input root: ' + name)
         for directory, dirs, files in os.walk(base, followlinks=False):
-            dirs[:] = sorted(d for d in dirs if d != '.git')
+            dirs[:] = sorted(d for d in dirs if d != '.git'
+                             and Path(directory) / d not in excluded)
             for name_ in sorted(set(dirs + files)):
                 item = Path(directory) / name_
                 relative = item.relative_to(root)
-                if item.name == '.git':
+                if item.name == '.git' or item in excluded:
                     continue
                 if item.is_symlink():
                     target = item.resolve(strict=True)
                     # Source feed links are allowed only within the hashed roots.
-                    if not any(target.is_relative_to(root / n) for n in names):
+                    if (not any(target.is_relative_to(root / n) for n in names)
+                            or any(target.is_relative_to(p) for p in excluded)):
                         raise ValueError('Uncovered linked input: ' + str(relative))
                     content = os.readlink(item).encode()
                 elif item.is_file():
@@ -48,7 +50,17 @@ def cache_key(root, toolchain, bootstrap):
     # Conservative complete package/feed source inventory includes indirect
     # PKG_FILE_DEPENDS, shared language recipes and arbitrary host dependencies.
     # Do not hash generated tmp metadata or cache target build/staging products.
-    source = fingerprint(root, ('package', 'feeds'), normalize=True)
+    # scripts/feeds update_index writes these sibling scan products. Their
+    # info/.files-* and .overrides-* names contain the process SCAN_COOKIE.
+    # Exclude only metadata paired with an actual feed, never nested *.tmp
+    # recipe inputs or bootstrap files. Keep all prepared source content.
+    excluded = set()
+    for feed in (root / 'feeds').iterdir():
+        if feed.is_dir() and not feed.name.endswith('.tmp'):
+            excluded.update(feed.with_name(feed.name + suffix)
+                            for suffix in ('.tmp', '.index', '.targetindex'))
+    source = fingerprint(root, ('package', 'feeds'), normalize=True,
+                         excluded=excluded)
     return hashlib.sha256(json.dumps([SCHEMA, str(root.resolve()), toolchain,
                                      bootstrap, source]).encode()).hexdigest()
 
