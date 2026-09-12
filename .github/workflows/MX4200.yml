@@ -7,6 +7,10 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+# Avoid overlapping builds and cache uploads without cancelling an active build.
+concurrency:
+  group: mx4200-build-cache
+  cancel-in-progress: false
 jobs:
   check:
     runs-on: ubuntu-24.04
@@ -14,7 +18,7 @@ jobs:
       changed: ${{ steps.compare.outputs.changed }}
     steps:
       - uses: actions/checkout@main
-      - name: Check release sources
+      - name: Check sources
         if: github.event_name == 'schedule'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -22,7 +26,7 @@ jobs:
           sudo mkdir -p /mnt/build_wrt
           sudo chown "$USER:$USER" /mnt/build_wrt
           python3 Scripts/Inputs.py --probe /mnt/build_wrt/source-lock.json
-      - name: Compare source lock
+      - name: Compare sources
         id: compare
         env:
           GH_TOKEN: ${{ github.token }}
@@ -68,7 +72,7 @@ jobs:
       WRT_IP: 192.168.10.1
     steps:
       - uses: actions/checkout@main
-      - name: Install dependencies
+      - name: Install deps
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
@@ -85,17 +89,13 @@ jobs:
           VERSION=$(python3 -c 'import json; print(json.load(open("/mnt/build_wrt/source-lock.json"))["official_tag"])')
           REVISION=$(python3 -c 'import pathlib,re; v=pathlib.Path("/mnt/build_wrt/version").read_text().strip(); m=re.fullmatch(r"(r[0-9]+)-[0-9a-f]+", v); assert m, "Invalid official revision: " + v; print(m[1])')
           echo "WRT_RELEASE_NAME=MX4200_ImmortalWrt_${VERSION}_${REVISION}_$(TZ=Asia/Hong_Kong date +'%y.%m.%d-%H.%M.%S')" >> "$GITHUB_ENV"
-      - name: Restore cache
+      - name: Restore downloads
         id: downloads
         uses: actions/cache/restore@main
         with:
           path: /mnt/build_wrt/dl
           key: mx4200-build-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: mx4200-build-${{ runner.os }}-${{ runner.arch }}-
-
-      - name: Fingerprint restored downloads
-        id: downloads-before
-        run: python3 Scripts/Downloads.py /mnt/build_wrt/dl
 
       - name: Restore ccache
         id: ccache
@@ -105,24 +105,60 @@ jobs:
           key: mx4200-ccache-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: mx4200-ccache-${{ runner.os }}-${{ runner.arch }}-
 
+      # Cache version includes the exact path list. Keep the old combined layout
+      # for migration only; move current hits aside so legacy cannot overwrite them.
+      - name: Protect caches
+        id: protect-current
+        if: steps.downloads.outputs.cache-matched-key == '' || steps.ccache.outputs.cache-matched-key == ''
+        env:
+          DOWNLOADS_MATCHED: ${{ steps.downloads.outputs.cache-matched-key }}
+          CCACHE_MATCHED: ${{ steps.ccache.outputs.cache-matched-key }}
+        run: |
+          cd /mnt/build_wrt
+          mkdir .current-cache
+          if [ -n "$DOWNLOADS_MATCHED" ]; then mv dl .current-cache/dl; fi
+          if [ -n "$CCACHE_MATCHED" ]; then mv .ccache .current-cache/.ccache; fi
+      - name: Restore legacy
+        if: steps.downloads.outputs.cache-matched-key == '' || steps.ccache.outputs.cache-matched-key == ''
+        uses: actions/cache/restore@main
+        with:
+          path: |
+            /mnt/build_wrt/dl
+            /mnt/build_wrt/.ccache
+          key: mx4200-build-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mx4200-build-${{ runner.os }}-${{ runner.arch }}-
+      - name: Recover caches
+        if: always() && steps.protect-current.outcome == 'success'
+        run: |
+          cd /mnt/build_wrt
+          for name in dl .ccache; do
+            if [ -d ".current-cache/$name" ]; then
+              rm -rf -- "$name"
+              mv ".current-cache/$name" "$name"
+            fi
+          done
+          rmdir .current-cache
+      - name: Snapshot downloads
+        id: downloads-before
+        run: python3 Scripts/Downloads.py /mnt/build_wrt/dl
+
+      # Use the feed's exact bootstrap release; still build final host Go natively.
       - name: Prepare packages
+        id: go-bootstrap
         run: |
           cd /mnt/build_wrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a
           cd package
           bash "$GITHUB_WORKSPACE/Scripts/Packages.sh"
-      # Use the feed's exact bootstrap release; still build final host Go natively.
-      - name: Identify Go bootstrap
-        id: go-bootstrap
-        run: python3 Scripts/GoBootstrap.py /mnt/build_wrt
-      - name: Install Go bootstrap
+          python3 "$GITHUB_WORKSPACE/Scripts/GoBootstrap.py" /mnt/build_wrt
+      - name: Setup Go
         uses: actions/setup-go@v6
         with:
           go-version: ${{ steps.go-bootstrap.outputs.version }}
           check-latest: false
           cache: false
-      - name: Configure firmware
+      - name: Configure
         run: |
           cd /mnt/build_wrt
           cp "$GITHUB_WORKSPACE/Config/MX4200.txt" .config
@@ -132,10 +168,10 @@ jobs:
           printf 'CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT="%s"\n' "$(go env GOROOT)" >> .config
           make defconfig
           python3 "$GITHUB_WORKSPACE/Scripts/Verify.py" config .
-      - name: Identify toolchain cache
+      - name: Toolchain key
         id: toolchain-key
         run: python3 Scripts/Cache.py /mnt/build_wrt
-      - name: Restore toolchain cache
+      - name: Restore toolchain
         id: toolchain
         uses: actions/cache/restore@main
         with:
@@ -145,9 +181,9 @@ jobs:
             /mnt/build_wrt/build_dir/host
             /mnt/build_wrt/build_dir/toolchain-*
           key: mx4200-toolchain-v1-${{ steps.toolchain-key.outputs.key }}
-      - name: Download packages
+      - name: Download
         run: make -C /mnt/build_wrt download -j"$(nproc)"
-      - name: Compile firmware
+      - name: Compile
         run: |
           cd /mnt/build_wrt
           export CCACHE_DIR=/mnt/build_wrt/.ccache
@@ -160,7 +196,7 @@ jobs:
           fi
           staging_dir/host/bin/ccache --zero-stats
           make -j"$(nproc)" V=s
-      - name: Cache statistics
+      - name: Cache stats
         if: always()
         run: |
           cd /mnt/build_wrt
@@ -169,7 +205,7 @@ jobs:
             CCACHE_DIR=/mnt/build_wrt/.ccache CCACHE_MAXSIZE=2G staging_dir/host/bin/ccache --show-stats
           fi
           du -sh dl .ccache staging_dir/host* staging_dir/toolchain* build_dir/host* build_dir/toolchain* 2>/dev/null || true
-      - name: Save toolchain cache
+      - name: Save toolchain
         if: success() && steps.toolchain.outputs.cache-hit != 'true'
         uses: actions/cache/save@main
         with:
@@ -180,10 +216,10 @@ jobs:
             /mnt/build_wrt/build_dir/toolchain-*
           key: ${{ steps.toolchain.outputs.cache-primary-key }}
       # Snapshot after compile too: Go may populate dl/go-mod-cache during build.
-      - name: Fingerprint final downloads
+      - name: Check downloads
         id: downloads-after
         run: python3 Scripts/Downloads.py /mnt/build_wrt/dl
-      - name: Save cache
+      - name: Save downloads
         if: success() && steps.downloads-after.outputs.files != '0' && (steps.downloads.outputs.cache-matched-key == '' || steps.downloads-before.outputs.digest != steps.downloads-after.outputs.digest)
         uses: actions/cache/save@main
         with:
@@ -197,13 +233,13 @@ jobs:
           key: ${{ steps.ccache.outputs.cache-primary-key }}
       - name: Verify images
         run: python3 Scripts/Verify.py images /mnt/build_wrt
-      - name: Upload source lock
+      - name: Upload lock
         uses: actions/upload-artifact@main
         with:
           name: source-lock
           path: /mnt/build_wrt/source-lock.json
           if-no-files-found: error
-      - name: Release firmware
+      - name: Release
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}

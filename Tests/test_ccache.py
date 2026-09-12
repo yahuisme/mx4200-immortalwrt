@@ -10,7 +10,7 @@ WORKFLOW = Path(__file__).resolve().parents[1] / '.github/workflows/MX4200.yml'
 class CcacheTest(unittest.TestCase):
     def test_cold_and_warm_reset_order(self):
         text = WORKFLOW.read_text()
-        block = text.split('      - name: Compile firmware\n', 1)[1].split('      - name:', 1)[0]
+        block = text.split('      - name: Compile\n', 1)[1].split('      - name:', 1)[0]
         script = '\n'.join(line[10:] for line in block.splitlines()[1:])
         for warm in (False, True):
             with self.subTest(warm=warm), tempfile.TemporaryDirectory() as directory:

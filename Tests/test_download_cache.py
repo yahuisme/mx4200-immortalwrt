@@ -12,9 +12,9 @@ class DownloadCacheTests(unittest.TestCase):
         workflow = (ROOT / '.github/workflows/MX4200.yml').read_text()
         self.assertIn("steps.downloads-after.outputs.files != '0'", workflow)
         self.assertIn("steps.downloads.outputs.cache-matched-key == '' || steps.downloads-before.outputs.digest != steps.downloads-after.outputs.digest", workflow)
-        self.assertLess(workflow.index('id: downloads-before'), workflow.index('name: Download packages'))
-        self.assertLess(workflow.index('name: Compile firmware'), workflow.index('id: downloads-after'))
-        self.assertLess(workflow.index('id: downloads-after'), workflow.index('name: Save cache'))
+        self.assertLess(workflow.index('id: downloads-before'), workflow.index('name: Download'))
+        self.assertLess(workflow.index('name: Compile'), workflow.index('id: downloads-after'))
+        self.assertLess(workflow.index('id: downloads-after'), workflow.index('name: Save downloads'))
 
     def test_content_not_timestamp_controls_save(self):
         script = ROOT / 'Scripts/Downloads.py'
