@@ -1,69 +1,22 @@
 # SPDX-License-Identifier: MIT
+# Copyright (C) 2026 VIKINGYFY
+
+# Linksys MX4200v1 / MX4200v2 每日编译
 name: MX4200 ImmortalWrt Builds
+
 on:
-  # 香港时间每日 12:00 = UTC 04:00；源码适配不匹配时直接失败。
+  # GitHub Actions 使用 UTC；香港时间每日 14:00 = UTC 06:00
   schedule:
-    - cron: '0 4 * * *'
+    - cron: '0 6 * * *'
   workflow_dispatch:
+
 permissions:
+  actions: write
   contents: write
-  actions: read
-# One writer for this product; freshness checks also reject old manual reruns.
-concurrency:
-  group: mx4200-immortalwrt-release
-  cancel-in-progress: false
+
 jobs:
-  check:
-    runs-on: ubuntu-24.04
-    outputs:
-      changed: ${{ steps.compare.outputs.changed }}
-    steps:
-      - uses: actions/checkout@main
-      - name: Check release sources
-        if: github.event_name == 'schedule'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          sudo mkdir -p /mnt/build_wrt
-          sudo chown "$USER:$USER" /mnt/build_wrt
-          python3 Scripts/Inputs.py --probe /mnt/build_wrt/source-lock.json
-      - name: Compare source lock
-        id: compare
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
-            echo 'changed=true' >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          python3 - <<'PY'
-          import json, os, subprocess
-          from pathlib import Path
-          current = json.loads(Path('/mnt/build_wrt/source-lock.json').read_text())
-          try:
-              body = subprocess.run(
-                  ['gh', 'release', 'view', '-R', os.environ['GITHUB_REPOSITORY'], '--json', 'body', '--jq', '.body'],
-                  check=True, capture_output=True, text=True).stdout
-          except subprocess.CalledProcessError:
-              body = ''
-          old = {}
-          for line in body.splitlines():
-              if line.startswith('官方 ImmortalWrt '):
-                  old['official_commit'] = line.rsplit('`', 2)[1]
-              elif line.startswith('LiBwrt NSS '):
-                  old['donor_commit'] = line.rsplit('`', 2)[1]
-              elif line.startswith('Firmware inputs: `') and line.endswith('`'):
-                  old['firmware_inputs_sha256'] = line.rsplit('`', 2)[1]
-          changed = any(old.get(key) != current[key] for key in
-                        ('official_commit', 'donor_commit', 'firmware_inputs_sha256'))
-          Path(os.environ['GITHUB_OUTPUT']).write_text(f"changed={'true' if changed else 'false'}\n")
-          print(f"official: {old.get('official_commit')} -> {current['official_commit']}")
-          print(f"donor: {old.get('donor_commit')} -> {current['donor_commit']}")
-          print(f"changed={changed}")
-          PY
   build:
-    needs: check
-    if: github.event_name == 'workflow_dispatch' || needs.check.outputs.changed == 'true'
+    name: MX4200v1-v2
     runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ github.token }}
@@ -71,337 +24,151 @@ jobs:
       WRT_SSID: MX4200
       WRT_WORD: 12345678
       WRT_IP: 192.168.10.1
+      WRT_REPO: https://github.com/VIKINGYFY/immortalwrt.git
+      WRT_BRANCH: main
     steps:
-      - uses: actions/checkout@main
-      - name: Install dependencies
+      - name: Checkout
+        uses: actions/checkout@main
+
+      - name: Initialization Environment
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get -yqq update
-          sudo apt-get -yqq install --no-install-recommends \
-            bison build-essential file flex gawk g++-multilib gcc-multilib \
-            gettext libelf-dev libncurses-dev libssl-dev python3-setuptools python3-venv \
-            rsync swig unzip zlib1g-dev
-          sudo mkdir -p /mnt/build_wrt /mnt/nss-sources
-          sudo chown "$USER:$USER" /mnt/build_wrt /mnt/nss-sources
-          python3 -m venv "$RUNNER_TEMP/image-tools"
-          "$RUNNER_TEMP/image-tools/bin/pip" install 'ubi-reader==0.8.16'
-          echo "$RUNNER_TEMP/image-tools/bin" >> "$GITHUB_PATH"
-      - name: Prepare sources
-        run: |
-          python3 Scripts/Prepare.py --sources /mnt/nss-sources --output /mnt/build_wrt
-          VERSION=$(python3 -c 'import json; print(json.load(open("/mnt/build_wrt/source-lock.json"))["official_tag"])')
-          REVISION=$(python3 -c 'import pathlib,re; v=pathlib.Path("/mnt/build_wrt/version").read_text().strip(); m=re.fullmatch(r"(r[0-9]+)-[0-9a-f]+", v); assert m, "Invalid official revision: " + v; print(m[1])')
-          echo "WRT_RELEASE_NAME=MX4200_ImmortalWrt_${VERSION}_${REVISION}_$(TZ=Asia/Hong_Kong date +'%y.%m.%d-%H.%M.%S')" >> "$GITHUB_ENV"
-      - name: Select freshest caches
-        id: cache-selection
-        env:
-          CACHE_PLATFORM: ${{ runner.os }}-${{ runner.arch }}
-        run: python3 Scripts/CacheSelection.py
-      - name: Restore downloads
-        id: downloads
-        uses: actions/cache/restore@main
-        with:
-          path: /mnt/build_wrt/dl
-          key: ${{ steps.cache-selection.outputs.downloads-key || format('mx4200-build-{0}-{1}-{2}-{3}', runner.os, runner.arch, github.run_id, github.run_attempt) }}
+          sudo -E apt-get -yqq update
+          sudo -E apt-get -yqq install --no-install-recommends \
+            bison build-essential ccache file flex gawk \
+            g++-multilib gcc-multilib gettext libelf-dev libncurses-dev \
+            libssl-dev python3-setuptools rsync swig unzip zlib1g-dev
+          sudo mkdir -p /mnt/build_wrt
+          sudo chown "$USER:$USER" /mnt/build_wrt
 
-      - name: Restore ccache
-        id: ccache
-        uses: actions/cache/restore@main
-        with:
-          path: /mnt/build_wrt/.ccache
-          key: ${{ steps.cache-selection.outputs.ccache-key || format('mx4200-ccache-{0}-{1}-{2}-{3}', runner.os, runner.arch, github.run_id, github.run_attempt) }}
-
-      # Cache version includes the exact path list. Keep the old combined layout
-      # for migration only; move current hits aside so legacy cannot overwrite them.
-      - name: Protect caches
-        id: protect-current
-        if: steps.cache-selection.outputs.restore-legacy == 'true'
-        env:
-          DOWNLOADS_MATCHED: ${{ steps.cache-selection.outputs.legacy-downloads != 'true' && steps.downloads.outputs.cache-matched-key || '' }}
-          CCACHE_MATCHED: ${{ steps.cache-selection.outputs.legacy-ccache != 'true' && steps.ccache.outputs.cache-matched-key || '' }}
+      - name: Clone Code
         run: |
-          cd /mnt/build_wrt
-          mkdir .current-cache
-          if [ -d dl ]; then mv dl .current-cache/dl; fi
-          if [ -d .ccache ]; then mv .ccache .current-cache/.ccache; fi
-          if [ -n "$DOWNLOADS_MATCHED" ]; then touch .current-cache/keep-dl; fi
-          if [ -n "$CCACHE_MATCHED" ]; then touch .current-cache/keep-.ccache; fi
-      - name: Restore legacy
-        id: legacy
-        if: steps.cache-selection.outputs.restore-legacy == 'true'
+          WRT_DATE="$(TZ=Asia/Hong_Kong date +'%y.%m.%d-%H.%M.%S')"
+          git clone --single-branch --branch "$WRT_BRANCH" "$WRT_REPO" /mnt/build_wrt/
+          cd /mnt/build_wrt/
+          WRT_HASH=$(git rev-parse HEAD)
+          WRT_REV=$(./scripts/getver.sh | sed -E 's/^r([0-9]+).*/\1/')
+          echo "WRT_DATE=$WRT_DATE" >> "$GITHUB_ENV"
+          echo "WRT_RELEASE_NAME=MX4200_ImmortalWrt_${WRT_DATE}_r${WRT_REV}" >> "$GITHUB_ENV"
+          echo "WRT_CACHE_PREFIX=wrt-immortalwrt-main-qualcommax-ipq807x" >> "$GITHUB_ENV"
+          echo "WRT_HASH=$WRT_HASH" >> "$GITHUB_ENV"
+          echo "WRT_CACHE_KEY=wrt-immortalwrt-main-qualcommax-ipq807x-$WRT_HASH" >> "$GITHUB_ENV"
+
+          PROJECT_MIRRORS_FILE="./scripts/projectsmirrors.json"
+          if [ -f "$PROJECT_MIRRORS_FILE" ]; then
+            sed -i '/.cn\//d; /tencent/d; /aliyun/d' "$PROJECT_MIRRORS_FILE"
+          fi
+
+      - name: Restore Build Cache
+        id: cache-restore
         uses: actions/cache/restore@main
         with:
+          key: ${{ env.WRT_CACHE_KEY }}
+          restore-keys: |
+            ${{ env.WRT_CACHE_PREFIX }}-
           path: |
-            /mnt/build_wrt/dl
             /mnt/build_wrt/.ccache
-          key: ${{ steps.cache-selection.outputs.legacy-key }}
-      - name: Recover caches
-        if: always() && steps.protect-current.outcome == 'success'
-        env:
-          LEGACY_MATCHED: ${{ steps.legacy.outputs.cache-matched-key }}
-          LEGACY_OUTCOME: ${{ steps.legacy.outcome }}
-        run: |
-          cd /mnt/build_wrt
-          for name in dl .ccache; do
-            if [ -d ".current-cache/$name" ]; then
-              if [ -f ".current-cache/keep-$name" ] || [ -z "$LEGACY_MATCHED" ] || [ "$LEGACY_OUTCOME" != success ]; then
-                rm -rf -- "$name"
-                mv ".current-cache/$name" "$name"
-              else
-                rm -rf -- ".current-cache/$name"
-              fi
-            fi
-            rm -f -- ".current-cache/keep-$name"
-          done
-          rmdir .current-cache
-      - name: Snapshot downloads
-        id: downloads-before
-        run: python3 Scripts/Downloads.py /mnt/build_wrt/dl
+            /mnt/build_wrt/dl
+            /mnt/build_wrt/staging_dir/host*
+            /mnt/build_wrt/staging_dir/tool*
 
-      # Use the exact feed bootstrap; final host Go still builds from source.
-      - name: Prepare packages
-        id: go-bootstrap
+      - name: Prepare Restored Build Cache
+        if: steps.cache-restore.outputs.cache-matched-key != ''
         run: |
-          cd /mnt/build_wrt
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-          cd package
+          find "/mnt/build_wrt/staging_dir" -type d -name "stamp" -not -path "*target*" | while read -r DIR; do
+            find "$DIR" -type f -exec touch {} +
+          done
+          mkdir -p /mnt/build_wrt/tmp
+          echo "1" > /mnt/build_wrt/tmp/.build
+          echo "restored build cache: ${{ steps.cache-restore.outputs.cache-matched-key }}"
+
+      - name: Update Feeds
+        run: |
+          cd /mnt/build_wrt/
+          ./scripts/feeds update -a >/dev/null || { echo "::error::feeds update failed"; exit 1; }
+          ./scripts/feeds install -a >/dev/null || { echo "::error::feeds install failed"; exit 1; }
+
+      - name: Custom Packages
+        run: |
+          cd /mnt/build_wrt/package/
           bash "$GITHUB_WORKSPACE/Scripts/Packages.sh"
-          python3 "$GITHUB_WORKSPACE/Scripts/GoBootstrap.py" /mnt/build_wrt
-      - name: Setup Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: ${{ steps.go-bootstrap.outputs.version }}
-          check-latest: false
-          cache: false
-      - name: Configure firmware
+          bash "$GITHUB_WORKSPACE/Scripts/Handles.sh"
+
+      - name: Custom Settings
         run: |
-          cd /mnt/build_wrt
-          cp "$GITHUB_WORKSPACE/Config/MX4200.txt" .config
-          cp -a "$GITHUB_WORKSPACE/files" .
+          cd /mnt/build_wrt/
+          cat "$GITHUB_WORKSPACE/Config/MX4200.txt" "$GITHUB_WORKSPACE/Config/GENERAL.txt" >> .config
+          echo 'CONFIG_CCACHE_DIR="/mnt/build_wrt/.ccache"' >> .config
+          cp -rf "$GITHUB_WORKSPACE/files" ./
           bash "$GITHUB_WORKSPACE/Scripts/Settings.sh"
-          echo '# CONFIG_GOLANG_BUILD_BOOTSTRAP is not set' >> .config
-          printf 'CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT="%s"\n' "$(go env GOROOT)" >> .config
-          make defconfig
-          python3 "$GITHUB_WORKSPACE/Scripts/Verify.py" config .
-      - name: Identify toolchain cache
-        id: toolchain-key
-        run: python3 Scripts/Cache.py /mnt/build_wrt
-      - name: Restore toolchain cache
-        id: toolchain
-        uses: actions/cache/restore@main
-        with:
-          path: |
-            /mnt/build_wrt/staging_dir/host
-            /mnt/build_wrt/staging_dir/toolchain-*
-            /mnt/build_wrt/build_dir/host
-            /mnt/build_wrt/build_dir/toolchain-*
-          key: mx4200-toolchain-v1-${{ steps.toolchain-key.outputs.key }}
-      - name: Hostpkg key
-        id: hostpkg-key
-        env:
-          TOOLCHAIN_KEY: ${{ steps.toolchain-key.outputs.key }}
-        run: python3 Scripts/HostpkgCache.py key /mnt/build_wrt "$TOOLCHAIN_KEY"
-      - name: Restore hostpkg
-        id: hostpkg
-        uses: actions/cache/restore@main
-        with:
-          path: /mnt/build_wrt/hostpkg.tar.zst
-          key: mx4200-hostpkg-v1-${{ steps.hostpkg-key.outputs.key }}
-      - name: Unpack hostpkg
-        if: steps.hostpkg.outputs.cache-hit == 'true'
-        run: python3 Scripts/HostpkgCache.py unpack /mnt/build_wrt /mnt/build_wrt/hostpkg.tar.zst
-      - name: Download packages
-        run: make -C /mnt/build_wrt download -j"$(nproc)"
-      - name: Compile firmware
+          make defconfig -j"$(nproc)"
+
+      - name: Download Packages
         run: |
-          cd /mnt/build_wrt
-          export CCACHE_DIR=/mnt/build_wrt/.ccache
-          export CCACHE_MAXSIZE=2G
+          cd /mnt/build_wrt/
+          make download -j"$(nproc)"
+
+      - name: Compile Firmware
+        run: |
+          cd /mnt/build_wrt/
+          export CCACHE_DIR="/mnt/build_wrt/.ccache"
+          export CCACHE_MAXSIZE="15G"
           export CCACHE_SLOPPINESS=file_stat_matches,include_file_mtime,time_macros
           export CCACHE_NOHASHDIR=true
           export CCACHE_COMPILERCHECK=content
-          if [ ! -x staging_dir/host/bin/ccache ]; then
-            make tools/ccache/compile -j"$(nproc)" V=s
-          fi
-          staging_dir/host/bin/ccache --zero-stats
-          make -j"$(nproc)" V=s || make -j1 V=s
-      - name: Cache statistics
-        if: always()
-        run: |
-          cd /mnt/build_wrt
-          if [ -x staging_dir/host/bin/ccache ]; then
-            CCACHE_DIR=/mnt/build_wrt/.ccache CCACHE_MAXSIZE=2G staging_dir/host/bin/ccache --cleanup
-            CCACHE_DIR=/mnt/build_wrt/.ccache CCACHE_MAXSIZE=2G staging_dir/host/bin/ccache --show-stats
-          fi
-          du -sh dl .ccache staging_dir/host* staging_dir/toolchain* build_dir/host* build_dir/toolchain* 2>/dev/null || true
-      # Sequential, read-only admission: denied candidates do not block smaller tiers.
-      # An attempted upload must be read back before any later save; no deletion.
-      # Cache failures are best-effort and must not prevent firmware publication.
-      - name: Admit toolchain cache
-        id: toolchain-admission
-        if: success() && env.CACHE_SAVES_BLOCKED != 'true' && steps.toolchain.outputs.cache-hit != 'true'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CACHE_KEY: ${{ steps.toolchain.outputs.cache-primary-key }}
-        run: |
-          measurement=$(python3 Scripts/CacheAdmission.py measure tools /mnt/build_wrt)
-          bytes=$(printf '%s' "$measurement" | python3 -c 'import json, sys; print(json.load(sys.stdin)["candidate_bytes"])')
-          python3 Scripts/CacheAdmission.py admit --repo "$GITHUB_REPOSITORY" --key "$CACHE_KEY" --ref "$GITHUB_REF" --bytes "$bytes"
-      - name: Save toolchain cache
-        id: save-toolchain
-        if: success() && env.CACHE_SAVES_BLOCKED != 'true' && steps.toolchain-admission.outcome == 'success' && steps.toolchain-admission.outputs.allowed == 'true'
-        continue-on-error: true
+          make -j"$(nproc)" || make -j1 V=s
+          staging_dir/host/bin/ccache -s || ccache -s || true
+
+      - name: Save Build Cache
+        if: success() && steps.cache-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@main
+        continue-on-error: true
         with:
+          key: ${{ env.WRT_CACHE_KEY }}
           path: |
-            /mnt/build_wrt/staging_dir/host
-            /mnt/build_wrt/staging_dir/toolchain-*
-            /mnt/build_wrt/build_dir/host
-            /mnt/build_wrt/build_dir/toolchain-*
-          key: ${{ steps.toolchain.outputs.cache-primary-key }}
-      - name: Verify toolchain cache save
-        id: verify-toolchain
-        if: success() && (steps.save-toolchain.outcome == 'success' || steps.save-toolchain.outcome == 'failure')
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CACHE_KEY: ${{ steps.toolchain.outputs.cache-primary-key }}
+            /mnt/build_wrt/.ccache
+            /mnt/build_wrt/dl
+            /mnt/build_wrt/staging_dir/host*
+            /mnt/build_wrt/staging_dir/tool*
+
+      - name: Package Firmware
         run: |
-          echo 'CACHE_SAVES_BLOCKED=true' >> "$GITHUB_ENV"
-          python3 Scripts/CacheAdmission.py verify --repo "$GITHUB_REPOSITORY" --key "$CACHE_KEY" --ref "$GITHUB_REF" > "$RUNNER_TEMP/cache-verify.json"
-          if python3 -c 'import json, sys; sys.exit(json.load(open(sys.argv[1]))["verified"] is not True)' "$RUNNER_TEMP/cache-verify.json"; then
-            echo 'CACHE_SAVES_BLOCKED=false' >> "$GITHUB_ENV"
+          cd /mnt/build_wrt/
+          mkdir ./upload/
+          find ./bin/targets/ -type f \( -iname '*factory*.bin' -o -iname '*sysupgrade*.bin' \) -exec mv -f {} ./upload/ \;
+          IMAGE_COUNT="$(find ./upload/ -maxdepth 1 -type f -name '*.bin' | wc -l)"
+          if [ "$IMAGE_COUNT" -lt 4 ]; then
+            echo "::error::expected at least 4 firmware images (v1+v2 × factory+sysupgrade), found $IMAGE_COUNT"
+            exit 1
           fi
-      # Snapshot after compile too: Go may populate dl/go-mod-cache during build.
-      - name: Check downloads
-        id: downloads-after
-        run: python3 Scripts/Downloads.py /mnt/build_wrt/dl
-      - name: Admit downloads
-        id: downloads-admission
-        if: success() && env.CACHE_SAVES_BLOCKED != 'true' && steps.downloads-after.outputs.files != '0' && (steps.downloads.outputs.cache-matched-key == '' || steps.cache-selection.outputs.legacy-downloads == 'true' || steps.downloads-before.outputs.digest != steps.downloads-after.outputs.digest)
-        continue-on-error: true
+
+      - name: Release Firmware
         env:
-          GH_TOKEN: ${{ github.token }}
-          CACHE_KEY: mx4200-build-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          RELEASE_NOTES: |
+            ## Linksys MX4200 系列 ImmortalWrt 固件
+
+            本 Release 仅包含以下设备的刷机镜像：
+            - Linksys MX4200v1：`factory.bin` / `sysupgrade.bin`
+            - Linksys MX4200v2：`factory.bin` / `sysupgrade.bin`
+
+            `factory.bin` 用于从原厂固件刷入；`sysupgrade.bin` 用于从已有 ImmortalWrt 升级。
+
+            基于开源 NSS 加速栈构建。
         run: |
-          measurement=$(python3 Scripts/CacheAdmission.py measure dl /mnt/build_wrt)
-          bytes=$(printf '%s' "$measurement" | python3 -c 'import json, sys; print(json.load(sys.stdin)["candidate_bytes"])')
-          python3 Scripts/CacheAdmission.py admit --repo "$GITHUB_REPOSITORY" --key "$CACHE_KEY" --ref "$GITHUB_REF" --bytes "$bytes"
-      - name: Save downloads
-        id: save-downloads
-        if: success() && env.CACHE_SAVES_BLOCKED != 'true' && steps.downloads-admission.outcome == 'success' && steps.downloads-admission.outputs.allowed == 'true'
-        continue-on-error: true
-        uses: actions/cache/save@main
-        with:
-          path: /mnt/build_wrt/dl
-          key: mx4200-build-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
-      - name: Verify downloads save
-        id: verify-downloads
-        if: success() && (steps.save-downloads.outcome == 'success' || steps.save-downloads.outcome == 'failure')
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CACHE_KEY: mx4200-build-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          gh release create "$WRT_RELEASE_NAME" /mnt/build_wrt/upload/*.bin \
+            --title "$WRT_RELEASE_NAME" --notes "$RELEASE_NOTES"
+          gh release list --json tagName --jq '.[].tagName' |
+            grep '^MX4200_' |
+            grep -Fxv "$WRT_RELEASE_NAME" |
+            xargs -r -n1 gh release delete --cleanup-tag -y || true
+
+      - name: Roll Build Cache
+        if: success()
         run: |
-          echo 'CACHE_SAVES_BLOCKED=true' >> "$GITHUB_ENV"
-          python3 Scripts/CacheAdmission.py verify --repo "$GITHUB_REPOSITORY" --key "$CACHE_KEY" --ref "$GITHUB_REF" > "$RUNNER_TEMP/cache-verify.json"
-          if python3 -c 'import json, sys; sys.exit(json.load(open(sys.argv[1]))["verified"] is not True)' "$RUNNER_TEMP/cache-verify.json"; then
-            echo 'CACHE_SAVES_BLOCKED=false' >> "$GITHUB_ENV"
-          fi
-      - name: Admit ccache
-        id: ccache-admission
-        if: success() && env.CACHE_SAVES_BLOCKED != 'true'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CACHE_KEY: mx4200-ccache-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
-        run: |
-          measurement=$(python3 Scripts/CacheAdmission.py measure ccache /mnt/build_wrt)
-          bytes=$(printf '%s' "$measurement" | python3 -c 'import json, sys; print(json.load(sys.stdin)["candidate_bytes"])')
-          python3 Scripts/CacheAdmission.py admit --repo "$GITHUB_REPOSITORY" --key "$CACHE_KEY" --ref "$GITHUB_REF" --bytes "$bytes"
-      - name: Save ccache
-        id: save-ccache
-        if: success() && env.CACHE_SAVES_BLOCKED != 'true' && steps.ccache-admission.outcome == 'success' && steps.ccache-admission.outputs.allowed == 'true'
-        continue-on-error: true
-        uses: actions/cache/save@main
-        with:
-          path: /mnt/build_wrt/.ccache
-          key: mx4200-ccache-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
-      - name: Verify ccache save
-        id: verify-ccache
-        if: success() && (steps.save-ccache.outcome == 'success' || steps.save-ccache.outcome == 'failure')
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CACHE_KEY: mx4200-ccache-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
-        run: |
-          echo 'CACHE_SAVES_BLOCKED=true' >> "$GITHUB_ENV"
-          python3 Scripts/CacheAdmission.py verify --repo "$GITHUB_REPOSITORY" --key "$CACHE_KEY" --ref "$GITHUB_REF" > "$RUNNER_TEMP/cache-verify.json"
-          if python3 -c 'import json, sys; sys.exit(json.load(open(sys.argv[1]))["verified"] is not True)' "$RUNNER_TEMP/cache-verify.json"; then
-            echo 'CACHE_SAVES_BLOCKED=false' >> "$GITHUB_ENV"
-          fi
-      - name: Admit hostpkg
-        id: hostpkg-admission
-        if: success() && env.CACHE_SAVES_BLOCKED != 'true' && steps.hostpkg.outputs.cache-hit != 'true'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CACHE_KEY: ${{ steps.hostpkg.outputs.cache-primary-key }}
-        run: |
-          python3 Scripts/HostpkgCache.py pack /mnt/build_wrt /mnt/build_wrt/hostpkg.tar.zst
-          measurement=$(python3 Scripts/CacheAdmission.py measure hostpkg /mnt/build_wrt)
-          bytes=$(printf '%s' "$measurement" | python3 -c 'import json, sys; print(json.load(sys.stdin)["candidate_bytes"])')
-          python3 Scripts/CacheAdmission.py admit --repo "$GITHUB_REPOSITORY" --key "$CACHE_KEY" --ref "$GITHUB_REF" --bytes "$bytes"
-      - name: Save hostpkg
-        id: save-hostpkg
-        if: success() && env.CACHE_SAVES_BLOCKED != 'true' && steps.hostpkg-admission.outcome == 'success' && steps.hostpkg-admission.outputs.allowed == 'true'
-        continue-on-error: true
-        uses: actions/cache/save@main
-        with:
-          path: /mnt/build_wrt/hostpkg.tar.zst
-          key: ${{ steps.hostpkg.outputs.cache-primary-key }}
-      - name: Verify hostpkg save
-        id: verify-hostpkg
-        if: success() && (steps.save-hostpkg.outcome == 'success' || steps.save-hostpkg.outcome == 'failure')
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CACHE_KEY: ${{ steps.hostpkg.outputs.cache-primary-key }}
-        run: |
-          echo 'CACHE_SAVES_BLOCKED=true' >> "$GITHUB_ENV"
-          python3 Scripts/CacheAdmission.py verify --repo "$GITHUB_REPOSITORY" --key "$CACHE_KEY" --ref "$GITHUB_REF" > "$RUNNER_TEMP/cache-verify.json"
-          if python3 -c 'import json, sys; sys.exit(json.load(open(sys.argv[1]))["verified"] is not True)' "$RUNNER_TEMP/cache-verify.json"; then
-            echo 'CACHE_SAVES_BLOCKED=false' >> "$GITHUB_ENV"
-          fi
-      - name: Verify images
-        run: python3 Scripts/Verify.py images /mnt/build_wrt
-      - name: Upload source lock
-        uses: actions/upload-artifact@main
-        with:
-          name: source-lock
-          path: /mnt/build_wrt/source-lock.json
-          if-no-files-found: error
-      - name: Release firmware
-        if: github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          GH_READ_TOKEN: ${{ github.token }}
-        run: |
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          d = json.loads(Path('/mnt/build_wrt/source-lock.json').read_text())
-          Path('/mnt/build_wrt/release-notes.md').write_text(
-              '## Linksys MX4200v1 / MX4200v2\n\n'
-              '每个硬件版本各一个 factory.bin 和 sysupgrade.bin，共四个镜像。\n'
-              'factory 用于原厂刷入；sysupgrade 用于已有兼容固件升级。请先检查设备与镜像，禁止强刷。\n\n'
-              f'官方 ImmortalWrt {d["official_tag"]}: `{d["official_commit"]}`\n\n'
-              f'LiBwrt NSS {d["donor_tag"]}: `{d["donor_commit"]}`\n\n'
-              f'Firmware inputs: `{d["firmware_inputs_sha256"]}`\n\n'
-              f'NSS source: `LiBwrt stable NSS patches; qosmio recipes`\n\n'
-              '采用第三方 NSS/ECM 与 ath11k 加速补丁，并非官方原版固件。\n')
-          PY
-          python3 Scripts/Release.py /mnt/build_wrt
+          gh cache list --key "$WRT_CACHE_PREFIX-" --limit 100 --json id,key --jq '.[] | [.id, .key] | @tsv' |
+            while IFS=$'\t' read -r CACHE_ID CACHE_KEY; do
+              [ -n "$CACHE_ID" ] || continue
+              [ "$CACHE_KEY" = "$WRT_CACHE_KEY" ] && continue
+              gh cache delete "$CACHE_ID" || true
+            done

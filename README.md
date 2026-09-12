@@ -1,8 +1,8 @@
-# AI 协力构建的 Linksys MX4200 ImmortalWrt 固件
+# AI 协力构建的 Linksys MX4200 系列 ImmortalWrt 固件
 
 适用于 **Linksys MX4200v1 / MX4200v2** 路由器的定制 ImmortalWrt 固件构建项目。
 
-基于 [ImmortalWrt 官方](https://github.com/immortalwrt/immortalwrt)最新正式版，集成 [LiBwrt](https://github.com/LiBwrt/LibWrt) NSS 适配与内置 NSS 软件包。
+本项目基于 [VIKINGYFY/immortalwrt](https://github.com/VIKINGYFY/immortalwrt) 构建，并针对 MX4200 系列调整软件包和配置。
 
 > ⚠️ **仅适用于 Linksys MX4200v1 / MX4200v2，请勿刷入其他型号设备。**
 
@@ -10,37 +10,36 @@
 
 ## ✨ 主要特性
 
-- 🌐 默认中文 LuCI 界面
-- 🎨 默认 Aurora 主题
-- 🚀 集成 NSS / ECM 与 ath11k 无线加速
-- 📡 集成 802.11s Mesh 与 usteer 漫游辅助
-- ⚡ BBR 拥塞控制与 USB 3.0 存储支持
+- 🎨 LuCI 默认主题：Aurora
+- 🕐 系统时区：香港（UTC+8）
+- 🚀 BBR 拥塞控制默认启用（fq + bbr）
+- ⚡ 开源 NSS 硬件加速
+- 🔗 内置 HomeProxy 与 sing-box
+- 📡 三频 Wi-Fi 默认开启 2.4G 与 5.8 GHz
+- 🔄 每日自动构建最新固件
 
 ---
 
 ## 🧩 预装应用
 
+固件严格保持纯净与高效，内置插件全中文支持，代理组件由专属源 [VIKINGYFY/packages](https://github.com/VIKINGYFY/packages) 定制提供：
+
 | 插件 | 功能说明 |
 | :--- | :--- |
-| `luci-app-homeproxy` | 基于 sing-box 的代理管理 |
-| `luci-app-advanced-reboot` | 双分区切换与高级重启 |
-| `luci-app-usteer` | AP / Mesh 漫游辅助 |
-| `luci-app-wol` | 网络唤醒 |
+| [`luci-app-homeproxy`](https://github.com/VIKINGYFY/packages/tree/main/luci-app-homeproxy) | 定制版代理客户端（集成官方最新 `sing-box` 核心） |
+| `luci-app-advanced-reboot` | 高级重启（支持双分区切换与关机） |
+| `luci-app-usteer` | 802.11k/v 智能漫游与弱信号剔除 |
+| `luci-app-wol` | 网络唤醒（Wake-on-LAN） |
 | `luci-app-ttyd` | 网页终端控制台 |
-| `luci-app-aurora-config` | Aurora 主题设置 |
 
 ---
 
-## 📦 固件下载
-
-前往 [Releases](https://github.com/yahuisme/mx4200-immortalwrt/releases) 下载对应硬件版本的镜像。
+## 📦 固件镜像
 
 | 镜像 | 用途 |
 | --- | --- |
-| `factory.bin` | 从原厂固件刷入 |
-| `sysupgrade.bin` | 已有兼容固件升级 |
-
-每次发布包含 MX4200v1 / MX4200v2 各一份 factory 与 sysupgrade 镜像，共四个文件。刷入前核对机身硬件版本与镜像文件名。
+| `factory.bin` | 从原厂固件刷入时使用 |
+| `sysupgrade.bin` | 从已有 ImmortalWrt 升级时使用 |
 
 ---
 
@@ -55,16 +54,16 @@
 
 ## 📡 默认无线配置
 
-| 项目 | 2.4 GHz | 5 GHz 低段 | 5 GHz 高段 |
+| 项目 | 2.4 GHz | 5.2 GHz | 5.8 GHz |
 | --- | --- | --- | --- |
 | 状态 | 开启 | **关闭** | 开启 |
 | 区域 | US | US | US |
 | 信道 | 11 | 48 | 149 |
-| 加密 | WPA2-PSK / CCMP | WPA2-PSK / CCMP | WPA2-PSK / CCMP |
+| 加密 | WPA2-PSK | WPA2-PSK | WPA2-PSK |
 | 发射功率 | 23 dBm | 25 dBm | 25 dBm |
 
 ---
 
 ## 🔄 自动构建
 
-检测到上游更新自动构建。
+GitHub Actions 每日自动构建，每个 Release 仅包含 MX4200v1 / MX4200v2 各自的 `factory.bin` 与 `sysupgrade.bin`。
