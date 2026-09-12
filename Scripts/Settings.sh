@@ -52,6 +52,10 @@ if [ -f "./include/version.mk" ]; then
 fi
 sed -i 's/ImmortalWRT/ImmortalWrt/g' "$CFG_FILE"
 
+# Place Advanced Reboot immediately after the native Reboot entry (90).
+sed -i 's/"order": 90/"order": 91/' \
+	./feeds/luci/applications/luci-app-advanced-reboot/root/usr/share/luci/menu.d/luci-app-advanced-reboot.json
+
 TPL_DIR="./package/luci-app-aurora-config/root/usr/share/aurora"
 if [ -d "$TPL_DIR" ]; then
 	sed -i "s/nav_type '.*'/nav_type 'sidebar'/g; s/struct_radius_base '.*'/struct_radius_base '0.125rem'/g" "$TPL_DIR"/*.template 2>/dev/null || true
