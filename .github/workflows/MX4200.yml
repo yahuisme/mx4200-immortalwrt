@@ -56,6 +56,7 @@ jobs:
           {
             echo "WRT_DATE=$WRT_DATE"
             echo "WRT_RELEASE_NAME=MX4200_ImmortalWrt_${WRT_DATE}_r${WRT_REV}"
+            echo "WRT_RELEASE_TITLE=MX4200-ImmortalWrt-r${WRT_REV}-${WRT_DATE/-/_}"
             echo "WRT_HASH=$WRT_HASH"
           } >> "$GITHUB_ENV"
 
@@ -201,7 +202,7 @@ jobs:
             基于开源 NSS 加速栈构建。
         run: |
           gh release create "$WRT_RELEASE_NAME" /mnt/build_wrt/upload/*.bin \
-            --target "$GITHUB_SHA" --title "$WRT_RELEASE_NAME" --notes "$RELEASE_NOTES"
+            --target "$GITHUB_SHA" --title "$WRT_RELEASE_TITLE" --notes "$RELEASE_NOTES"
           gh release list --json tagName --jq '.[].tagName' |
             grep '^MX4200_' |
             grep -Fxv "$WRT_RELEASE_NAME" |
