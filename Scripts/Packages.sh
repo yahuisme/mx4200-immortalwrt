@@ -33,14 +33,10 @@ for name in luci-theme-aurora luci-app-aurora-config luci-app-homeproxy sing-box
 	test -s "$source/Makefile" || { echo "ERROR: missing $name/Makefile" >&2; exit 1; }
 done
 
-# Keep the mirrored source intact; publish only a fully patched copy.
-sh "$stage/packages/custom/homeproxy/apply.sh" \
-	"$stage/packages/luci-app-homeproxy" "$stage/luci-app-homeproxy"
-
 for name in luci-theme-aurora luci-app-aurora-config luci-app-homeproxy sing-box; do
 	source="$stage/$name"
 	case "$name" in
-		sing-box) source="$stage/packages/$name" ;;
+		luci-app-homeproxy|sing-box) source="$stage/packages/$name" ;;
 	esac
 	# Remove live and dangling feed links as well as in-tree recipes.
 	find . ../feeds/luci ../feeds/packages -name "$name" \( -type d -o -type l \) -prune -exec rm -rf -- {} +
