@@ -3,7 +3,7 @@
 
 Run prepare AFTER final defconfig and BEFORE any tools build/restore. Keep the
 same absolute build root and host environment. Exact tc-key only; rolling-prefix
-is the ONLY restore-prefix. No legacy paths, migration, or hostpkg cache.
+is the ONLY restore-prefix. Hostpkg uses a separate exact companion key.
 pack creates one PAX/gzip archive and reports its actual size. Save THAT file,
 not the original trees. actions/cache adds its own transport wrapper; admission
 reserves overhead, but cannot disable the action's outer compression.
@@ -100,6 +100,8 @@ def prepare(root, ref, host_id):
 def paths(root, tier):
     if tier == 'rolling':
         result = ['dl', '.ccache']
+    elif tier == 'hostpkg':
+        result = ['build_dir/hostpkg', 'staging_dir/hostpkg']
     else:
         result = ['build_dir/host', 'staging_dir/host']
         build = sorted(p.name for p in (root / 'build_dir').glob('toolchain-*'))
@@ -120,6 +122,8 @@ def allowed(name, tier):
         return False
     if tier == 'rolling':
         return parts[0] in ('dl', '.ccache')
+    if tier == 'hostpkg':
+        return len(parts) >= 2 and parts[0] in ('build_dir', 'staging_dir') and parts[1] == 'hostpkg'
     return (len(parts) >= 2 and parts[0] in ('build_dir', 'staging_dir')
             and (parts[1] == 'host' or parts[1].startswith('toolchain-')))
 
@@ -168,13 +172,15 @@ def unpack(root, tier, archive):
             raise ValueError('cache roots must be explicit directories')
         if tier == 'rolling':
             complete = targets == ['.ccache', 'dl']
+        elif tier == 'hostpkg':
+            complete = targets == ['build_dir/hostpkg', 'staging_dir/hostpkg']
         else:
             build = {n.split('/')[1] for n in targets if n.startswith('build_dir/')}
             stage = {n.split('/')[1] for n in targets if n.startswith('staging_dir/')}
             complete = build == stage and 'host' in build and len(build) > 1
         if not complete:
             raise ValueError('incomplete paired cache roots')
-    # Only selected roots move; hostpkg and target outputs never participate.
+    # Only selected tier roots move; target outputs never participate.
     # A root-local backup guarantees same-filesystem atomic renames per tree.
     backup = Path(tempfile.mkdtemp(prefix='.cache-backup-', dir=root))
     moved = []
@@ -224,7 +230,7 @@ def inventory(repo):
 
 def owned_prefix(key, ref):
     prefix = scope(ref)
-    for tier in ('tc-', 'rolling-'):
+    for tier in ('tc-', 'rolling-', 'hostpkg-'):
         if key.startswith(prefix + tier) and len(key) > len(prefix + tier):
             return prefix + tier
     raise ValueError('key outside current schema/ref namespace')
@@ -284,7 +290,7 @@ def main():
     for command in ('pack', 'unpack'):
         c = sub.add_parser(command)
         c.add_argument('--root', type=Path, required=True)
-        c.add_argument('--tier', choices=['tc', 'rolling'], required=True)
+        c.add_argument('--tier', choices=['tc', 'rolling', 'hostpkg'], required=True)
         c.add_argument('--archive', type=Path, required=True)
     for command in ('admit', 'prune'):
         c = sub.add_parser(command)

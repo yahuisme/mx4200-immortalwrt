@@ -75,12 +75,28 @@ jobs:
           cd /mnt/build_wrt/package/
           bash "$GITHUB_WORKSPACE/Scripts/Packages.sh"
 
+      - name: Resolve official Go bootstrap
+        id: go-bootstrap
+        run: python3 Scripts/GoBootstrap.py /mnt/build_wrt
+
+      - name: Install official Go bootstrap
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ steps.go-bootstrap.outputs.version }}
+          check-latest: false
+          cache: false
+
       - name: Configure firmware and derive cache keys
         id: keys
         run: |
           cd /mnt/build_wrt/
-          cat "$GITHUB_WORKSPACE/Config/MX4200.txt" >> .config
-          echo 'CONFIG_CCACHE_DIR="/mnt/build_wrt/.ccache"' >> .config
+          BOOTSTRAP_ROOT="$(go env GOROOT)"
+          {
+            cat "$GITHUB_WORKSPACE/Config/MX4200.txt"
+            echo 'CONFIG_CCACHE_DIR="/mnt/build_wrt/.ccache"'
+            echo '# CONFIG_GOLANG_BUILD_BOOTSTRAP is not set'
+            printf 'CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT="%s"\n' "$BOOTSTRAP_ROOT"
+          } >> .config
           cp -rf "$GITHUB_WORKSPACE/files" ./
           bash "$GITHUB_WORKSPACE/Scripts/Settings.sh"
           make defconfig -j"$(nproc)"
@@ -90,12 +106,25 @@ jobs:
             --root /mnt/build_wrt --ref "$GITHUB_REF" \
             --host-id "${ImageOS}-${ImageVersion}-mx4200-env-v1"
 
+      - name: Derive hostpkg cache key
+        id: hostpkg-key
+        env:
+          TC_KEY: ${{ steps.keys.outputs.tc-key }}
+        run: python3 Scripts/HostpkgCache.py /mnt/build_wrt "$TC_KEY" "$(go env GOROOT)"
+
       - name: Restore toolchain cache
         id: tools
         uses: actions/cache/restore@main
         with:
           key: ${{ steps.keys.outputs.tc-key }}
           path: /mnt/mx4200-cache/tc.tar.gz
+
+      - name: Restore hostpkg cache
+        id: hostpkg
+        uses: actions/cache/restore@main
+        with:
+          key: ${{ steps.hostpkg-key.outputs.hostpkg-key }}
+          path: /mnt/mx4200-cache/hostpkg.tar.gz
 
       - name: Restore downloads and ccache
         id: rolling
@@ -107,7 +136,7 @@ jobs:
 
       - name: Unpack build caches
         run: |
-          for tier in tc rolling; do
+          for tier in tc hostpkg rolling; do
             archive="/mnt/mx4200-cache/$tier.tar.gz"
             if [ -s "$archive" ]; then
               python3 Scripts/Cache.py unpack --root /mnt/build_wrt --tier "$tier" --archive "$archive"
@@ -200,6 +229,7 @@ jobs:
           path: /mnt/mx4200-cache/tc.tar.gz
 
       - name: Prune obsolete toolchain caches
+        id: prune-tc
         if: success() && steps.save-tc.outcome == 'success'
         continue-on-error: true
         env:
@@ -207,9 +237,39 @@ jobs:
         run: |
           python3 Scripts/Cache.py prune --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF" --key "$CACHE_KEY" --delete
 
+      - name: Pack hostpkg cache
+        id: pack-hostpkg
+        if: success() && github.ref == 'refs/heads/main' && steps.hostpkg.outputs.cache-hit != 'true' && (steps.save-tc.outcome == 'skipped' || steps.prune-tc.outcome == 'success')
+        continue-on-error: true
+        env:
+          CACHE_KEY: ${{ steps.hostpkg-key.outputs.hostpkg-key }}
+        run: |
+          python3 Scripts/Cache.py pack --root /mnt/build_wrt --tier hostpkg --archive /mnt/mx4200-cache/hostpkg.tar.gz
+          python3 Scripts/Cache.py --output "$GITHUB_OUTPUT" admit \
+            --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF" --key "$CACHE_KEY" \
+            --archive /mnt/mx4200-cache/hostpkg.tar.gz
+
+      - name: Save hostpkg cache
+        id: save-hostpkg
+        if: success() && steps.pack-hostpkg.outputs.admitted == 'true'
+        uses: actions/cache/save@main
+        continue-on-error: true
+        with:
+          key: ${{ steps.hostpkg-key.outputs.hostpkg-key }}
+          path: /mnt/mx4200-cache/hostpkg.tar.gz
+
+      - name: Prune obsolete hostpkg caches
+        id: prune-hostpkg
+        if: success() && steps.save-hostpkg.outcome == 'success'
+        continue-on-error: true
+        env:
+          CACHE_KEY: ${{ steps.hostpkg-key.outputs.hostpkg-key }}
+        run: |
+          python3 Scripts/Cache.py prune --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF" --key "$CACHE_KEY" --delete
+
       - name: Pack downloads and ccache
         id: pack-rolling
-        if: success() && github.ref == 'refs/heads/main'
+        if: success() && github.ref == 'refs/heads/main' && (steps.save-tc.outcome == 'skipped' || steps.prune-tc.outcome == 'success') && (steps.save-hostpkg.outcome == 'skipped' || steps.prune-hostpkg.outcome == 'success')
         continue-on-error: true
         env:
           CACHE_KEY: ${{ steps.rolling.outputs.cache-primary-key }}

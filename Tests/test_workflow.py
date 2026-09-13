@@ -55,6 +55,7 @@ class WorkflowTests(unittest.TestCase):
                 (workspace / 'Scripts/Settings.sh').write_text(
                     'echo settings >> "$LOG"\n[ "$FAILURE" != settings ]\n')
                 for command, body in {
+                    'go': 'printf "/fixture/go\\n"',
                     'make': 'echo defconfig >> "$LOG"\n[ "$FAILURE" != defconfig ]',
                     'python3': 'test "$PWD" = "$GITHUB_WORKSPACE"\n'
                                'test "$1" = Scripts/Cache.py\n'

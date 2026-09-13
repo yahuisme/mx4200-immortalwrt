@@ -159,6 +159,10 @@ class CacheTests(unittest.TestCase):
         self.assertTrue(binary.is_file(), cold)
         data, timestamp = binary.read_bytes(), binary.stat().st_mtime_ns
         for base in ['build_dir', 'staging_dir']:
+            # defconfig may create an empty target staging toolchain directory;
+            # this test validates native flock, not a complete GCC toolchain.
+            for existing in (self.root / base).glob('toolchain-*'):
+                shutil.rmtree(existing)
             (self.root / base / 'toolchain-fixture').mkdir(exist_ok=True)
         archive = self.base / 'real-flock.gz'
         cache.pack(self.root, 'tc', archive)
