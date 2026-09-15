@@ -164,7 +164,7 @@ jobs:
           staging_dir/host/bin/ccache -z
           # Always report this build's statistics without masking its exit status.
           trap 'status=$?; staging_dir/host/bin/ccache -s || true; exit "$status"' EXIT
-          make -j"$(nproc)" || make -j1 V=s
+          make -j"$(nproc)" V=s || make -j1 V=s
 
       - name: Collect and verify firmware images
         run: |

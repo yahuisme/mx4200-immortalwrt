@@ -121,7 +121,7 @@ if [[ "$*" == *tools/ccache/compile* ]]; then
   exit 0
 fi
 [ "$FAILURE" != final ] || exit 9
-if [ "$FAILURE" = parallel ] && [[ "$*" != *V=s* ]]; then exit 8; fi
+if [ "$FAILURE" = parallel ] && [[ "$1" != -j1 ]]; then exit 8; fi
 exit 0
 ''')
                 make.chmod(0o755)
@@ -131,9 +131,19 @@ exit 0
                 log = (root / 'log').read_text()
                 self.assertEqual(result.returncode == 0, failure in ('', 'parallel', 'stats'), log + result.stderr)
                 if failure == 'bootstrap':
-                    self.assertNotIn('ccache -z', log)
+                    self.assertEqual(result.returncode, 7)
+                    self.assertEqual(len(log.splitlines()), 1)
+                    self.assertIn('tools/ccache/compile', log)
                 else:
-                    self.assertEqual(log.count('ccache -z'), 1)
+                    calls = log.splitlines()
+                    start = 1 if cold else 0
+                    self.assertEqual(calls[start], 'ccache -z')
+                    self.assertRegex(calls[start + 1], r'^make -j[0-9]+ V=s$')
+                    expected = calls[:start + 2]
+                    if failure in ('parallel', 'final'):
+                        expected += ['make -j1 V=s']
+                    expected += ['ccache -s']
+                    self.assertEqual(calls, expected)
                 if failure == 'final':
                     self.assertEqual(result.returncode, 9)
                     self.assertIn('V=s', log)
