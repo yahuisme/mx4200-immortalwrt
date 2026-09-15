@@ -35,7 +35,7 @@ class CompileStatsTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 7 if make_failure else 0, result.stderr)
                 calls = log.read_text().splitlines()
                 self.assertEqual(calls[0], 'ccache -z')
-                self.assertTrue(calls[1].endswith(' V=s'), calls)
+                self.assertRegex(calls[1], r'^make -j[0-9]+$')
                 if make_failure:
                     self.assertEqual(calls[2], 'make -j1 V=s')
                 self.assertEqual(calls[-1], 'ccache -s')

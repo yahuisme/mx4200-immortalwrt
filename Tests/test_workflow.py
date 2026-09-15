@@ -138,7 +138,7 @@ exit 0
                     calls = log.splitlines()
                     start = 1 if cold else 0
                     self.assertEqual(calls[start], 'ccache -z')
-                    self.assertRegex(calls[start + 1], r'^make -j[0-9]+ V=s$')
+                    self.assertRegex(calls[start + 1], r'^make -j[0-9]+$')
                     expected = calls[:start + 2]
                     if failure in ('parallel', 'final'):
                         expected += ['make -j1 V=s']

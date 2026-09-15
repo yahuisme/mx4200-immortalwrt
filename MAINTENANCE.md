@@ -12,7 +12,11 @@
 
 ## 本地验证
 
+GnuTLS 包准备后通过真实 `include/autotools.mk` 检查 hook，仅在重复时删除包配方的冗余 `autoreconf`，保留 gettext 与一次 autoreconf；已修复上游不改写，未知行为停止构建。不修改全局 include 或缓存算法，包输入变化仍会正常更新 hostpkg key。正常并行编译使用默认输出，仅串行失败重试保留 `V=s`。
+
 安装 PyYAML，运行 `python3 -m unittest discover -v`、`actionlint .github/workflows/MX4200.yml` 和 `git diff --check`。
+
+`GNUTLS_PRISTINE_SOURCE` 可指定包含真实 GnuTLS feed 配方及 `include/autotools.mk` 的源码根以验证 hook；这不等于 GnuTLS 编译。`SETTINGS_PRISTINE_SOURCE` 可指定真实设置模板树。
 
 设置 `CACHE_OPENWRT_ROOT` 为专用 VIKING 测试源码树，可启用真实 flock 冷编译、归档恢复与热构建测试；该测试会修改测试树，请勿指向正在使用的编译目录。普通测试不访问远程缓存或发布 API。
 

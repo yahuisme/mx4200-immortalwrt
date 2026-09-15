@@ -75,6 +75,7 @@ jobs:
         run: |
           cd /mnt/build_wrt/package/
           bash "$GITHUB_WORKSPACE/Scripts/Packages.sh"
+          python3 "$GITHUB_WORKSPACE/Scripts/GnuTLS.py" /mnt/build_wrt
 
       - name: Resolve official Go bootstrap
         id: go-bootstrap
@@ -164,7 +165,7 @@ jobs:
           staging_dir/host/bin/ccache -z
           # Always report this build's statistics without masking its exit status.
           trap 'status=$?; staging_dir/host/bin/ccache -s || true; exit "$status"' EXIT
-          make -j"$(nproc)" V=s || make -j1 V=s
+          make -j"$(nproc)" || make -j1 V=s
 
       - name: Collect and verify firmware images
         run: |
