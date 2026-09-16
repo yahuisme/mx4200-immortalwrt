@@ -29,6 +29,35 @@ class HomeProxyTests(unittest.TestCase):
     def key(self, tc='tc-original'):
         return self.module.cache_key(self.root, tc, self.root / 'bootstrap')
 
+    def test_base_feed_alias_preserves_covered_inputs(self):
+        (self.root / 'feeds/base').symlink_to('../package', target_is_directory=True)
+        original = self.key()
+        (self.pkg / 'htdocs/node.js').write_text('updated runtime')
+        self.assertEqual(self.key(), original)
+        recipe = self.pkg / 'Makefile'
+        recipe.write_text(recipe.read_text().replace('PKG_RELEASE:=6', 'PKG_RELEASE:=7'))
+        self.assertEqual(self.key(), original)
+        source = self.root / 'package/tool/Makefile'
+        source.parent.mkdir()
+        source.write_text('host input')
+        changed = self.key()
+        self.assertNotEqual(changed, original)
+        source.write_text('changed host input')
+        self.assertNotEqual(self.key(), changed)
+
+    def test_base_feed_exception_is_exact(self):
+        link = self.root / 'feeds/base'
+        for target in ('../package/luci-app-homeproxy',
+                       '../package/luci-app-homeproxy/htdocs', '../bootstrap'):
+            with self.subTest(target=target):
+                link.symlink_to(target, target_is_directory=True)
+                with self.assertRaises(ValueError):
+                    self.key()
+                link.unlink()
+        (self.root / 'feeds/other').symlink_to('../package', target_is_directory=True)
+        with self.assertRaises(ValueError):
+            self.key()
+
     def test_audited_runtime_and_literal_metadata_are_stable(self):
         original = self.key()
         for name in ('htdocs/node.js', 'root/etc/config/homeproxy', 'po/en/homeproxy.po'):

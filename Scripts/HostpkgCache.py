@@ -64,8 +64,12 @@ def fingerprint(root, names, normalize=False, excluded=(), replacements=None):
                     continue
                 if item.is_symlink():
                     target = item.resolve(strict=True)
+                    # The base feed aliases the package root already inventoried here.
+                    base_feed = (item == root / 'feeds/base' and target == root / 'package'
+                                 and 'package' in names)
                     if (not any(target.is_relative_to(root / n) for n in names)
-                            or any(target.is_relative_to(p) or p.is_relative_to(target)
+                            or any(target.is_relative_to(p)
+                                   or (p.is_relative_to(target) and not base_feed)
                                    for p in excluded)
                             or (replacements and target in replacements)
                             or '.git' in target.relative_to(root).parts):
