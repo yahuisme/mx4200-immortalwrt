@@ -43,6 +43,32 @@ class WorkflowTests(unittest.TestCase):
                              STEPS['Save ' + label]['with']['path'])
         self.assertLess(ordered.index('Prune obsolete toolchain caches'), ordered.index('Pack downloads and ccache'))
 
+    def test_feed_source_logging(self):
+        for failure in ('', 'update', 'install', 'revision'):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                (root / 'scripts').mkdir()
+                (root / 'feeds/packages/.git').mkdir(parents=True)
+                (root / 'feeds/packages.tmp').mkdir()
+                (root / 'bin').mkdir()
+                feeds = root / 'scripts/feeds'
+                feeds.write_text('#!/bin/bash\necho "$1" >> "$LOG"\n[ "$FAILURE" != "$1" ]\n')
+                feeds.chmod(0o755)
+                git = root / 'bin/git'
+                git.write_text('#!/bin/bash\n[ "$FAILURE" != revision ] || exit 7\n'
+                               'test "$*" = "-C feeds/packages rev-parse HEAD" || exit 8\n'
+                               'printf "%040d\\n" 1\n')
+                git.chmod(0o755)
+                result = self.run_block('Update and install feeds', root, {
+                    'FAILURE': failure, 'LOG': str(root / 'calls'),
+                    'PATH': str(root / 'bin') + ':' + os.environ['PATH']})
+                self.assertEqual(result.returncode == 0, not failure, result.stderr)
+                self.assertEqual((root / 'calls').read_text().splitlines(),
+                                 ['update'] if failure == 'update' else ['update', 'install'])
+                if not failure:
+                    self.assertIn('feeds/packages ' + '0' * 39 + '1', result.stdout)
+                    self.assertNotIn('packages.tmp', result.stdout)
+
     def test_configuration_cache_key_handoff(self):
         for failure in ('', 'settings', 'defconfig'):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temp:

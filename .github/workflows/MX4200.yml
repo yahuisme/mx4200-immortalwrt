@@ -70,6 +70,11 @@ jobs:
           cd /mnt/build_wrt/
           ./scripts/feeds update -a >/dev/null || { echo "::error::feeds update failed"; exit 1; }
           ./scripts/feeds install -a >/dev/null || { echo "::error::feeds install failed"; exit 1; }
+          for feed in feeds/*; do
+            [ -e "$feed/.git" ] || continue
+            revision=$(git -C "$feed" rev-parse HEAD)
+            printf '%s %s\n' "$feed" "$revision"
+          done
 
       - name: Prepare custom packages
         run: |
