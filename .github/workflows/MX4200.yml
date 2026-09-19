@@ -203,7 +203,7 @@ jobs:
 
             `factory.bin` 用于从原厂固件刷入；`sysupgrade.bin` 用于从已有 ImmortalWrt 升级。
 
-            基于开源 NSS 加速栈构建。
+            集成 NSS 硬件加速。
         run: |
           gh release create "$WRT_RELEASE_NAME" /mnt/build_wrt/upload/*.bin \
             --target "$GITHUB_SHA" --title "$WRT_RELEASE_TITLE" --notes "$RELEASE_NOTES"
