@@ -1,4 +1,4 @@
-# AI 协力构建的 Linksys MX4200 系列 ImmortalWrt 固件
+# MX4200 ImmortalWrt
 
 适用于 **Linksys MX4200v1 / MX4200v2** 路由器的定制 ImmortalWrt 固件构建项目。
 
