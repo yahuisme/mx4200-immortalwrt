@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   build:
-    name: MX4200v1-v2
+    name: MX4200 Build firmware
     runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ github.token }}
@@ -31,7 +31,7 @@ jobs:
       WRT_REPO: https://github.com/VIKINGYFY/immortalwrt.git
       WRT_BRANCH: main
     steps:
-      - name: Check out build repository
+      - name: Check out repository
         uses: actions/checkout@main
 
       - name: Install build dependencies
@@ -77,23 +77,21 @@ jobs:
           done
 
       - name: Prepare custom packages
+        id: go-bootstrap
         run: |
           cd /mnt/build_wrt/package/
           bash "$GITHUB_WORKSPACE/Scripts/Packages.sh"
           python3 "$GITHUB_WORKSPACE/Scripts/GnuTLS.py" /mnt/build_wrt
+          python3 "$GITHUB_WORKSPACE/Scripts/GoBootstrap.py" /mnt/build_wrt
 
-      - name: Resolve official Go bootstrap
-        id: go-bootstrap
-        run: python3 Scripts/GoBootstrap.py /mnt/build_wrt
-
-      - name: Install official Go bootstrap
+      - name: Install Go bootstrap
         uses: actions/setup-go@v6
         with:
           go-version: ${{ steps.go-bootstrap.outputs.version }}
           check-latest: false
           cache: false
 
-      - name: Configure firmware and derive cache keys
+      - name: Configure firmware and cache keys
         id: keys
         run: |
           cd /mnt/build_wrt/
@@ -113,7 +111,7 @@ jobs:
             --root /mnt/build_wrt --ref "$GITHUB_REF" \
             --host-id "${ImageOS}-${ImageVersion}-mx4200-env-v1"
 
-      - name: Derive hostpkg cache key
+      - name: Prepare hostpkg cache key
         id: hostpkg-key
         env:
           TC_KEY: ${{ steps.keys.outputs.tc-key }}
@@ -172,7 +170,7 @@ jobs:
           trap 'status=$?; staging_dir/host/bin/ccache -s || true; exit "$status"' EXIT
           make -j"$(nproc)" || make -j1 V=s
 
-      - name: Collect and verify firmware images
+      - name: Validate and stage firmware
         run: |
           cd /mnt/build_wrt/
           mkdir ./upload/
@@ -193,7 +191,7 @@ jobs:
             done
           done
 
-      - name: Publish firmware release
+      - name: Publish firmware and prune releases
         if: github.ref == 'refs/heads/main'
         env:
           RELEASE_NOTES: |
@@ -235,7 +233,7 @@ jobs:
           key: ${{ steps.keys.outputs.tc-key }}
           path: /mnt/mx4200-cache/tc.tar.gz
 
-      - name: Prune obsolete toolchain caches
+      - name: Prune old toolchain caches
         id: prune-tc
         if: success() && steps.save-tc.outcome == 'success'
         continue-on-error: true
@@ -265,7 +263,7 @@ jobs:
           key: ${{ steps.hostpkg-key.outputs.hostpkg-key }}
           path: /mnt/mx4200-cache/hostpkg.tar.gz
 
-      - name: Prune obsolete hostpkg caches
+      - name: Prune old hostpkg caches
         id: prune-hostpkg
         if: success() && steps.save-hostpkg.outcome == 'success'
         continue-on-error: true
@@ -295,7 +293,7 @@ jobs:
           key: ${{ steps.rolling.outputs.cache-primary-key }}
           path: /mnt/mx4200-cache/rolling.tar.gz
 
-      - name: Prune obsolete downloads and ccache
+      - name: Prune old downloads and ccache
         if: success() && steps.save-rolling.outcome == 'success'
         continue-on-error: true
         env:

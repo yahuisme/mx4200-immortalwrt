@@ -21,19 +21,19 @@ class WorkflowTests(unittest.TestCase):
 
     def test_release_scope(self):
         self.assertEqual(WORKFLOW['concurrency'], {'group': 'mx4200-build', 'cancel-in-progress': False})
-        self.assertEqual(STEPS['Publish firmware release']['if'], "github.ref == 'refs/heads/main'")
+        self.assertEqual(STEPS['Publish firmware and prune releases']['if'], "github.ref == 'refs/heads/main'")
         self.assertEqual(WORKFLOW['jobs']['build']['runs-on'], 'ubuntu-24.04')
 
     def test_cache_contract(self):
         ordered = list(STEPS)
-        self.assertEqual(STEPS['Configure firmware and derive cache keys']['id'], 'keys')
-        self.assertLess(ordered.index('Configure firmware and derive cache keys'), ordered.index('Restore toolchain cache'))
+        self.assertEqual(STEPS['Configure firmware and cache keys']['id'], 'keys')
+        self.assertLess(ordered.index('Configure firmware and cache keys'), ordered.index('Restore toolchain cache'))
         self.assertNotIn('restore-keys', STEPS['Restore toolchain cache']['with'])
         self.assertIn('rolling-prefix', STEPS['Restore downloads and ccache']['with']['restore-keys'])
         self.assertNotIn('staging_dir', STEPS['Restore toolchain cache']['with']['path'])
         for label in ('toolchain cache', 'downloads and ccache'):
-            prune = 'Prune obsolete ' + ('toolchain caches' if label == 'toolchain cache' else 'downloads and ccache')
-            self.assertLess(ordered.index('Publish firmware release'), ordered.index('Pack ' + label))
+            prune = 'Prune old ' + ('toolchain caches' if label == 'toolchain cache' else 'downloads and ccache')
+            self.assertLess(ordered.index('Publish firmware and prune releases'), ordered.index('Pack ' + label))
             self.assertLess(ordered.index('Pack ' + label), ordered.index('Save ' + label))
             self.assertLess(ordered.index('Save ' + label), ordered.index(prune))
             self.assertIn("github.ref == 'refs/heads/main'", STEPS['Pack ' + label]['if'])
@@ -41,7 +41,7 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn("outcome == 'success'", STEPS[prune]['if'])
             self.assertEqual(STEPS['Restore ' + label]['with']['path'],
                              STEPS['Save ' + label]['with']['path'])
-        self.assertLess(ordered.index('Prune obsolete toolchain caches'), ordered.index('Pack downloads and ccache'))
+        self.assertLess(ordered.index('Prune old toolchain caches'), ordered.index('Pack downloads and ccache'))
 
     def test_feed_source_logging(self):
         for failure in ('', 'update', 'install', 'revision'):
@@ -69,6 +69,43 @@ class WorkflowTests(unittest.TestCase):
                     self.assertIn('feeds/packages ' + '0' * 39 + '1', result.stdout)
                     self.assertNotIn('packages.tmp', result.stdout)
 
+    def test_package_bootstrap_handoff(self):
+        self.assertEqual(STEPS['Prepare custom packages']['id'], 'go-bootstrap')
+        self.assertEqual(STEPS['Install Go bootstrap']['with']['go-version'],
+                         '${{ steps.go-bootstrap.outputs.version }}')
+        for failure in ('', 'packages', 'gnutls', 'bootstrap'):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                (root / 'package').mkdir()
+                workspace = root / 'workspace'
+                scripts = workspace / 'Scripts'
+                scripts.mkdir(parents=True)
+                (scripts / 'Packages.sh').write_text(
+                    'echo packages >> "$LOG"\n[ "$FAILURE" != packages ]\n')
+                (scripts / 'GnuTLS.py').write_text(
+                    'import os, sys\nfrom pathlib import Path\n'
+                    'assert Path.cwd() == Path(sys.argv[1]) / "package"\n'
+                    'with open(os.environ["LOG"], "a") as f: f.write("gnutls\\n")\n'
+                    'sys.exit(7 if os.environ["FAILURE"] == "gnutls" else 0)\n')
+                (scripts / 'GoBootstrap.py').write_bytes((ROOT / 'Scripts/GoBootstrap.py').read_bytes())
+                recipe = root / 'feeds/packages/lang/golang/golang-bootstrap/Makefile'
+                recipe.parent.mkdir(parents=True)
+                recipe.write_text('invalid' if failure == 'bootstrap' else
+                                  'GO_VERSION_MAJOR_MINOR:=1.24\nGO_VERSION_PATCH:=7\n')
+                # Map both trailing-slash cd and bare script arguments to this fixture.
+                code = STEPS['Prepare custom packages']['run'].replace('/mnt/build_wrt', str(root))
+                result = subprocess.run(['bash', '-eo', 'pipefail', '-c', code], cwd=root,
+                    env=dict(os.environ, GITHUB_WORKSPACE=str(workspace),
+                             GITHUB_OUTPUT=str(root / 'output'), LOG=str(root / 'log'),
+                             FAILURE=failure), capture_output=True, text=True)
+                self.assertEqual(result.returncode == 0, not failure, result.stderr)
+                self.assertEqual((root / 'log').read_text().splitlines(),
+                                 ['packages'] if failure == 'packages' else ['packages', 'gnutls'])
+                if failure:
+                    self.assertFalse((root / 'output').exists())
+                else:
+                    self.assertEqual((root / 'output').read_text(), 'version=1.24.7\n')
+
     def test_configuration_cache_key_handoff(self):
         for failure in ('', 'settings', 'defconfig'):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temp:
@@ -91,7 +128,7 @@ class WorkflowTests(unittest.TestCase):
                     stub = workspace / 'bin' / command
                     stub.write_text('#!/bin/bash -e\n' + body + '\n')
                     stub.chmod(0o755)
-                result = self.run_block('Configure firmware and derive cache keys', root, {
+                result = self.run_block('Configure firmware and cache keys', root, {
                     'GITHUB_WORKSPACE': str(workspace), 'GITHUB_OUTPUT': str(root / 'output'),
                     'PATH': str(workspace / 'bin') + ':' + os.environ['PATH'],
                     'LOG': str(root / 'log'), 'FAILURE': failure,
@@ -121,7 +158,7 @@ class WorkflowTests(unittest.TestCase):
                         image.write_bytes(b'' if case == 'empty' else b'fixture, not firmware')
                 if case == 'extra':
                     (images / 'other-sysupgrade.bin').write_bytes(b'fixture')
-                result = self.run_block('Collect and verify firmware images', root)
+                result = self.run_block('Validate and stage firmware', root)
                 self.assertEqual(result.returncode == 0, case == 'valid', result.stdout + result.stderr)
 
     def test_build_control_flow(self):
@@ -194,7 +231,7 @@ if sys.argv[1:3] == ['release', 'list']:
     print('Other_keep')
 ''')
             gh.chmod(0o755)
-            result = self.run_block('Publish firmware release', root, {
+            result = self.run_block('Publish firmware and prune releases', root, {
                 'PATH': str(root) + ':' + os.environ['PATH'], 'LOG': str(root / 'log'),
                 'WRT_RELEASE_NAME': 'MX4200_current', 'GITHUB_SHA': 'a' * 40,
                 'RELEASE_NOTES': 'fixture notes'})

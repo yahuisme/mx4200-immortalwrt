@@ -22,9 +22,9 @@ class GoBootstrapTests(unittest.TestCase):
         self.assertIn("steps.prune-tc.outcome == 'success'", by_name['Pack hostpkg cache']['if'])
         self.assertIn("steps.prune-hostpkg.outcome == 'success'", by_name['Pack downloads and ccache']['if'])
         self.assertIn('admitted', by_name['Save hostpkg cache']['if'])
-        self.assertIn("steps.save-hostpkg.outcome == 'success'", by_name['Prune obsolete hostpkg caches']['if'])
-        self.assertLess(steps.index(by_name['Prune obsolete toolchain caches']), steps.index(by_name['Pack hostpkg cache']))
-        self.assertLess(steps.index(by_name['Prune obsolete hostpkg caches']), steps.index(by_name['Pack downloads and ccache']))
+        self.assertIn("steps.save-hostpkg.outcome == 'success'", by_name['Prune old hostpkg caches']['if'])
+        self.assertLess(steps.index(by_name['Prune old toolchain caches']), steps.index(by_name['Pack hostpkg cache']))
+        self.assertLess(steps.index(by_name['Prune old hostpkg caches']), steps.index(by_name['Pack downloads and ccache']))
 
     def test_official_version_and_reject_ambiguous_recipe(self):
         with tempfile.TemporaryDirectory() as directory:

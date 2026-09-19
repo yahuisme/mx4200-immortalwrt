@@ -28,7 +28,8 @@ class SettingsScriptTests(unittest.TestCase):
             "package/base-files/files/etc/openwrt_release":
                 "DISTRIB_DESCRIPTION='%D %V %C'\nDISTRIB_RELEASE='%V'\n",
             "package/base-files/files/usr/lib/os-release":
-                'PRETTY_NAME="%D %V %C"\nVERSION="%V"\n',
+                'PRETTY_NAME="%D %V"\nOPENWRT_RELEASE="%D %V %C"\n'
+                'VERSION="%V"\nVERSION_ID="%v"\n',
             "package/base-files/files/etc/banner": "%D %V, %C\n",
             "include/version.mk": "VERSION_DIST:=ImmortalWRT\n",
         }
@@ -47,6 +48,9 @@ class SettingsScriptTests(unittest.TestCase):
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_text(text)
             before = {p: Path(d, p).read_text() for p in replacements}
+            self.assertIn('PRETTY_NAME="%D %V"',
+                          before["package/base-files/files/usr/lib/os-release"])
+            version_before = Path(d, "include/version.mk").read_text()
             env = os.environ | {"WRT_IP": "192.168.10.1", "WRT_THEME": "aurora",
                                 "WRT_SSID": "MX4200", "WRT_WORD": "12345678"}
             result = subprocess.run(["bash", str(ROOT / "Scripts/Settings.sh")],
@@ -55,10 +59,20 @@ class SettingsScriptTests(unittest.TestCase):
             for relative, (old, new) in replacements.items():
                 self.assertIn(old, before[relative], relative)
                 self.assertEqual(Path(d, relative).read_text(),
-                                 before[relative].replace(old, new), relative)
+                                 before[relative].replace(old, new).replace(
+                                     'PRETTY_NAME="%D %V"', 'PRETTY_NAME="%D %C"'),
+                                 relative)
             self.assertIn("192.168.10.1", Path(d,
                 "package/base-files/files/bin/config_generate").read_text())
-            self.assertNotIn("ImmortalWRT", Path(d, "include/version.mk").read_text())
+            self.assertEqual(Path(d, "include/version.mk").read_text(),
+                             version_before.replace("ImmortalWRT", "ImmortalWrt"))
+            after = {p.relative_to(d): p.read_bytes() for p in Path(d).rglob("*")
+                     if p.is_file()}
+            result = subprocess.run(["bash", str(ROOT / "Scripts/Settings.sh")],
+                                    cwd=d, env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(after, {p.relative_to(d): p.read_bytes()
+                                    for p in Path(d).rglob("*") if p.is_file()})
 
     def test_missing_fixture_fails(self):
         with tempfile.TemporaryDirectory() as d:
