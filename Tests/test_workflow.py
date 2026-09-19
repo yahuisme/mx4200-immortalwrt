@@ -19,6 +19,18 @@ class WorkflowTests(unittest.TestCase):
         return subprocess.run(['bash', '-eo', 'pipefail', '-c', code], cwd=root,
                               env=dict(os.environ, **(env or {})), capture_output=True, text=True)
 
+    def test_profile_excludes_usteer(self):
+        lines = (ROOT / 'Config/MX4200.txt').read_text().splitlines()
+        for package in ('usteer', 'luci-app-usteer', 'luci-i18n-usteer-zh-cn'):
+            symbol = 'CONFIG_PACKAGE_' + package
+            with self.subTest(package=package):
+                # Require explicit n in the input: absence permits upstream defaults.
+                self.assertEqual([line for line in lines if line.startswith(symbol + '=')],
+                                 [symbol + '=n'])
+        self.assertNotIn('usteer', (ROOT / 'README.md').read_text().lower())
+        for package in ('etherwake', 'luci-app-wol', 'ttyd', 'luci-app-ttyd'):
+            self.assertIn('CONFIG_PACKAGE_' + package + '=y', lines)
+
     def test_release_scope(self):
         self.assertEqual(WORKFLOW['concurrency'], {'group': 'mx4200-build', 'cancel-in-progress': False})
         self.assertEqual(STEPS['Publish firmware and prune releases']['if'], "github.ref == 'refs/heads/main'")
