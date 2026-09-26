@@ -171,6 +171,7 @@ jobs:
           make -j"$(nproc)" || make -j1 V=s
 
       - name: Validate and stage firmware
+        id: stage
         run: |
           cd /mnt/build_wrt/
           mkdir ./upload/
@@ -190,27 +191,6 @@ jobs:
               fi
             done
           done
-
-      - name: Publish firmware and prune releases
-        if: github.ref == 'refs/heads/main'
-        env:
-          RELEASE_NOTES: |
-            ## Linksys MX4200 系列 ImmortalWrt 固件
-
-            本 Release 仅包含以下设备的刷机镜像：
-            - Linksys MX4200v1：`factory.bin` / `sysupgrade.bin`
-            - Linksys MX4200v2：`factory.bin` / `sysupgrade.bin`
-
-            `factory.bin` 用于从原厂固件刷入；`sysupgrade.bin` 用于从已有 ImmortalWrt 升级。
-
-            集成 NSS 硬件加速。
-        run: |
-          gh release create "$WRT_RELEASE_NAME" /mnt/build_wrt/upload/*.bin \
-            --target "$GITHUB_SHA" --title "$WRT_RELEASE_TITLE" --notes "$RELEASE_NOTES"
-          gh release list --json tagName --jq '.[].tagName' |
-            grep '^MX4200_' |
-            grep -Fxv "$WRT_RELEASE_NAME" |
-            xargs -r -n1 gh release delete --cleanup-tag -y || true
 
       - name: Pack toolchain cache
         id: pack-tc
@@ -300,3 +280,24 @@ jobs:
           CACHE_KEY: ${{ steps.rolling.outputs.cache-primary-key }}
         run: |
           python3 Scripts/Cache.py prune --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF" --key "$CACHE_KEY" --delete
+
+      - name: Publish firmware and prune releases
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' && steps.stage.outcome == 'success' }}
+        env:
+          RELEASE_NOTES: |
+            ## Linksys MX4200 系列 ImmortalWrt 固件
+
+            本 Release 仅包含以下设备的刷机镜像：
+            - Linksys MX4200v1：`factory.bin` / `sysupgrade.bin`
+            - Linksys MX4200v2：`factory.bin` / `sysupgrade.bin`
+
+            `factory.bin` 用于从原厂固件刷入；`sysupgrade.bin` 用于从已有 ImmortalWrt 升级。
+
+            集成 NSS 硬件加速。
+        run: |
+          gh release create "$WRT_RELEASE_NAME" /mnt/build_wrt/upload/*.bin \
+            --target "$GITHUB_SHA" --title "$WRT_RELEASE_TITLE" --notes "$RELEASE_NOTES"
+          gh release list --json tagName --jq '.[].tagName' |
+            grep '^MX4200_' |
+            grep -Fxv "$WRT_RELEASE_NAME" |
+            xargs -r -n1 gh release delete --cleanup-tag -y || true

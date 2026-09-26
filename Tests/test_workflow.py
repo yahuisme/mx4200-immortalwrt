@@ -31,9 +31,15 @@ class WorkflowTests(unittest.TestCase):
         for package in ('etherwake', 'luci-app-wol', 'ttyd', 'luci-app-ttyd'):
             self.assertIn('CONFIG_PACKAGE_' + package + '=y', lines)
 
+    def test_profile_omits_retired_fullcone_package(self):
+        self.assertNotIn('CONFIG_PACKAGE_kmod-nft-fullcone',
+                         (ROOT / 'Config/MX4200.txt').read_text())
+
     def test_release_scope(self):
         self.assertEqual(WORKFLOW['concurrency'], {'group': 'mx4200-build', 'cancel-in-progress': False})
-        self.assertEqual(STEPS['Publish firmware and prune releases']['if'], "github.ref == 'refs/heads/main'")
+        self.assertEqual(STEPS['Publish firmware and prune releases']['if'],
+                         "${{ !cancelled() && github.ref == 'refs/heads/main' && steps.stage.outcome == 'success' }}")
+        self.assertEqual(STEPS['Validate and stage firmware']['id'], 'stage')
         self.assertEqual(WORKFLOW['jobs']['build']['runs-on'], 'ubuntu-24.04')
 
     def test_cache_contract(self):
@@ -45,7 +51,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn('staging_dir', STEPS['Restore toolchain cache']['with']['path'])
         for label in ('toolchain cache', 'downloads and ccache'):
             prune = 'Prune old ' + ('toolchain caches' if label == 'toolchain cache' else 'downloads and ccache')
-            self.assertLess(ordered.index('Publish firmware and prune releases'), ordered.index('Pack ' + label))
+            self.assertLess(ordered.index(prune), ordered.index('Publish firmware and prune releases'))
             self.assertLess(ordered.index('Pack ' + label), ordered.index('Save ' + label))
             self.assertLess(ordered.index('Save ' + label), ordered.index(prune))
             self.assertIn("github.ref == 'refs/heads/main'", STEPS['Pack ' + label]['if'])

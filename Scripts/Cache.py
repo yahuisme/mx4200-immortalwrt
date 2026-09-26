@@ -23,6 +23,7 @@ import platform
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time
@@ -79,20 +80,31 @@ def prepare(root, ref, host_id):
             run('gcc', '--version').decode(), run('g++', '--version').decode(),
             run('ld', '--version').decode(), run('make', '--version').decode(),
             run('dpkg-query', '-W', '-f=${Package}=${Version}\n').decode()]
-    h.update(json.dumps([SCHEMA, str(root), host], sort_keys=True).encode())
+    environment = json.dumps([SCHEMA, str(root), host], sort_keys=True).encode()
+    h.update(environment)
+    # Tee the exact key bytes, not a second inventory/read or a new key schema.
+    # Environment includes schema, absolute root and the complete host manifest.
+    groups = {'environment': hashlib.sha256(environment), '.config': hashlib.sha256()}
     for name in names:
         p = root / name
-        h.update(json.dumps([name, p.lstat().st_mode & 0o7777,
-                             os.readlink(p) if p.is_symlink() else None]).encode())
+        record = json.dumps([name, p.lstat().st_mode & 0o7777,
+                             os.readlink(p) if p.is_symlink() else None]).encode()
+        h.update(record)
+        group = groups.setdefault(name.split('/')[0], hashlib.sha256())
+        group.update(record)
         with p.open('rb') as f:
             for block in iter(lambda: f.read(1024 * 1024), b''):
                 h.update(block)
+                group.update(block)
         h.update(b'\0')
+        group.update(b'\0')
     # Only enumerated source files: never stamps/build_dir/staging/tmp metadata.
     # A fixed old time makes freshly checked-out recipes match upstream find_md5.
     for name in names:
         os.utime(root / name, ns=(EPOCH_NS, EPOCH_NS), follow_symlinks=False)
     prefix = scope(ref)
+    print('cache-inputs sha256/16 ' + ' '.join(
+        f'{name}={digest.hexdigest()[:16]}' for name, digest in groups.items()), file=sys.stderr)
     return {'tc-key': prefix + 'tc-' + h.hexdigest(),
             'rolling-prefix': prefix + 'rolling-', 'source-files': len(names)}
 
