@@ -28,9 +28,10 @@ import tarfile
 import tempfile
 import time
 
-# Bump whenever prepare/inputs fingerprint or timestamp rules change: old
-# toolchains must never be accepted under a new interpretation of their inputs.
+# Archive/scope and timestamp policy; config-only changes must not discard rolling.
 SCHEMA = 'mx4200-pax-v2'
+# A new config interpretation cold-fills tc (and its hostpkg companion) once.
+TC_CONFIG_SCHEMA = 'package-unset-v1'
 EPOCH_NS = 1600000000000000000
 LIMIT = 10_000_000_000  # conservative decimal 10 GB, includes ALL refs/namespaces
 ROOTS = ('tools', 'toolchain', 'include', 'target', 'scripts')
@@ -71,6 +72,37 @@ def inputs(root):
     return names
 
 
+def config_bytes(data):
+    """Omit only canonical package-unset lines in a final generated config.
+
+    Unknown syntax or duplicate symbols keep the entire raw input: do not guess
+    which assignment Kconfig/make would use. Never rewrite the on-disk config.
+    """
+    if (not data.startswith(b'#\n# Automatically generated file; DO NOT EDIT.\n')
+            or not data.endswith(b'\n') or re.search(rb'[\x00-\x09\x0b-\x1f\x7f]', data)):
+        return data
+    seen, kept = set(), []
+    for line in data.splitlines(keepends=True):
+        unset = re.fullmatch(rb'# (CONFIG_[A-Za-z0-9_+.-]+) is not set\n', line)
+        assignment = re.fullmatch(
+            rb'(CONFIG_[A-Za-z0-9_+.-]+)=(?:[ymn]|-?[0-9]+|0x[0-9a-fA-F]+|"(?:[^"\\\r\n]|\\.)*")\n', line)
+        symbol = unset or assignment
+        if symbol:
+            name = symbol[1]
+            if name in seen or name == b'CONFIG_PACKAGE_':
+                return data
+            seen.add(name)
+            if unset and name.startswith(b'CONFIG_PACKAGE_'):
+                continue
+        elif (line != b'\n' and line != b'#\n' and not line.startswith(b'# ')
+              or line.startswith(b'# CONFIG_') or line.endswith(b'\\\n')):
+            return data
+        kept.append(line)
+    if b'CONFIG_HAVE_DOT_CONFIG=y\n' not in kept:
+        return data
+    return b''.join(kept)
+
+
 def prepare(root, ref, host_id):
     root = root.resolve()
     names = inputs(root)
@@ -80,10 +112,10 @@ def prepare(root, ref, host_id):
             run('gcc', '--version').decode(), run('g++', '--version').decode(),
             run('ld', '--version').decode(), run('make', '--version').decode(),
             run('dpkg-query', '-W', '-f=${Package}=${Version}\n').decode()]
-    environment = json.dumps([SCHEMA, str(root), host], sort_keys=True).encode()
+    environment = json.dumps([SCHEMA, str(root), host, TC_CONFIG_SCHEMA], sort_keys=True).encode()
     h.update(environment)
-    # Tee the exact key bytes, not a second inventory/read or a new key schema.
-    # Environment includes schema, absolute root and the complete host manifest.
+    # Tee exact fingerprint bytes; .config is the filtered digest, not raw-file SHA.
+    # Environment includes both policies, absolute root and complete host manifest.
     groups = {'environment': hashlib.sha256(environment), '.config': hashlib.sha256()}
     for name in names:
         p = root / name
@@ -93,7 +125,8 @@ def prepare(root, ref, host_id):
         group = groups.setdefault(name.split('/')[0], hashlib.sha256())
         group.update(record)
         with p.open('rb') as f:
-            for block in iter(lambda: f.read(1024 * 1024), b''):
+            blocks = (config_bytes(f.read()),) if name == '.config' else iter(lambda: f.read(1024 * 1024), b'')
+            for block in blocks:
                 h.update(block)
                 group.update(block)
         h.update(b'\0')
