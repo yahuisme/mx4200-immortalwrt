@@ -15,7 +15,7 @@ STEPS = {step['name']: step for step in WORKFLOW['jobs']['build']['steps']}
 
 class WorkflowTests(unittest.TestCase):
     def run_block(self, name, root, env=None):
-        code = STEPS[name]['run'].replace('/mnt/build_wrt/', str(root) + '/')
+        code = STEPS[name]['run'].replace('/mnt/build_wrt', str(root))
         return subprocess.run(['bash', '-eo', 'pipefail', '-c', code], cwd=root,
                               env=dict(os.environ, **(env or {})), capture_output=True, text=True)
 
@@ -44,8 +44,9 @@ class WorkflowTests(unittest.TestCase):
 
     def test_cache_contract(self):
         ordered = list(STEPS)
-        self.assertEqual(STEPS['Configure firmware and cache keys']['id'], 'keys')
-        self.assertLess(ordered.index('Configure firmware and cache keys'), ordered.index('Restore toolchain cache'))
+        self.assertEqual(STEPS['Configure firmware and caches']['id'], 'keys')
+        self.assertEqual(len(ordered), 21)
+        self.assertLess(ordered.index('Configure firmware and caches'), ordered.index('Restore toolchain cache'))
         self.assertNotIn('restore-keys', STEPS['Restore toolchain cache']['with'])
         self.assertIn('rolling-prefix', STEPS['Restore downloads and ccache']['with']['restore-keys'])
         self.assertNotIn('staging_dir', STEPS['Restore toolchain cache']['with']['path'])
@@ -61,77 +62,68 @@ class WorkflowTests(unittest.TestCase):
                              STEPS['Save ' + label]['with']['path'])
         self.assertLess(ordered.index('Prune old toolchain caches'), ordered.index('Pack downloads and ccache'))
 
-    def test_feed_source_logging(self):
-        for failure in ('', 'update', 'install', 'revision'):
-            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temp:
-                root = Path(temp)
-                (root / 'scripts').mkdir()
-                (root / 'feeds/packages/.git').mkdir(parents=True)
-                (root / 'feeds/packages.tmp').mkdir()
-                (root / 'bin').mkdir()
-                feeds = root / 'scripts/feeds'
-                feeds.write_text('#!/bin/bash\necho "$1" >> "$LOG"\n[ "$FAILURE" != "$1" ]\n')
-                feeds.chmod(0o755)
-                git = root / 'bin/git'
-                git.write_text('#!/bin/bash\n[ "$FAILURE" != revision ] || exit 7\n'
-                               'test "$*" = "-C feeds/packages rev-parse HEAD" || exit 8\n'
-                               'printf "%040d\\n" 1\n')
-                git.chmod(0o755)
-                result = self.run_block('Update and install feeds', root, {
-                    'FAILURE': failure, 'LOG': str(root / 'calls'),
-                    'PATH': str(root / 'bin') + ':' + os.environ['PATH']})
-                self.assertEqual(result.returncode == 0, not failure, result.stderr)
-                self.assertEqual((root / 'calls').read_text().splitlines(),
-                                 ['update'] if failure == 'update' else ['update', 'install'])
-                if not failure:
-                    self.assertIn('feeds/packages ' + '0' * 39 + '1', result.stdout)
-                    self.assertNotIn('packages.tmp', result.stdout)
-
-    def test_package_bootstrap_handoff(self):
-        self.assertEqual(STEPS['Prepare custom packages']['id'], 'go-bootstrap')
+    def test_source_preparation_handoff(self):
+        self.assertEqual(STEPS['Prepare firmware source']['id'], 'go-bootstrap')
         self.assertEqual(STEPS['Install Go bootstrap']['with']['go-version'],
                          '${{ steps.go-bootstrap.outputs.version }}')
-        for failure in ('', 'packages', 'gnutls', 'temperature', 'bootstrap'):
+        order = ['clone', 'hash', 'version', 'update', 'install', 'revision',
+                 'packages', 'gnutls', 'temperature', 'bootstrap']
+        for failure in ['', *order]:
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temp:
                 root = Path(temp)
-                (root / 'package').mkdir()
                 workspace = root / 'workspace'
-                scripts = workspace / 'Scripts'
-                scripts.mkdir(parents=True)
-                (scripts / 'Packages.sh').write_text(
-                    'echo packages >> "$LOG"\n[ "$FAILURE" != packages ]\n')
-                (scripts / 'GnuTLS.py').write_text(
-                    'import os, sys\nfrom pathlib import Path\n'
-                    'assert Path.cwd() == Path(sys.argv[1]) / "package"\n'
-                    'with open(os.environ["LOG"], "a") as f: f.write("gnutls\\n")\n'
-                    'sys.exit(7 if os.environ["FAILURE"] == "gnutls" else 0)\n')
-                (scripts / 'GoBootstrap.py').write_bytes((ROOT / 'Scripts/GoBootstrap.py').read_bytes())
-                (scripts / 'Temperature.py').write_text(
-                    'import os, sys\n'
-                    'with open(os.environ["LOG"], "a") as f: f.write("temperature\\n")\n'
-                    'sys.exit(7 if os.environ["FAILURE"] == "temperature" else 0)\n')
+                for directory in ('scripts', 'package', 'feeds/packages/.git', 'feeds/packages.tmp',
+                                  'workspace/Scripts', 'bin'):
+                    (root / directory).mkdir(parents=True)
+                # GITHUB_ENV is deliberately not sourced within this step.
+                common = 'echo "$event" >> "$LOG"\n[ "$FAILURE" != "$event" ] || exit 7\n'
+                stubs = {
+                    root / 'bin/git': 'case "$1" in clone) event=clone;; rev-parse) event=hash;; -C) event=revision;; *) exit 8;; esac\n' + common + 'printf "%040d\\n" 1\n',
+                    root / 'scripts/getver.sh': 'event=version\n' + common + 'echo r1234-abcdef0\n',
+                    root / 'scripts/feeds': 'event="$1"\n' + common,
+                    workspace / 'Scripts/Packages.sh': 'test "$PWD" = "$BUILD/package"\nevent=packages\n' + common,
+                }
+                for path, body in stubs.items():
+                    path.write_text('#!/bin/bash -e\n' + body)
+                    path.chmod(0o755)
+                for name, event in [('GnuTLS.py', 'gnutls'), ('Temperature.py', 'temperature'),
+                                    ('GoBootstrap.py', 'bootstrap')]:
+                    (workspace / 'Scripts' / name).write_text(
+                        'import os, sys\nfrom pathlib import Path\n'
+                        'assert Path.cwd() == Path(sys.argv[1]) / "package"\n'
+                        f'event = {event!r}\n'
+                        'with open(os.environ["LOG"], "a") as f: f.write(event + "\\n")\n'
+                        'if os.environ["FAILURE"] == event: sys.exit(7)\n' +
+                        ('import runpy\n' + f'runpy.run_path({str(ROOT / "Scripts/GoBootstrap.py")!r}, run_name="__main__")\n'
+                         if event == 'bootstrap' else ''))
                 recipe = root / 'feeds/packages/lang/golang/golang-bootstrap/Makefile'
                 recipe.parent.mkdir(parents=True)
-                recipe.write_text('invalid' if failure == 'bootstrap' else
-                                  'GO_VERSION_MAJOR_MINOR:=1.24\nGO_VERSION_PATCH:=7\n')
-                # Map both trailing-slash cd and bare script arguments to this fixture.
-                code = STEPS['Prepare custom packages']['run'].replace('/mnt/build_wrt', str(root))
-                result = subprocess.run(['bash', '-eo', 'pipefail', '-c', code], cwd=root,
-                    env=dict(os.environ, GITHUB_WORKSPACE=str(workspace),
-                             GITHUB_OUTPUT=str(root / 'output'), LOG=str(root / 'log'),
-                             FAILURE=failure), capture_output=True, text=True)
+                recipe.write_text('GO_VERSION_MAJOR_MINOR:=1.24\nGO_VERSION_PATCH:=7\n')
+                result = self.run_block('Prepare firmware source', root, {
+                    'GITHUB_WORKSPACE': str(workspace), 'GITHUB_OUTPUT': str(root / 'output'),
+                    'GITHUB_ENV': str(root / 'env'), 'BUILD': str(root),
+                    'WRT_REPO': 'fixture', 'WRT_BRANCH': 'master',
+                    'PATH': str(root / 'bin') + ':' + os.environ['PATH'],
+                    'LOG': str(root / 'log'), 'FAILURE': failure})
                 self.assertEqual(result.returncode == 0, not failure, result.stderr)
-                self.assertEqual((root / 'log').read_text().splitlines(),
-                                 ['packages'] if failure == 'packages' else
-                                 ['packages', 'gnutls'] if failure == 'gnutls' else
-                                 ['packages', 'gnutls', 'temperature'])
+                expected = order[:order.index(failure) + 1] if failure else order
+                self.assertEqual((root / 'log').read_text().splitlines(), expected)
                 if failure:
                     self.assertFalse((root / 'output').exists())
                 else:
                     self.assertEqual((root / 'output').read_text(), 'version=1.24.7\n')
+                    self.assertIn('feeds/packages ' + '0' * 39 + '1', result.stdout)
+                    self.assertNotIn('packages.tmp', result.stdout)
+                    values = dict(line.split('=', 1) for line in (root / 'env').read_text().splitlines())
+                    self.assertEqual(values['WRT_HASH'], '0' * 39 + '1')
+                    self.assertEqual(values['WRT_RELEASE_NAME'],
+                                     'MX4200_ImmortalWrt_' + values['WRT_DATE'] + '_r1234')
+                    self.assertEqual(values['WRT_RELEASE_TITLE'],
+                                     'MX4200-ImmortalWrt-r1234-' + values['WRT_DATE'].replace('-', '_', 1))
 
     def test_configuration_cache_key_handoff(self):
-        for failure in ('', 'settings', 'defconfig'):
+        order = ['go', 'settings', 'defconfig', 'keys', 'hostpkg']
+        for failure in ['', *order]:
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temp:
                 root = Path(temp)
                 workspace = root / 'workspace'
@@ -139,33 +131,89 @@ class WorkflowTests(unittest.TestCase):
                     (workspace / directory).mkdir(parents=True)
                 (workspace / 'Config/MX4200.txt').write_text('CONFIG_TEST=y\n')
                 (workspace / 'files/marker').write_text('overlay')
-                (workspace / 'Scripts/Settings.sh').write_text(
-                    'echo settings >> "$LOG"\n[ "$FAILURE" != settings ]\n')
+                common = 'echo "$event" >> "$LOG"\n[ "$FAILURE" != "$event" ] || exit 7\n'
+                (workspace / 'Scripts/Settings.sh').write_text('event=settings\n' + common)
                 for command, body in {
-                    'go': 'printf "/fixture/go\\n"',
-                    'make': 'echo defconfig >> "$LOG"\n[ "$FAILURE" != defconfig ]',
-                    'python3': 'test "$PWD" = "$GITHUB_WORKSPACE"\n'
-                               'test "$1" = Scripts/Cache.py\n'
-                               'echo keys >> "$LOG"\n'
-                               'echo tc-key=fixture >> "$GITHUB_OUTPUT"',
+                    'go': 'event=go\n' + common + 'printf "/fixture/go\\n"',
+                    'make': 'test "$PWD" = "$BUILD"\nevent=defconfig\n' + common,
+                    'python3': '''test "$PWD" = "$BUILD"
+case "$1" in
+  "$GITHUB_WORKSPACE/Scripts/Cache.py")
+    event=keys
+    ''' + common + '''
+    test "$2" = --output
+    test "$3" = "$GITHUB_OUTPUT"
+    printf 'tc-key=fixture\nrolling-prefix=rolling-\nsource-files=42\n' >> "$GITHUB_OUTPUT"
+    ;;
+  "$GITHUB_WORKSPACE/Scripts/HostpkgCache.py")
+    event=hostpkg
+    ''' + common + '''
+    test "$2" = "$BUILD"
+    test "$3" = fixture
+    test "$4" = /fixture/go
+    echo hostpkg-key=host-fixture >> "$GITHUB_OUTPUT"
+    ;;
+  *) exit 8;;
+esac
+''',
                 }.items():
                     stub = workspace / 'bin' / command
                     stub.write_text('#!/bin/bash -e\n' + body + '\n')
                     stub.chmod(0o755)
-                result = self.run_block('Configure firmware and cache keys', root, {
+                result = self.run_block('Configure firmware and caches', root, {
                     'GITHUB_WORKSPACE': str(workspace), 'GITHUB_OUTPUT': str(root / 'output'),
                     'PATH': str(workspace / 'bin') + ':' + os.environ['PATH'],
-                    'LOG': str(root / 'log'), 'FAILURE': failure,
+                    'LOG': str(root / 'log'), 'FAILURE': failure, 'BUILD': str(root),
+                    'TC_KEY': 'stale-environment-must-not-be-used',
                     'GITHUB_REF': 'refs/heads/main', 'ImageOS': 'ubuntu24', 'ImageVersion': 'fixture'})
                 self.assertEqual(result.returncode == 0, not failure, result.stderr)
-                expected = ['settings'] if failure == 'settings' else ['settings', 'defconfig']
-                if not failure:
-                    expected.append('keys')
-                    self.assertEqual((root / 'output').read_text(), 'tc-key=fixture\n')
-                    self.assertEqual((root / 'files/marker').read_text(), 'overlay')
-                else:
-                    self.assertFalse((root / 'output').exists())
+                expected = order[:order.index(failure) + 1] if failure else order
                 self.assertEqual((root / 'log').read_text().splitlines(), expected)
+                if not failure:
+                    self.assertEqual((root / 'output').read_text(),
+                                     'tc-key=fixture\nrolling-prefix=rolling-\nsource-files=42\nhostpkg-key=host-fixture\n')
+                    self.assertEqual((root / 'files/marker').read_text(), 'overlay')
+                    self.assertIn('CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT="/fixture/go"',
+                                  (root / '.config').read_text())
+                elif failure != 'hostpkg':
+                    self.assertFalse((root / 'output').exists())
+
+    def test_build_inputs_stop_before_download_on_unpack_failure(self):
+        for failure in ('', 'tc', 'hostpkg', 'rolling', 'download', 'cold'):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                archives = root / 'archives'
+                archives.mkdir()
+                bindir = root / 'bin'
+                bindir.mkdir()
+                if failure != 'cold':
+                    for tier in ('tc', 'hostpkg', 'rolling'):
+                        (archives / (tier + '.tar.gz')).write_text('archive fixture')
+                common = 'echo "$event" >> "$LOG"\n[ "$FAILURE" != "$event" ] || exit 7\n'
+                for command, body in {
+                    'python3': 'test "$1" = "$GITHUB_WORKSPACE/Scripts/Cache.py"\n'
+                               'test "$2" = unpack\n'
+                               'test "$4" = "$BUILD"\nevent="$6"\n' + common,
+                    'make': 'test "$PWD" = "$BUILD"\ntest "$1" = download\n'
+                            'event=download\n' + common,
+                }.items():
+                    stub = bindir / command
+                    stub.write_text('#!/bin/bash -e\n' + body)
+                    stub.chmod(0o755)
+                code = STEPS['Prepare build inputs']['run'].replace('/mnt/build_wrt', str(root))
+                code = code.replace('/mnt/mx4200-cache', str(archives))
+                result = subprocess.run(['bash', '-eo', 'pipefail', '-c', code], cwd=bindir,
+                    env=dict(os.environ, PATH=str(bindir) + ':' + os.environ['PATH'],
+                             GITHUB_WORKSPACE=str(root / 'workspace'), BUILD=str(root),
+                             LOG=str(root / 'log'), FAILURE=failure), capture_output=True, text=True)
+                self.assertEqual(result.returncode == 0, failure in ('', 'cold'), result.stderr)
+                order = ['tc', 'hostpkg', 'rolling', 'download']
+                expected = ['download'] if failure == 'cold' else (
+                    order[:order.index(failure) + 1] if failure else order)
+                self.assertEqual((root / 'log').read_text().splitlines(), expected)
+                remaining = sorted(p.name for p in archives.iterdir())
+                self.assertEqual(remaining, sorted(t + '.tar.gz' for t in
+                    order[order.index(failure):3]) if failure in order[:3] else [])
 
     def test_images(self):
         for case in ('valid', 'missing', 'empty', 'extra', 'wrong-device'):

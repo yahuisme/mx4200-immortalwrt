@@ -112,8 +112,7 @@ class ReleaseOrderTests(unittest.TestCase):
                        GH_TOKEN='fixture-token-not-a-credential')
             outcomes, outputs, trace, diagnostics = {}, {
                 'tools': {'cache-hit': 'false'}, 'hostpkg': {'cache-hit': 'false'},
-                'keys': {'tc-key': prefix + 'tc-new'},
-                'hostpkg-key': {'hostpkg-key': prefix + 'hostpkg-new'},
+                'keys': {'tc-key': prefix + 'tc-new', 'hostpkg-key': prefix + 'hostpkg-new'},
                 'rolling': {'cache-primary-key': prefix + 'rolling-new'},
             }, [], []
             success, cancelled = True, fault == 'cancel-before-compile'

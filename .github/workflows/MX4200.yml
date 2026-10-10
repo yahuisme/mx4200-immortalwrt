@@ -46,7 +46,8 @@ jobs:
           sudo mkdir -p /mnt/build_wrt /mnt/mx4200-cache
           sudo chown "$USER:$USER" /mnt/build_wrt /mnt/mx4200-cache
 
-      - name: Clone firmware source
+      - name: Prepare firmware source
+        id: go-bootstrap
         run: |
           WRT_DATE="$(TZ=Asia/Hong_Kong date +'%y.%m.%d-%H.%M.%S')"
           git clone --single-branch --branch "$WRT_BRANCH" "$WRT_REPO" /mnt/build_wrt/
@@ -65,9 +66,6 @@ jobs:
             sed -i '/.cn\//d; /tencent/d; /aliyun/d' "$PROJECT_MIRRORS_FILE"
           fi
 
-      - name: Update and install feeds
-        run: |
-          cd /mnt/build_wrt/
           ./scripts/feeds update -a >/dev/null || { echo "::error::feeds update failed"; exit 1; }
           ./scripts/feeds install -a >/dev/null || { echo "::error::feeds install failed"; exit 1; }
           for feed in feeds/*; do
@@ -76,9 +74,6 @@ jobs:
             printf '%s %s\n' "$feed" "$revision"
           done
 
-      - name: Prepare custom packages
-        id: go-bootstrap
-        run: |
           cd /mnt/build_wrt/package/
           bash "$GITHUB_WORKSPACE/Scripts/Packages.sh"
           python3 "$GITHUB_WORKSPACE/Scripts/GnuTLS.py" /mnt/build_wrt
@@ -92,7 +87,7 @@ jobs:
           check-latest: false
           cache: false
 
-      - name: Configure firmware and cache keys
+      - name: Configure firmware and caches
         id: keys
         run: |
           cd /mnt/build_wrt/
@@ -107,16 +102,12 @@ jobs:
           bash "$GITHUB_WORKSPACE/Scripts/Settings.sh"
           make defconfig -j"$(nproc)"
 
-          cd "$GITHUB_WORKSPACE"
-          python3 Scripts/Cache.py --output "$GITHUB_OUTPUT" prepare \
+          python3 "$GITHUB_WORKSPACE/Scripts/Cache.py" --output "$GITHUB_OUTPUT" prepare \
             --root /mnt/build_wrt --ref "$GITHUB_REF" \
             --host-id "${ImageOS}-${ImageVersion}-mx4200-env-v1"
 
-      - name: Prepare hostpkg cache key
-        id: hostpkg-key
-        env:
-          TC_KEY: ${{ steps.keys.outputs.tc-key }}
-        run: python3 Scripts/HostpkgCache.py /mnt/build_wrt "$TC_KEY" "$(go env GOROOT)"
+          TC_KEY="$(sed -n 's/^tc-key=//p' "$GITHUB_OUTPUT")"
+          python3 "$GITHUB_WORKSPACE/Scripts/HostpkgCache.py" /mnt/build_wrt "$TC_KEY" "$BOOTSTRAP_ROOT"
 
       - name: Restore toolchain cache
         id: tools
@@ -129,7 +120,7 @@ jobs:
         id: hostpkg
         uses: actions/cache/restore@main
         with:
-          key: ${{ steps.hostpkg-key.outputs.hostpkg-key }}
+          key: ${{ steps.keys.outputs.hostpkg-key }}
           path: /mnt/mx4200-cache/hostpkg.tar.gz
 
       - name: Restore downloads and ccache
@@ -140,18 +131,16 @@ jobs:
           restore-keys: ${{ steps.keys.outputs.rolling-prefix }}
           path: /mnt/mx4200-cache/rolling.tar.gz
 
-      - name: Unpack build caches
+      - name: Prepare build inputs
         run: |
           for tier in tc hostpkg rolling; do
             archive="/mnt/mx4200-cache/$tier.tar.gz"
             if [ -s "$archive" ]; then
-              python3 Scripts/Cache.py unpack --root /mnt/build_wrt --tier "$tier" --archive "$archive"
+              python3 "$GITHUB_WORKSPACE/Scripts/Cache.py" unpack --root /mnt/build_wrt --tier "$tier" --archive "$archive"
               rm "$archive"
             fi
           done
 
-      - name: Download source archives
-        run: |
           cd /mnt/build_wrt/
           make download -j"$(nproc)"
 
@@ -228,7 +217,7 @@ jobs:
         if: success() && github.ref == 'refs/heads/main' && steps.hostpkg.outputs.cache-hit != 'true' && (steps.save-tc.outcome == 'skipped' || steps.prune-tc.outcome == 'success')
         continue-on-error: true
         env:
-          CACHE_KEY: ${{ steps.hostpkg-key.outputs.hostpkg-key }}
+          CACHE_KEY: ${{ steps.keys.outputs.hostpkg-key }}
         run: |
           python3 Scripts/Cache.py pack --root /mnt/build_wrt --tier hostpkg --archive /mnt/mx4200-cache/hostpkg.tar.gz
           python3 Scripts/Cache.py --output "$GITHUB_OUTPUT" admit \
@@ -241,7 +230,7 @@ jobs:
         uses: actions/cache/save@main
         continue-on-error: true
         with:
-          key: ${{ steps.hostpkg-key.outputs.hostpkg-key }}
+          key: ${{ steps.keys.outputs.hostpkg-key }}
           path: /mnt/mx4200-cache/hostpkg.tar.gz
 
       - name: Prune old hostpkg caches
@@ -249,7 +238,7 @@ jobs:
         if: success() && steps.save-hostpkg.outcome == 'success'
         continue-on-error: true
         env:
-          CACHE_KEY: ${{ steps.hostpkg-key.outputs.hostpkg-key }}
+          CACHE_KEY: ${{ steps.keys.outputs.hostpkg-key }}
         run: |
           python3 Scripts/Cache.py prune --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF" --key "$CACHE_KEY" --delete
 
