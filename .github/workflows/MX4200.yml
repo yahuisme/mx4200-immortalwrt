@@ -101,6 +101,7 @@ jobs:
           cp -rf "$GITHUB_WORKSPACE/files" ./
           bash "$GITHUB_WORKSPACE/Scripts/Settings.sh"
           make defconfig -j"$(nproc)"
+          python3 "$GITHUB_WORKSPACE/Scripts/CheckDefaults.py" .config tmp/.packageinfo
 
           python3 "$GITHUB_WORKSPACE/Scripts/Cache.py" --output "$GITHUB_OUTPUT" prepare \
             --root /mnt/build_wrt --ref "$GITHUB_REF" \

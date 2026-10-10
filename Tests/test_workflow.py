@@ -122,7 +122,7 @@ class WorkflowTests(unittest.TestCase):
                                      'MX4200-ImmortalWrt-r1234-' + values['WRT_DATE'].replace('-', '_', 1))
 
     def test_configuration_cache_key_handoff(self):
-        order = ['go', 'settings', 'defconfig', 'keys', 'hostpkg']
+        order = ['go', 'settings', 'defconfig', 'defaults', 'keys', 'hostpkg']
         for failure in ['', *order]:
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temp:
                 root = Path(temp)
@@ -138,6 +138,12 @@ class WorkflowTests(unittest.TestCase):
                     'make': 'test "$PWD" = "$BUILD"\nevent=defconfig\n' + common,
                     'python3': '''test "$PWD" = "$BUILD"
 case "$1" in
+  "$GITHUB_WORKSPACE/Scripts/CheckDefaults.py")
+    event=defaults
+    ''' + common + '''
+    test "$2" = .config
+    test "$3" = tmp/.packageinfo
+    ;;
   "$GITHUB_WORKSPACE/Scripts/Cache.py")
     event=keys
     ''' + common + '''

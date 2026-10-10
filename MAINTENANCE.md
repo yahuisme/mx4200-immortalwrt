@@ -24,7 +24,9 @@ GnuTLS 包准备后通过真实 `include/autotools.mk` 检查 hook，仅在重�
 
 ## 官方基线必要差异
 
-- 非必要组件遵循官方默认，不强选旧 fork 隐含的 ext4/f2fs 工具与驱动。官方 qualcommax 默认提供 wpad-openssl，无需重复选择，基础无线及 Mesh/AP 支持保留。移除可选 usbutils 的旧显式选择，不为其 libudev-zero 依赖额外启用 input-support；既有基础 USB 存储支持和其他已选应用、个人参数不变。
+- 保持官方设备定义、DTS、驱动、固件、默认包及依赖完整，不以删除 DEVICE_PACKAGES 绕过缺包。非必要组件遵循官方默认，不强选旧 fork 隐含的 ext4/f2fs 工具与驱动；wpad-openssl 由官方默认提供。可选 usbutils 不恢复，既有基础 USB 存储及其他已选应用、个人参数不变。
+- 显式启用 input-support 是官方设备默认 kmod-hci-uart → kmod-bluetooth → kmod-hid → kmod-input-evdev 的必要依赖，不是为 usbutils 增添功能。此前只检查显式配置遗漏了设备默认包闭包，导致 APK 镜像组装缺包。defconfig 后检查全部启用 MODULE_DEFAULT 包及虚拟包提供者，允许 y/m，保留 per-device rootfs 安装语义，不强制全局 y。此检查证明配置可编译选择，不证明产物或硬件功能。
+- 用户明确排除值守式更新应用 attendedsysupgrade，保留现有配置排除与 LuCI collection 依赖移除；不删除共用 rpcd/ubus 或指定保留的 luci-app-package-manager。
 - 版本显示沿用 `ImmortalWrt r<官方提交计数>-<Git缩写>`：openwrt_release 的描述、os-release 的 PRETTY_NAME/OPENWRT_RELEASE 和 banner 不显示 SNAPSHOT；机器字段 VERSION/DISTRIB_RELEASE 仍为 SNAPSHOT。保留真实 getver 与源码提交日期，不补旧 fork 的计数差、不启用 VERSIONOPT。Release tag/title 的格式与香港构建时间来源不变；LuCI 经 procd `system.board` 读取 OPENWRT_RELEASE，再附加独立的 LuCI 版本。
 - 默认 SSID/key 与 WPA2 `psk2+ccmp` 一起设置，避免官方默认开放加密覆盖既定密码约定。首启 overlay 保持原样，包括香港时区、US、48/11/149、25/23/25、禁用1/0/0及5G模式沿用。
 - `Temperature.py` 只修复 autocore 通用 Wi-Fi 读数循环：单个已存在但读返回 EIO 的传感器不再中断后续 phy 的读取，忽略非数字，不伪造 0°C。保留官方 RPC/界面及无读数表现；不写死 radio0/phy0。BusyBox 隔离测试覆盖三路各自单独可读、三路同时可读、仅第三路可读而前两路 EIO。此为真实脚本模拟，不是设备启停/信道测试。
