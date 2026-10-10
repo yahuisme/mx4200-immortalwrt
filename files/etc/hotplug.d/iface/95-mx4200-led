@@ -1,0 +1,53 @@
+#!/bin/sh
+# netifd logical interface state, not Internet reachability.
+(
+case "$(cat /tmp/sysinfo/board_name 2>/dev/null)" in
+	linksys,mx4200v1) blue=255 ;;
+	linksys,mx4200v2) blue=51 ;;
+	*) exit 0 ;;
+esac
+[ "$(uci -q get system.@system[0].wan_led)" != 0 ] || exit 0
+[ "$(uci -q get system.@system[-1].leds_off)" != 1 ] || exit 0
+wan="$(uci -q get system.@system[0].wan_led_interface)"
+wan="${wan:-wan}"
+case "$ACTION" in
+	boot) ;;
+	ifup|ifdown|ifupdate) [ "$INTERFACE" = "$wan" ] || exit 0 ;;
+	*) exit 0 ;;
+esac
+# Boot sync runs after native done/led; leave early boot/failsafe alone.
+[ -e /var/run/mx4200-led-ready ] || exit 0
+[ ! -e /tmp/mx4200-led-upgrade ] || exit 0
+leds=/sys/class/leds
+# Never replace a user's active kernel trigger (or native upgrade green).
+for color in blue red green; do
+	[ -d "$leds/$color:status" ] || exit 0
+	case "$(cat "$leds/$color:status/trigger")" in
+		*\[none\]*) ;;
+		*) exit 0 ;;
+	esac
+done
+status="$(ubus -t 2 call "network.interface.$wan" status 2>/dev/null)" || exit 0
+up="$(printf '%s' "$status" | jsonfilter -e '@.up' 2>/dev/null)"
+case "$up" in true|false) ;; *) exit 0 ;; esac
+# Recheck after ubus, which may overlap the beginning of sysupgrade.
+[ ! -e /tmp/mx4200-led-upgrade ] || exit 0
+case "$(cat "$leds/green:status/trigger")" in *\[none\]*) ;; *) exit 0 ;; esac
+for color in blue red; do
+	value=0
+	if [ "$up" = true ]; then
+		[ "$color" != blue ] || value="$blue"
+	else
+		[ "$color" != red ] || value="$(cat "$leds/red:status/max_brightness")"
+	fi
+	max="$(cat "$leds/$color:status/max_brightness")"
+	[ "$value" -le "$max" ] || value="$max"
+	[ ! -e /tmp/mx4200-led-upgrade ] || break
+	printf '%s\n' "$value" > "$leds/$color:status/brightness"
+done
+# An upgrade starting during the writes owns both channels from now on.
+if [ -e /tmp/mx4200-led-upgrade ]; then
+	echo 0 > "$leds/blue:status/brightness"
+	echo 0 > "$leds/red:status/brightness"
+fi
+)
