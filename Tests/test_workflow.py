@@ -91,7 +91,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(STEPS['Prepare custom packages']['id'], 'go-bootstrap')
         self.assertEqual(STEPS['Install Go bootstrap']['with']['go-version'],
                          '${{ steps.go-bootstrap.outputs.version }}')
-        for failure in ('', 'packages', 'gnutls', 'bootstrap'):
+        for failure in ('', 'packages', 'gnutls', 'temperature', 'bootstrap'):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temp:
                 root = Path(temp)
                 (root / 'package').mkdir()
@@ -106,6 +106,10 @@ class WorkflowTests(unittest.TestCase):
                     'with open(os.environ["LOG"], "a") as f: f.write("gnutls\\n")\n'
                     'sys.exit(7 if os.environ["FAILURE"] == "gnutls" else 0)\n')
                 (scripts / 'GoBootstrap.py').write_bytes((ROOT / 'Scripts/GoBootstrap.py').read_bytes())
+                (scripts / 'Temperature.py').write_text(
+                    'import os, sys\n'
+                    'with open(os.environ["LOG"], "a") as f: f.write("temperature\\n")\n'
+                    'sys.exit(7 if os.environ["FAILURE"] == "temperature" else 0)\n')
                 recipe = root / 'feeds/packages/lang/golang/golang-bootstrap/Makefile'
                 recipe.parent.mkdir(parents=True)
                 recipe.write_text('invalid' if failure == 'bootstrap' else
@@ -118,7 +122,9 @@ class WorkflowTests(unittest.TestCase):
                              FAILURE=failure), capture_output=True, text=True)
                 self.assertEqual(result.returncode == 0, not failure, result.stderr)
                 self.assertEqual((root / 'log').read_text().splitlines(),
-                                 ['packages'] if failure == 'packages' else ['packages', 'gnutls'])
+                                 ['packages'] if failure == 'packages' else
+                                 ['packages', 'gnutls'] if failure == 'gnutls' else
+                                 ['packages', 'gnutls', 'temperature'])
                 if failure:
                     self.assertFalse((root / 'output').exists())
                 else:

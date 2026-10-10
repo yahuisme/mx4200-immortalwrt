@@ -2,7 +2,7 @@
 
 适用于 **Linksys MX4200v1 / MX4200v2** 路由器的定制 ImmortalWrt 固件构建项目。
 
-本项目基于 [VIKINGYFY/immortalwrt](https://github.com/VIKINGYFY/immortalwrt) 构建，并针对 MX4200 系列调整软件包和配置。
+本项目基于 [ImmortalWrt 官方 master snapshot](https://github.com/immortalwrt/immortalwrt/tree/master) 构建，并针对 MX4200 系列调整软件包和配置。
 
 > ⚠️ **仅适用于 Linksys MX4200v1 / MX4200v2，请勿刷入其他型号设备。**
 
@@ -13,7 +13,7 @@
 - 🎨 LuCI 默认主题：Aurora
 - 🕐 系统时区：香港（UTC+8）
 - 🚀 BBR 拥塞控制
-- ⚡ NSS 硬件加速
+- 💾 基础 USB 存储支持
 - 🔗 内置 HomeProxy 与 sing-box
 - 📡 三频 Wi-Fi 默认开启 2.4 GHz 与 5.8 GHz
 - 🔄 每日自动构建最新固件

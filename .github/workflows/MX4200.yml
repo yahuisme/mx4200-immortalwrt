@@ -28,8 +28,8 @@ jobs:
       WRT_SSID: MX4200
       WRT_WORD: 12345678
       WRT_IP: 192.168.10.1
-      WRT_REPO: https://github.com/VIKINGYFY/immortalwrt.git
-      WRT_BRANCH: main
+      WRT_REPO: https://github.com/immortalwrt/immortalwrt.git
+      WRT_BRANCH: master
     steps:
       - name: Check out repository
         uses: actions/checkout@main
@@ -82,6 +82,7 @@ jobs:
           cd /mnt/build_wrt/package/
           bash "$GITHUB_WORKSPACE/Scripts/Packages.sh"
           python3 "$GITHUB_WORKSPACE/Scripts/GnuTLS.py" /mnt/build_wrt
+          python3 "$GITHUB_WORKSPACE/Scripts/Temperature.py" /mnt/build_wrt
           python3 "$GITHUB_WORKSPACE/Scripts/GoBootstrap.py" /mnt/build_wrt
 
       - name: Install Go bootstrap
@@ -293,7 +294,7 @@ jobs:
 
             `factory.bin` 用于从原厂固件刷入；`sysupgrade.bin` 用于从已有 ImmortalWrt 升级。
 
-            集成 NSS 硬件加速。
+            基于 ImmortalWrt 官方 master snapshot，保留个人配置与应用。
         run: |
           gh release create "$WRT_RELEASE_NAME" /mnt/build_wrt/upload/*.bin \
             --target "$GITHUB_SHA" --title "$WRT_RELEASE_TITLE" --notes "$RELEASE_NOTES"
