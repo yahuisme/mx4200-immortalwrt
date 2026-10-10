@@ -1,0 +1,38 @@
+#!/bin/sh
+# One-time native LuCI LED presets; never replace restored/user rules.
+[ ! -f /sysupgrade.tgz ] && [ ! -f /tmp/sysupgrade.tar ] || exit 0
+
+. /lib/functions.sh
+case "$(board_name)" in
+	linksys,mx4200v1) blue=255 ;;
+	linksys,mx4200v2) blue=51 ;;
+	*) exit 0 ;;
+esac
+
+led_exists() {
+	local sysfs
+	config_get sysfs "$1" sysfs
+	[ "$sysfs" != "$color:status" ] || found=1
+}
+
+config_load system
+for color in blue green red; do
+	found=0
+	config_foreach led_exists led
+	[ "$found" = 0 ] || continue
+	# A pre-existing section with this name also belongs to the user.
+	uci -q get "system.led_$color" >/dev/null && continue
+	default=0
+	[ "$color" != blue ] || default=1
+	uci -q batch <<EOF || exit 1
+set system.led_$color=led
+set system.led_$color.name='$color'
+set system.led_$color.sysfs='$color:status'
+set system.led_$color.trigger='none'
+set system.led_$color.default='$default'
+EOF
+	[ "$color" != blue ] || uci -q set "system.led_$color.brightness=$blue" || exit 1
+done
+
+# The native uci-defaults boot wrapper commits the configuration.
+exit 0

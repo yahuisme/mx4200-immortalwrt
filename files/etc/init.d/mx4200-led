@@ -1,8 +1,0 @@
-#!/bin/sh /etc/rc.common
-# One boot-time sync, after the native done (95) and led (96) scripts.
-START=97
-
-boot() {
-	touch /var/run/mx4200-led-ready
-	ACTION=boot INTERFACE= sh /etc/hotplug.d/iface/95-mx4200-led
-}

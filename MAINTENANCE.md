@@ -26,6 +26,6 @@ actionlint .github/workflows/MX4200.yml
 git diff --check
 ```
 
-真实配置检查设置 `MX4200_PREPARED_SOURCE`；原版源码设置 `MX4200_PRISTINE_SOURCE`（温度）、`GNUTLS_PRISTINE_SOURCE`（配方），设置模板用 `SETTINGS_PRISTINE_SOURCE`。温度测试需要 BusyBox。
+真实配置检查设置 `MX4200_PREPARED_SOURCE`；原版源码设置 `MX4200_PRISTINE_SOURCE`（温度）、`GNUTLS_PRISTINE_SOURCE`（配方），设置模板用 `SETTINGS_PRISTINE_SOURCE`。温度测试需要 BusyBox。原生 LED 隔离测试设置 `MX4200_TEST_ROOTFS` 为已解包、可在宿主执行的 OpenWrt/ImmortalWrt rootfs，使用 root 执行 `python3 -m unittest Tests.test_native_leds -v`；测试将真实 UCI、ash、LED 服务与 diag 复制到临时 chroot，只模拟 sysfs/设备树，不挂载或操作宿主硬件。未设置时明确跳过，不能当作已验证。
 `HOMEPROXY_AUDIT` 的两提交源码布局见 [测试夹具说明](Tests/fixtures/hostpkg/README.md)。完整非编译验证须提供上述环境变量并检查跳过项。
 禁止本地编译时不要设置 `CACHE_OPENWRT_ROOT`，该项会实际编译 flock；推送、触发构建及发布须另行授权。
