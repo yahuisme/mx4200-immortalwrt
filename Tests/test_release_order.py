@@ -54,8 +54,12 @@ if a[:2] == ['release', 'list']:
     print('MX4200_old')
     print('Other_keep')
 elif a[:2] == ['release', 'delete']:
-    assert a[-1] == 'MX4200_old'
+    assert a[2] == 'MX4200_old'
 elif a and a[0] == 'api':
+    if any('/releases?' in v for v in a):
+        print(json.dumps([[dict(tag_name=t, published_at=str(i), id=i, draft=False, prerelease=False)
+                           for i, t in enumerate(['MX4200_old', 'MX4200_previous', os.environ['WRT_RELEASE_NAME']], 1)]]))
+        sys.exit(0)
     tier = os.environ['TIER']
     if fault == 'admit-' + tier and step == 'pack-' + tier:
         sys.exit(7)

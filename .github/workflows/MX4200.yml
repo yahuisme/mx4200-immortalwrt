@@ -287,7 +287,19 @@ jobs:
         run: |
           gh release create "$WRT_RELEASE_NAME" /mnt/build_wrt/upload/*.bin \
             --target "$GITHUB_SHA" --title "$WRT_RELEASE_TITLE" --notes "$RELEASE_NOTES"
-          gh release list --json tagName --jq '.[].tagName' |
-            grep '^MX4200_' |
-            grep -Fxv "$WRT_RELEASE_NAME" |
-            xargs -r -n1 gh release delete --cleanup-tag -y || true
+          if releases=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100") &&
+            old_tags=$(jq -er --arg current "$WRT_RELEASE_NAME" '
+              flatten | map(select(.draft == false and .prerelease == false and
+                (.tag_name | startswith("MX4200_")) )) |
+              sort_by(.published_at, .id) | reverse |
+              if any(.tag_name == $current) then
+                [.[] | select(.tag_name != $current)][1:] | map(.tag_name) | join("\n")
+              else error("Published release missing from inventory") end
+            ' <<< "$releases"); then
+            while IFS= read -r tag; do
+              [ -n "$tag" ] || continue
+              gh release delete "$tag" --cleanup-tag -y || echo "::warning::Failed to delete release $tag"
+            done <<< "$old_tags"
+          else
+            echo "::warning::Release inventory unavailable; retaining all releases"
+          fi

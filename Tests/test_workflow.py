@@ -304,10 +304,9 @@ exit 0
             gh.write_text('''#!/usr/bin/env python3
 import json, os, sys
 with open(os.environ['LOG'], 'a') as f: f.write(json.dumps(sys.argv[1:]) + '\\n')
-if sys.argv[1:3] == ['release', 'list']:
-    print(os.environ['WRT_RELEASE_NAME'])
-    print('MX4200_old')
-    print('Other_keep')
+if sys.argv[1] == 'api':
+    print(json.dumps([[dict(tag_name=t, published_at=str(i), id=i, draft=False, prerelease=False)
+                       for i, t in enumerate(['MX4200_old', 'MX4200_previous', os.environ['WRT_RELEASE_NAME']], 1)]]))
 ''')
             gh.chmod(0o755)
             result = self.run_block('Publish firmware and prune releases', root, {
