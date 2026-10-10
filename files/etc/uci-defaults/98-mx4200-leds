@@ -1,5 +1,5 @@
 #!/bin/sh
-# One-time native LuCI LED presets; never replace restored/user rules.
+# One-time native LuCI presets; restored configurations remain user-owned.
 [ ! -f /sysupgrade.tgz ] && [ ! -f /tmp/sysupgrade.tar ] || exit 0
 
 . /lib/functions.sh
@@ -9,30 +9,72 @@ case "$(board_name)" in
 	*) exit 0 ;;
 esac
 
+case "$(uci -q get network.wan.proto)" in
+	pppoe) device=pppoe-wan ;;
+	dhcp|static) device="$(uci -q get network.wan.device)" ;;
+	*) device= ;;
+esac
+
 led_exists() {
 	local sysfs
 	config_get sysfs "$1" sysfs
-	[ "$sysfs" != "$color:status" ] || found=1
+	[ "$sysfs" = "$color:status" ] || return 0
+	found=1
+	[ "$1" = "led_$color" ] || custom=1
 }
 
+# Only the exact native blue preset is eligible for first-boot replacement.
+# Unknown/renamed sections and any extra user options are left alone.
 config_load system
+color=blue
+found=0
+custom=0
+config_foreach led_exists led
+if [ "$found" = 1 ] && [ "$custom" = 0 ] && [ -n "$device" ]; then
+	if [ "$(uci -q get system.led_blue)" = led ] &&
+	   [ "$(uci -q get system.led_blue.name)" = blue ] &&
+	   [ "$(uci -q get system.led_blue.sysfs)" = blue:status ] &&
+	   [ "$(uci -q get system.led_blue.default)" = 1 ] &&
+	   [ "$(uci -q get system.led_blue.brightness)" = "$blue" ] &&
+	   uci -q show system.led_blue | while IFS= read -r line; do
+		case "$line" in
+			system.led_blue=*|system.led_blue.name=*|system.led_blue.sysfs=*|\
+			system.led_blue.default=*|system.led_blue.brightness=*|\
+			"system.led_blue.trigger='none'") ;;
+			*) exit 1 ;;
+		esac
+	   done; then
+		uci -q set system.led_blue.trigger=netdev || exit 1
+		uci -q set "system.led_blue.dev=$device" || exit 1
+		uci -q set system.led_blue.mode=link || exit 1
+	fi
+fi
+
 for color in blue green red; do
 	found=0
 	config_foreach led_exists led
 	[ "$found" = 0 ] || continue
-	# A pre-existing section with this name also belongs to the user.
 	uci -q get "system.led_$color" >/dev/null && continue
 	default=0
-	[ "$color" != blue ] || default=1
+	trigger=none
+	if [ "$color" = blue ]; then
+		[ -n "$device" ] || continue
+		default=1
+		trigger=netdev
+	fi
 	uci -q batch <<EOF || exit 1
 set system.led_$color=led
 set system.led_$color.name='$color'
 set system.led_$color.sysfs='$color:status'
-set system.led_$color.trigger='none'
+set system.led_$color.trigger='$trigger'
 set system.led_$color.default='$default'
 EOF
-	[ "$color" != blue ] || uci -q set "system.led_$color.brightness=$blue" || exit 1
+	if [ "$color" = blue ]; then
+		uci -q set "system.led_blue.brightness=$blue" || exit 1
+		uci -q set "system.led_blue.dev=$device" || exit 1
+		uci -q set system.led_blue.mode=link || exit 1
+	fi
 done
 
-# The native uci-defaults boot wrapper commits the configuration.
+# The native uci-defaults boot wrapper commits and removes this script.
 exit 0
