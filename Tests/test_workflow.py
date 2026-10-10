@@ -46,7 +46,7 @@ class WorkflowTests(unittest.TestCase):
     def test_cache_contract(self):
         ordered = list(STEPS)
         self.assertEqual(STEPS['Configure firmware and caches']['id'], 'keys')
-        self.assertEqual(len(ordered), 21)
+        self.assertEqual(len(ordered), 23)
         self.assertLess(ordered.index('Configure firmware and caches'), ordered.index('Restore toolchain cache'))
         self.assertNotIn('restore-keys', STEPS['Restore toolchain cache']['with'])
         self.assertIn('rolling-prefix', STEPS['Restore downloads and ccache']['with']['restore-keys'])
@@ -115,6 +115,10 @@ class WorkflowTests(unittest.TestCase):
                     self.assertEqual((root / 'output').read_text(), 'version=1.24.7\n')
                     self.assertIn('feeds/packages ' + '0' * 39 + '1', result.stdout)
                     self.assertNotIn('packages.tmp', result.stdout)
+                    recorded = dict(line.split() for line in (root / 'source-revisions.txt').read_text().splitlines()
+                                    if len(line.split()) == 2)
+                    self.assertEqual(recorded['source'], '0' * 39 + '1')
+                    self.assertEqual(recorded['feeds/packages'], '0' * 39 + '1')
                     values = dict(line.split('=', 1) for line in (root / 'env').read_text().splitlines())
                     self.assertEqual(values['WRT_HASH'], '0' * 39 + '1')
                     self.assertEqual(values['WRT_RELEASE_NAME'],
@@ -298,13 +302,24 @@ exit 0
             root = Path(temp)
             upload = root / 'upload'
             upload.mkdir()
-            for index in range(4):
-                (upload / f'{index}.bin').write_bytes(b'fixture')
+            (root / 'Scripts').symlink_to(ROOT / 'Scripts')
+            for device in ('mx4200v1', 'mx4200v2'):
+                for kind in ('factory', 'sysupgrade'):
+                    (upload / f'fixture-linksys_{device}-{kind}.bin').write_bytes(b'fixture')
             gh = root / 'gh'
             gh.write_text('''#!/usr/bin/env python3
 import json, os, sys
 with open(os.environ['LOG'], 'a') as f: f.write(json.dumps(sys.argv[1:]) + '\\n')
 if sys.argv[1] == 'api':
+    if '/releases/assets/' in sys.argv[2]:
+        sys.stdout.buffer.write(b'fixture')
+        sys.exit(0)
+    if '/releases/tags/' in sys.argv[-1]:
+        from pathlib import Path
+        print(json.dumps(dict(tag_name=os.environ['WRT_RELEASE_NAME'], draft=False, prerelease=False,
+                              assets=[dict(id=i, name=p.name, size=p.stat().st_size, state='uploaded')
+                                      for i, p in enumerate(Path('upload').glob('*.bin'), 1)])))
+        sys.exit(0)
     print(json.dumps([[dict(tag_name=t, published_at=str(i), id=i, draft=False, prerelease=False)
                        for i, t in enumerate(['MX4200_old', 'MX4200_previous', os.environ['WRT_RELEASE_NAME']], 1)]]))
 ''')
@@ -312,9 +327,10 @@ if sys.argv[1] == 'api':
             result = self.run_block('Publish firmware and prune releases', root, {
                 'PATH': str(root) + ':' + os.environ['PATH'], 'LOG': str(root / 'log'),
                 'WRT_RELEASE_NAME': 'MX4200_current', 'GITHUB_SHA': 'a' * 40,
-                'RELEASE_NOTES': 'fixture notes'})
+                'RELEASE_NOTES': 'fixture notes', 'GITHUB_REPOSITORY': 'fixture/repo'})
             self.assertEqual(result.returncode, 0, result.stderr)
             calls = [json.loads(line) for line in (root / 'log').read_text().splitlines()]
+            self.assertEqual(sum('/releases/assets/' in args[1] for args in calls if args[0] == 'api'), 4)
             create = calls[0]
             self.assertEqual(create[create.index('--target') + 1], 'a' * 40)
             self.assertEqual(sum(arg.endswith('.bin') for arg in create), 4)

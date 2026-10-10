@@ -22,7 +22,20 @@ done
 
 echo "source SHAs:"
 for repo in luci-theme-aurora luci-app-aurora-config packages; do
-	printf '%s %s\n' "$repo" "$(git -C "$stage/$repo" rev-parse HEAD)"
+	revision=$(git -C "$stage/$repo" rev-parse HEAD)
+	printf '%s %s\n' "$repo" "$revision"
+	case "$repo" in
+		luci-theme-aurora) variable=CUSTOM_THEME_SHA ;;
+		luci-app-aurora-config) variable=CUSTOM_CONFIG_SHA ;;
+		packages) variable=CUSTOM_PACKAGES_SHA ;;
+	esac
+	if [ -n "${GITHUB_ENV:-}" ]; then
+		printf '%s=%s\n' "$variable" "$revision" >> "$GITHUB_ENV" || echo '::warning::Could not retain custom source revision'
+	fi
+	# Record before the temporary clone is removed; never resolve remote HEAD later.
+	if [ -n "${SOURCE_REVISIONS:-}" ]; then
+		printf 'custom/%s %s\n' "$repo" "$revision" >> "$SOURCE_REVISIONS" || echo '::warning::Could not record custom source revision'
+	fi
 done
 
 for name in luci-theme-aurora luci-app-aurora-config luci-app-homeproxy sing-box; do

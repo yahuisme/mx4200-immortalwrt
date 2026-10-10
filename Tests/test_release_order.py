@@ -11,6 +11,7 @@ import unittest
 
 import yaml
 from Scripts import Cache
+from Tests.test_build_record import source_fixture
 
 ROOT = Path(__file__).resolve().parents[1]
 STEPS = yaml.safe_load((ROOT / '.github/workflows/MX4200.yml').read_text())['jobs']['build']['steps']
@@ -56,6 +57,14 @@ if a[:2] == ['release', 'list']:
 elif a[:2] == ['release', 'delete']:
     assert a[2] == 'MX4200_old'
 elif a and a[0] == 'api':
+    if any('/releases/tags/' in v for v in a):
+        import hashlib
+        assets = [dict(name=p.name, size=p.stat().st_size, state='uploaded',
+                       digest='sha256:' + hashlib.sha256(p.read_bytes()).hexdigest())
+                  for p in Path(os.environ['IMAGES']).glob('*.bin')]
+        print(json.dumps(dict(tag_name=os.environ['WRT_RELEASE_NAME'], draft=False,
+                              prerelease=False, assets=assets)))
+        sys.exit(0)
     if any('/releases?' in v for v in a):
         print(json.dumps([[dict(tag_name=t, published_at=str(i), id=i, draft=False, prerelease=False)
                            for i, t in enumerate(['MX4200_old', 'MX4200_previous', os.environ['WRT_RELEASE_NAME']], 1)]]))
@@ -91,6 +100,13 @@ class ReleaseOrderTests(unittest.TestCase):
                 (p / 'payload').write_text('cache fixture')
             images = build / 'bin/targets/qualcommax/ipq807x'
             images.mkdir(parents=True)
+            (build / '.config').write_text('CONFIG_FIXTURE=y\n')
+            revision_env = source_fixture(build)
+            if fault == 'record-incomplete':
+                (build / 'source-revisions.txt').write_text('source ' + 'a' * 40 + '\n')
+            (images / 'fixture.manifest').write_text('fixture - 1\n')
+            if fault == 'record':
+                (build / '.config').unlink()
             for device in ('mx4200v1', 'mx4200v2'):
                 for kind in ('factory', 'sysupgrade'):
                     (images / f'immortalwrt-linksys_{device}-squashfs-{kind}.bin').write_bytes(
@@ -110,10 +126,11 @@ class ReleaseOrderTests(unittest.TestCase):
                         created_at='2026-01-01') for i, tier in enumerate(TIERS, 1)]
             state.write_text(json.dumps({'rows': old, 'calls': []}))
             env = dict(os.environ, PATH=str(bindir) + ':' + os.environ['PATH'],
-                       STATE=str(state), FAULT=fault, GITHUB_REF=ref,
+                       STATE=str(state), FAULT=fault, GITHUB_REF=ref, IMAGES=str(build / 'upload'),
                        GITHUB_REPOSITORY='fixture/repo', GITHUB_SHA='a' * 40,
                        WRT_RELEASE_NAME='MX4200_fixture', WRT_RELEASE_TITLE='fixture title',
                        GH_TOKEN='fixture-token-not-a-credential')
+            env.update(revision_env)
             outcomes, outputs, trace, diagnostics = {}, {
                 'tools': {'cache-hit': 'false'}, 'hostpkg': {'cache-hit': 'false'},
                 'keys': {'tc-key': prefix + 'tc-new', 'hostpkg-key': prefix + 'hostpkg-new'},
@@ -135,7 +152,11 @@ class ReleaseOrderTests(unittest.TestCase):
                 for key, value in step.get('env', {}).items():
                     env[key] = re.sub(r'\$\{\{ steps\.([\w-]+)\.outputs\.([\w-]+) \}\}',
                                       lambda m: outputs[m[1]][m[2]], value)
-                if 'uses' in step:
+                if step.get('uses') == 'actions/upload-artifact@v4':
+                    self.assertEqual(step['with']['retention-days'], 30)
+                    self.assertTrue((build / 'build-record/images.json').is_file())
+                    rc = 7 if fault == 'record-upload' else 0
+                elif 'uses' in step:
                     self.assertEqual(step['uses'], 'actions/cache/save@main')
                     rc = 7 if fault == 'save-' + tier else 0
                     if not rc and fault != 'unconfirmed-' + tier:
@@ -175,7 +196,7 @@ class ReleaseOrderTests(unittest.TestCase):
         self.assertFalse(any(a[:2] == ['release', 'delete'] for _, a in state['calls']))
 
     def test_failure_matrix(self):
-        faults = ['none', 'compile', 'stage', 'cancel-before-compile', 'cancel-after-stage',
+        faults = ['none', 'record', 'record-incomplete', 'record-upload', 'compile', 'stage', 'cancel-before-compile', 'cancel-after-stage',
                   'cancel-after-cache'] + [f'{kind}-{tier}' for tier in TIERS
                   for kind in ('pack', 'admit', 'save', 'prune', 'unconfirmed')]
         for fault in faults:
@@ -188,6 +209,11 @@ class ReleaseOrderTests(unittest.TestCase):
                 else:
                     self.assertTrue(success, diagnostics)
                     self.assertEqual(trace[-1], (PUBLISH, 'success'))
+                if fault in ('record', 'record-incomplete', 'record-upload'):
+                    self.assertEqual(outcomes['record' if fault == 'record-incomplete' else fault], 'failure', diagnostics)
+                    if fault != 'record-upload':
+                        self.assertEqual(outcomes['record-upload'], 'skipped', diagnostics)
+                    self.assertTrue(any(a[:2] == ['release', 'delete'] for _, a in state['calls']))
                 if fault == 'none':
                     self.assertTrue(all(result == 'success' for _, result in trace), trace)
                     self.assertEqual({r['id'] for r in state['rows']}, {10, 11, 12})

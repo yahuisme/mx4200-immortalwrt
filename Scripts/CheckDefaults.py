@@ -5,7 +5,7 @@ import re
 import sys
 
 
-def check(config, packageinfo):
+def check(config, packageinfo, requested=""):
     values = dict(re.findall(r'^CONFIG_([^=]+)=(.*)$', config, re.M))
     defaults = sorted(key.removeprefix('MODULE_DEFAULT_') for key, value in values.items()
                       if key.startswith('MODULE_DEFAULT_') and value == 'y')
@@ -22,12 +22,17 @@ def check(config, packageinfo):
     missing = [package for package in defaults if package not in available]
     if missing:
         raise ValueError('unavailable device default packages: ' + ', '.join(missing))
+    for package, wanted in re.findall(r'^CONFIG_PACKAGE_([^=]+)=([yn])$', requested, re.M):
+        actual = values.get('PACKAGE_' + package, 'n')
+        if (wanted == 'y' and actual != 'y') or (wanted == 'n' and actual != 'n'):
+            raise ValueError(f'explicit package selection mismatch: {package} wanted {wanted}, got {actual}')
     return defaults
 
 
 if __name__ == '__main__':
     try:
-        defaults = check(Path(sys.argv[1]).read_text(), Path(sys.argv[2]).read_text())
+        defaults = check(Path(sys.argv[1]).read_text(), Path(sys.argv[2]).read_text(),
+                         Path(sys.argv[3]).read_text())
     except (OSError, ValueError) as error:
         sys.exit(str(error))
     print(f'Verified {len(defaults)} device default packages are selected (y/m)')

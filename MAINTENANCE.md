@@ -6,10 +6,11 @@
 ## 文件职责
 
 - `Config/MX4200.txt`：设备、构建开关、中文 LuCI 与指定应用；依赖交给官方配方，保留 hci-uart 必需的 input-support。
-- `Scripts/Packages.sh`：获取 Aurora、HomeProxy、sing-box；输出实际包源提交。
+- `Scripts/Packages.sh`：获取 Aurora、HomeProxy、sing-box；在临时克隆删除前输出并记录实际包源提交。
+- `Scripts/BuildRecord.py`：保存最终配置、包清单、源码提交、镜像 SHA-256 与构建环境，仅作为保留 30 天的 Actions artifact；记录失败不阻断有效镜像发布。记录必须完整匹配实际 source/recipe、所有 Git feeds 和临时克隆时保留的三个 custom SHA。发布后核验四个附件的名称、大小、uploaded 状态及 SHA-256；缺少 digest 时流式下载核对，下载失败或 hash 不符不清理旧版，通过后才按原策略保留最新两版。
 - `Scripts/Settings.sh`、`files/`：主题、版本显示、管理地址与无线默认值；排除 attendedsysupgrade。
 - `Scripts/Temperature.py`：修正单路传感器读取失败中断其他无线温度的问题。
-- `Scripts/CheckDefaults.py`：defconfig 后核验全部设备默认包及虚拟提供者。
+- `Scripts/CheckDefaults.py`：defconfig 后核验全部设备默认包及虚拟提供者，并复用 `Config/MX4200.txt` 的显式 PACKAGE=y/n：指定应用必须 y，排除包不得 y/m。
 - `.github/workflows/MX4200.yml`：准备、构建、校验镜像与发布；GnuTLS/GoBootstrap 脚本处理构建前置要求。
 
 ## 缓存

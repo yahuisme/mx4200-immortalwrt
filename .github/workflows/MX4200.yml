@@ -53,6 +53,8 @@ jobs:
           git clone --single-branch --branch "$WRT_BRANCH" "$WRT_REPO" /mnt/build_wrt/
           cd /mnt/build_wrt/
           WRT_HASH=$(git rev-parse HEAD)
+          export SOURCE_REVISIONS=/mnt/build_wrt/source-revisions.txt
+          printf 'source %s\nrecipe %s\n' "$WRT_HASH" "$GITHUB_SHA" > "$SOURCE_REVISIONS" || echo '::warning::Could not record source revision'
           WRT_REV=$(./scripts/getver.sh | sed -E 's/^r([0-9]+).*/\1/')
           {
             echo "WRT_DATE=$WRT_DATE"
@@ -72,6 +74,7 @@ jobs:
             [ -e "$feed/.git" ] || continue
             revision=$(git -C "$feed" rev-parse HEAD)
             printf '%s %s\n' "$feed" "$revision"
+            printf '%s %s\n' "$feed" "$revision" >> "$SOURCE_REVISIONS" || echo '::warning::Could not record feed revision'
           done
 
           cd /mnt/build_wrt/package/
@@ -101,7 +104,7 @@ jobs:
           cp -rf "$GITHUB_WORKSPACE/files" ./
           bash "$GITHUB_WORKSPACE/Scripts/Settings.sh"
           make defconfig -j"$(nproc)"
-          python3 "$GITHUB_WORKSPACE/Scripts/CheckDefaults.py" .config tmp/.packageinfo
+          python3 "$GITHUB_WORKSPACE/Scripts/CheckDefaults.py" .config tmp/.packageinfo "$GITHUB_WORKSPACE/Config/MX4200.txt"
 
           python3 "$GITHUB_WORKSPACE/Scripts/Cache.py" --output "$GITHUB_OUTPUT" prepare \
             --root /mnt/build_wrt --ref "$GITHUB_REF" \
@@ -182,6 +185,23 @@ jobs:
               fi
             done
           done
+
+      - name: Collect build record
+        id: record
+        if: ${{ !cancelled() && steps.stage.outcome == 'success' }}
+        continue-on-error: true
+        run: python3 Scripts/BuildRecord.py collect /mnt/build_wrt /mnt/build_wrt/build-record
+
+      - name: Upload build record
+        id: record-upload
+        if: ${{ !cancelled() && steps.record.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: mx4200-build-record-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /mnt/build_wrt/build-record/
+          retention-days: 30
+          if-no-files-found: error
 
       - name: Pack toolchain cache
         id: pack-tc
@@ -287,6 +307,7 @@ jobs:
         run: |
           gh release create "$WRT_RELEASE_NAME" /mnt/build_wrt/upload/*.bin \
             --target "$GITHUB_SHA" --title "$WRT_RELEASE_TITLE" --notes "$RELEASE_NOTES"
+          python3 Scripts/BuildRecord.py verify /mnt/build_wrt/upload "$GITHUB_REPOSITORY" "$WRT_RELEASE_NAME"
           if releases=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100") &&
             old_tags=$(jq -er --arg current "$WRT_RELEASE_NAME" '
               flatten | map(select(.draft == false and .prerelease == false and

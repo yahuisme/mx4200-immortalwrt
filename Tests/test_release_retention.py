@@ -20,6 +20,31 @@ with open(os.environ['CALLS'], 'a') as f:
 if a[:2] == ['release', 'create']:
     sys.exit(1 if os.environ['FAULT'] == 'create' else 0)
 elif a[0] == 'api':
+    if '/releases/assets/' in a[1]:
+        assert a[2:] == ['-H', 'Accept: application/octet-stream']
+        fault = os.environ['FAULT']
+        sys.stdout.buffer.write(b'wrong content' if fault == 'download-corrupt' else b'fixture image')
+        sys.exit(8 if fault == 'download-failed' else 0)
+    if '/releases/tags/' in a[-1]:
+        import hashlib
+        assets = [dict(id=i, name=p.name, size=p.stat().st_size, state='uploaded',
+                       digest='sha256:' + hashlib.sha256(p.read_bytes()).hexdigest())
+                  for i, p in enumerate(Path(os.environ['IMAGES']).glob('*.bin'), 1)]
+        fault = os.environ['FAULT']
+        if fault == 'readback': sys.exit(8)
+        if fault == 'malformed': print('{'); sys.exit(0)
+        if fault == 'missing': assets.pop()
+        if fault == 'extra': assets.append(dict(name='metadata.json'))
+        if fault == 'name': assets[0]['name'] = 'unexpected.bin'
+        if fault == 'duplicate': assets[0] = assets[1]
+        if fault == 'size': assets[0]['size'] += 1
+        if fault == 'state': assets[0]['state'] = 'new'
+        if fault == 'digest': assets[0]['digest'] = 'sha256:wrong'
+        if fault in ('no-digest', 'download-corrupt', 'download-failed'):
+            for asset in assets: asset.pop('digest')
+        print(json.dumps(dict(tag_name='wrong' if fault == 'tag' else os.environ['WRT_RELEASE_NAME'],
+                              draft=fault == 'draft', prerelease=fault == 'prerelease', assets=assets)))
+        sys.exit(0)
     assert '--paginate' in a and '--slurp' in a
     print(Path(os.environ['ROWS']).read_text())
     sys.exit(1 if os.environ['FAULT'] == 'list' else 0)
@@ -43,14 +68,31 @@ class ReleaseRetention(unittest.TestCase):
             (p / 'gh').write_text(STUB)
             (p / 'gh').chmod(0o755)
             (p / 'rows').write_text(json.dumps(pages))
-            env = dict(os.environ, PATH=d + ':' + os.environ['PATH'],
+            for device in ('mx4200v1', 'mx4200v2'):
+                for kind in ('factory', 'sysupgrade'):
+                    (p / f'fixture-linksys_{device}-{kind}.bin').write_bytes(b'fixture image')
+            env = dict(os.environ, PATH=d + ':' + os.environ['PATH'], IMAGES=d,
                        CALLS=str(p / 'calls'), ROWS=str(p / 'rows'), FAULT=fault,
                        WRT_RELEASE_NAME='MX4200_current', WRT_RELEASE_TITLE='fixture',
                        GITHUB_SHA='a' * 40, GITHUB_REPOSITORY='fixture/repo', RELEASE_NOTES='fixture')
-            result = subprocess.run(['bash', '-eo', 'pipefail', '-c', CODE],
+            code = CODE.replace('/mnt/build_wrt/upload', d)
+            result = subprocess.run(['bash', '-eo', 'pipefail', '-c', code], cwd=ROOT,
                                     env=env, capture_output=True, text=True)
             calls = [json.loads(x) for x in (p / 'calls').read_text().splitlines()]
             return result, [a[2] for a in calls if a[:2] == ['release', 'delete']]
+
+    def test_readback_failures_protect_old_releases(self):
+        pages = [[row('MX4200_current', 10), row('MX4200_previous', 9), row('MX4200_old', 1)]]
+        for fault in ('readback', 'malformed', 'missing', 'extra', 'name', 'duplicate',
+                      'size', 'state', 'digest', 'tag', 'draft', 'prerelease',
+                      'download-corrupt', 'download-failed'):
+            with self.subTest(fault=fault):
+                result, deleted = self.replay(pages, fault)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(deleted, [])
+        result, deleted = self.replay(pages, 'no-digest')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(deleted, ['MX4200_old'])
 
     def test_zero_one_two_three(self):
         for count in range(4):
