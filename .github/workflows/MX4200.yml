@@ -278,13 +278,12 @@ jobs:
           RELEASE_NOTES: |
             ## Linksys MX4200 系列 ImmortalWrt 固件
 
-            本 Release 仅包含以下设备的刷机镜像：
-            - Linksys MX4200v1：`factory.bin` / `sysupgrade.bin`
-            - Linksys MX4200v2：`factory.bin` / `sysupgrade.bin`
+            - 源码：[ImmortalWrt 官方 master snapshot](https://github.com/immortalwrt/immortalwrt/tree/master)
+            - 机型：Linksys MX4200v1 / MX4200v2，请选择对应硬件版本的镜像。
+            - 镜像：`factory.bin` 用于从原厂固件刷入，`sysupgrade.bin` 用于从已有 ImmortalWrt 升级。
+            - 定制：中文 LuCI、Aurora、HomeProxy、sing-box 及既定网络与无线设置。
 
-            `factory.bin` 用于从原厂固件刷入；`sysupgrade.bin` 用于从已有 ImmortalWrt 升级。
-
-            基于 ImmortalWrt 官方 master snapshot，保留个人配置与应用。
+            [默认设置与使用说明](https://github.com/yahuisme/mx4200-immortalwrt#默认设置)
         run: |
           gh release create "$WRT_RELEASE_NAME" /mnt/build_wrt/upload/*.bin \
             --target "$GITHUB_SHA" --title "$WRT_RELEASE_TITLE" --notes "$RELEASE_NOTES"

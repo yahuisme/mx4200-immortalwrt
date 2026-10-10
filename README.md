@@ -1,68 +1,51 @@
 # MX4200 ImmortalWrt
 
-适用于 **Linksys MX4200v1 / MX4200v2** 路由器的定制 ImmortalWrt 固件构建项目。
+基于 [ImmortalWrt 官方 master snapshot](https://github.com/immortalwrt/immortalwrt/tree/master)，适用于 Linksys MX4200v1 / MX4200v2。
 
-本项目基于 [ImmortalWrt 官方 master snapshot](https://github.com/immortalwrt/immortalwrt/tree/master) 构建，并针对 MX4200 系列调整软件包和配置。
-
-> ⚠️ **仅适用于 Linksys MX4200v1 / MX4200v2，请勿刷入其他型号设备。**
-
----
-
-## ✨ 主要特性
-
-- 🎨 LuCI 默认主题：Aurora
-- 🕐 系统时区：香港（UTC+8）
-- 🚀 BBR 拥塞控制
-- 💾 基础 USB 存储支持
-- 🔗 内置 HomeProxy 与 sing-box
-- 📡 三频 Wi-Fi 默认开启 2.4 GHz 与 5.8 GHz
-- 🔄 每日自动构建最新固件
-
----
-
-## 🧩 预装应用
-
-固件严格保持纯净与高效，内置插件全中文支持，代理组件由专属源 [yahuisme/packages](https://github.com/yahuisme/packages) 定制提供：
-
-| 插件 | 功能说明 |
-| :--- | :--- |
-| [`luci-app-homeproxy`](https://github.com/yahuisme/packages/tree/main/luci-app-homeproxy) | 定制版代理客户端（集成官方最新 `sing-box` 核心） |
-| `luci-app-advanced-reboot` | 高级重启（支持双分区切换与关机） |
-| `luci-app-wol` | 网络唤醒（Wake-on-LAN） |
-| `luci-app-ttyd` | 网页终端控制台 |
-
----
-
-## 📦 固件镜像
+固件下载见 [Releases](https://github.com/yahuisme/mx4200-immortalwrt/releases)。请选择对应硬件版本的镜像：
 
 | 镜像 | 用途 |
 | --- | --- |
-| `factory.bin` | 从原厂固件刷入时使用 |
-| `sysupgrade.bin` | 从已有 ImmortalWrt 升级时使用 |
+| `factory.bin` | 从原厂固件刷入 |
+| `sysupgrade.bin` | 从已有 ImmortalWrt 升级 |
 
----
+## 功能
 
-## 默认访问
+- 中文 LuCI 与 Aurora 主题。
+- HomeProxy 与官方稳定版 sing-box。
+- BBR 拥塞控制与基础 USB 存储支持。
+- 三频 Wi-Fi，默认开启 2.4 GHz 与 5.8 GHz。
+
+## 预装应用
+
+| 插件 | 功能说明 |
+| --- | --- |
+| [HomeProxy](https://github.com/yahuisme/packages/tree/main/luci-app-homeproxy) | 代理客户端 |
+| Aurora 配置 | 主题设置 |
+| 高级重启 | 双分区重启切换 |
+| 网络唤醒 | 唤醒局域网设备 |
+| 网页终端 | 浏览器终端访问 |
+| 软件包管理器 | 安装与管理软件包 |
+| 防火墙 | 网络访问规则 |
+
+## 默认设置
 
 - 管理地址：`192.168.10.1`
 - 管理密码：无
-- Wi-Fi SSID：`MX4200`
+- 系统时区：香港（UTC+8）
+- Wi-Fi 名称：`MX4200`
 - Wi-Fi 密码：`12345678`
-
----
-
-## 📡 默认无线配置
 
 | 项目 | 2.4 GHz | 5.2 GHz | 5.8 GHz |
 | --- | --- | --- | --- |
-| 状态 | 开启 | **关闭** | 开启 |
+| 状态 | 开启 | 关闭 | 开启 |
 | 区域 | US | US | US |
 | 信道 | 11 | 48 | 149 |
 | 加密 | WPA2-PSK | WPA2-PSK | WPA2-PSK |
-| 发射功率 | 23 dBm | 25 dBm | 25 dBm |
+| 配置功率 | 23 dBm | 25 dBm | 25 dBm |
 
----
+## 构建
 
-## 🔄 自动构建
+每日自动构建，也可手动运行 Actions。仅发布两个硬件版本各自的 `factory.bin` 与 `sysupgrade.bin`。
 
-GitHub Actions 每日自动构建，每个 Release 仅包含 MX4200v1 / MX4200v2 各自的 `factory.bin` 与 `sysupgrade.bin`。
+[构建维护](MAINTENANCE.md)
