@@ -28,7 +28,8 @@ class WorkflowTests(unittest.TestCase):
                 self.assertEqual([line for line in lines if line.startswith(symbol + '=')],
                                  [symbol + '=n'])
         self.assertNotIn('usteer', (ROOT / 'README.md').read_text().lower())
-        for package in ('etherwake', 'luci-app-wol', 'ttyd', 'luci-app-ttyd'):
+        # Executable dependencies are asserted in the real defconfig test.
+        for package in ('luci-app-wol', 'luci-app-ttyd'):
             self.assertIn('CONFIG_PACKAGE_' + package + '=y', lines)
 
     def test_profile_omits_retired_fullcone_package(self):

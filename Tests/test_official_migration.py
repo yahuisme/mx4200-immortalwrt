@@ -18,14 +18,20 @@ class OfficialMigrationTests(unittest.TestCase):
 
     def test_optional_donor_components_follow_official_defaults(self):
         config = (ROOT / 'Config/MX4200.txt').read_text().splitlines()
-        for package in ('e2fsprogs', 'f2fs-tools', 'kmod-fs-ext4', 'kmod-fs-f2fs',
-                        'wpad-openssl', 'usbutils'):
-            self.assertFalse(any(line.startswith('CONFIG_PACKAGE_' + package + '=')
-                                 for line in config), package)
-        for package in ('kmod-usb3', 'kmod-usb-core', 'kmod-usb-dwc3',
-                        'kmod-usb-storage', 'kmod-usb-storage-extras',
-                        'kmod-usb-storage-uas', 'automount', 'input-support'):
-            self.assertIn('CONFIG_PACKAGE_' + package + '=y', config)
+        # Only requested applications, their UI collection and the official
+        # hci-uart dependency gate belong in the fragment. Dependencies are
+        # selected by real recipes, not an inherited donor package list.
+        positive = {line.split('=', 1)[0].removeprefix('CONFIG_PACKAGE_')
+                    for line in config if line.startswith('CONFIG_PACKAGE_')
+                    and line.endswith('=y')}
+        self.assertEqual(positive, {
+            'input-support', 'luci', 'autocore', 'luci-app-advanced-reboot',
+            'luci-app-aurora-config', 'luci-app-homeproxy', 'luci-app-ttyd',
+            'luci-app-wol', 'luci-theme-aurora',
+        })
+        for package in ('usteer', 'luci-app-usteer', 'luci-i18n-usteer-zh-cn',
+                        'luci-app-attendedsysupgrade'):
+            self.assertIn('CONFIG_PACKAGE_' + package + '=n', config)
 
     @unittest.skipUnless(os.environ.get('MX4200_PREPARED_SOURCE'),
                          'set MX4200_PREPARED_SOURCE for native defconfig closure')
@@ -37,7 +43,19 @@ class OfficialMigrationTests(unittest.TestCase):
                         'attendedsysupgrade-common', 'auc', 'owut'):
             for value in ('y', 'm'):
                 self.assertNotIn('CONFIG_PACKAGE_' + package + '=' + value, config)
-        self.assertIn('CONFIG_PACKAGE_luci-app-package-manager=y', config)
+        for package in ('luci-app-firewall', 'luci-app-package-manager', 'autocore',
+                        'luci-i18n-firewall-zh-cn', 'luci-i18n-package-manager-zh-cn',
+                        'kmod-usb3', 'kmod-usb-storage', 'curl', 'etherwake', 'ttyd'):
+            self.assertIn('CONFIG_PACKAGE_' + package + '=y', config)
+        for package in ('kmod-bonding', 'proto-bonding', 'kmod-fs-btrfs', 'kmod-fuse',
+                        'kmod-wireguard', 'kmod-inet-mptcp-diag', 'kmod-mtd-rw',
+                        'kmod-dummy', 'kmod-veth', 'kmod-tcp-bbr',
+                        'exfat-fsck', 'exfat-mkfs', 'fdisk', 'gdisk', 'smartmontools',
+                        'smartmontools-drivedb', 'iperf3', 'htop', 'ip-full',
+                        'openssh-keygen', 'openssh-sftp-server', 'openssl-util',
+                        'blkid', 'dmesg', 'lsblk', 'nand-utils', 'xz-utils'):
+            for value in ('y', 'm'):
+                self.assertNotIn('CONFIG_PACKAGE_' + package + '=' + value, config)
         requested = (ROOT / 'Config/MX4200.txt').read_text().splitlines()
         for line in requested:
             if line.startswith('CONFIG_PACKAGE_') and line.endswith('=y'):

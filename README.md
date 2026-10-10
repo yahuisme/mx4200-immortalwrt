@@ -13,7 +13,7 @@
 
 - 中文 LuCI 与 Aurora 主题。
 - HomeProxy 与官方稳定版 sing-box。
-- BBR 拥塞控制与基础 USB 存储支持。
+- 设备驱动及基础 USB 支持沿用官方默认。
 - 三频 Wi-Fi，默认开启 2.4 GHz 与 5.8 GHz。
 
 ## 预装应用
