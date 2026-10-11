@@ -13,6 +13,12 @@
 - `Scripts/CheckDefaults.py`：defconfig 后核验全部设备默认包及虚拟提供者，并复用 `Config/MX4200.txt` 的显式 PACKAGE=y/n：指定应用必须 y，排除包不得 y/m。
 - `.github/workflows/MX4200.yml`：准备、构建、校验镜像与发布；GnuTLS/GoBootstrap 脚本处理构建前置要求。
 
+## ath11k 内存模式
+
+`Settings.sh` 仅为 MX4200v2 的官方 `&wifi` 模板添加 `qcom,ath11k-fw-memory-mode = <1>;`，重复执行不再改写；模板、已有模式值或节点数量不符即失败，避免覆盖上游变化。官方 `903-ath11k-support-setting-FW-memory-mode-via-DT.patch` 原生支持该模式：每 radio 的 VDEV/peer 预算由 17/512 降为 8/128，多 SSID、Mesh 与客户端容量相应受限；128 不代表任何组合下都可接入 128 个客户端。
+
+v1 已用 mode 1，不改动；v2 不引入 `ipq8074-512m.dtsi`，不调整 reserved/preallocated memory、ring 或 SKB。固定预留区不变，不能回收其 MemTotal，也不承诺 30 MiB 或任何实测收益。非编译测试仅证明精确单行转换与幂等；实际收益和稳定性仍需冷启动、三 radio、QMI/校准日志及同负载内存对比验证。
+
 ## 缓存
 
 三层缓存为 toolchain、hostpkg、dl + ccache；源码与最终配置参与精确匹配，下载及 ccache 滚动复用。
@@ -26,6 +32,6 @@ actionlint .github/workflows/MX4200.yml
 git diff --check
 ```
 
-真实配置检查设置 `MX4200_PREPARED_SOURCE`；原版源码设置 `MX4200_PRISTINE_SOURCE`（温度）、`GNUTLS_PRISTINE_SOURCE`（配方），设置模板用 `SETTINGS_PRISTINE_SOURCE`。温度测试需要 BusyBox。原生 LED 隔离测试设置 `MX4200_TEST_ROOTFS` 为已解包、可在宿主执行的 OpenWrt/ImmortalWrt rootfs，使用 root 执行 `python3 -m unittest Tests.test_native_leds -v`；测试将真实 UCI、ash、LED 服务与 diag 复制到临时 chroot，只模拟 sysfs/设备树，不挂载或操作宿主硬件。未设置时明确跳过，不能当作已验证。
+真实配置检查设置 `MX4200_PREPARED_SOURCE`；原版源码设置 `MX4200_PRISTINE_SOURCE`（温度）、`GNUTLS_PRISTINE_SOURCE`（配方），设置模板用 `SETTINGS_PRISTINE_SOURCE`（包含原版设置文件、MX4200v1/v2 DTS、qualcommax 预留内存文件与 ath11k patches；测试完整 Settings 及平台文件字节边界）。温度测试需要 BusyBox。原生 LED 隔离测试设置 `MX4200_TEST_ROOTFS` 为已解包、可在宿主执行的 OpenWrt/ImmortalWrt rootfs，使用 root 执行 `python3 -m unittest Tests.test_native_leds -v`；测试将真实 UCI、ash、LED 服务与 diag 复制到临时 chroot，只模拟 sysfs/设备树，不挂载或操作宿主硬件。未设置时明确跳过，不能当作已验证。
 `HOMEPROXY_AUDIT` 的两提交源码布局见 [测试夹具说明](Tests/fixtures/hostpkg/README.md)。完整非编译验证须提供上述环境变量并检查跳过项。
 禁止本地编译时不要设置 `CACHE_OPENWRT_ROOT`，该项会实际编译 flock；推送、触发构建及发布须另行授权。

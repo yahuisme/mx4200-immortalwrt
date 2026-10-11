@@ -6,6 +6,9 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
+DTS = 'target/linux/qualcommax/dts/ipq8174-mx4200v2.dts'
+WIFI = '&wifi {\n\tstatus = "okay";\n\n\tqcom,ath11k-calibration-variant = "Linksys-MX4200v2";\n};\n'
+MODE = '\tqcom,ath11k-fw-memory-mode = <1>;\n'
 
 
 class SettingsScriptTests(unittest.TestCase):
@@ -15,6 +18,7 @@ class SettingsScriptTests(unittest.TestCase):
         import shutil
 
         fixtures = {
+            DTS: WIFI,
             "package/luci-app-aurora-config/root/usr/share/aurora/default.template":
                 "option nav_type 'topbar'\noption struct_radius_base '1rem'\n",
             "feeds/luci/collections/luci/Makefile":
@@ -47,6 +51,13 @@ class SettingsScriptTests(unittest.TestCase):
                     path = Path(d, relative)
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_text(text)
+            dts_before = Path(d, DTS).read_bytes()
+            platform_before = {p.relative_to(d): p.read_bytes()
+                               for top in ('target', 'package/kernel')
+                               for p in Path(d, top).rglob('*') if p.is_file()}
+            platform_expected = dict(platform_before)
+            platform_expected[Path(DTS)] = dts_before.replace(
+                WIFI.encode(), WIFI.replace('};\n', MODE + '};\n').encode())
             before = {p: Path(d, p).read_text() for p in replacements}
             self.assertIn('PRETTY_NAME="%D %V"',
                           before["package/base-files/files/usr/lib/os-release"])
@@ -56,6 +67,9 @@ class SettingsScriptTests(unittest.TestCase):
             result = subprocess.run(["bash", str(ROOT / "Scripts/Settings.sh")],
                                     cwd=d, env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(platform_expected, {p.relative_to(d): p.read_bytes()
+                             for top in ('target', 'package/kernel')
+                             for p in Path(d, top).rglob('*') if p.is_file()})
             wifi = Path(d, "package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc").read_text()
             self.assertIn("encryption='psk2+ccmp'", wifi)
             self.assertIn("ssid='MX4200'", wifi)
@@ -77,6 +91,50 @@ class SettingsScriptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual(after, {p.relative_to(d): p.read_bytes()
                                     for p in Path(d).rglob("*") if p.is_file()})
+
+    def test_memory_mode_rejects_changed_templates_without_writing(self):
+        # Run the exact embedded transformation, without unrelated settings.
+        script = (ROOT / 'Scripts/Settings.sh').read_text().split("python3 - <<'PY'\n", 1)[1].split('\nPY\n', 1)[0]
+        changed = WIFI.replace('};\n', MODE + '};\n')
+        cases = [None, WIFI.replace('okay', 'disabled'), WIFI + WIFI,
+                 changed.replace('<1>', '<0>'), changed.replace('<1>', '<2>'),
+                 changed.replace(MODE, MODE + MODE),
+                 WIFI + '&other {\n' + MODE + '};\n']
+        for content in cases:
+            with self.subTest(content=content), tempfile.TemporaryDirectory() as d:
+                path = Path(d, DTS)
+                path.parent.mkdir(parents=True)
+                if content is not None:
+                    path.write_text(content)
+                result = subprocess.run(['python3', '-c', script], cwd=d, capture_output=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(path.read_text() if path.exists() else None, content)
+
+    @unittest.skipUnless(os.environ.get('SETTINGS_PRISTINE_SOURCE'),
+                         'set SETTINGS_PRISTINE_SOURCE for real DTS boundary checks')
+    def test_real_memory_mode_changes_only_one_v2_line(self):
+        import shutil
+        source = Path(os.environ['SETTINGS_PRISTINE_SOURCE'])
+        script = (ROOT / 'Scripts/Settings.sh').read_text().split("python3 - <<'PY'\n", 1)[1].split('\nPY\n', 1)[0]
+        with tempfile.TemporaryDirectory() as d:
+            shutil.copytree(source, d, dirs_exist_ok=True)
+            before = {p.relative_to(d): p.read_bytes() for p in Path(d).rglob('*') if p.is_file()}
+            for protected in (
+                'target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8074-512m.dtsi',
+                'target/linux/qualcommax/patches-6.18/0102-arm64-dts-ipq8074-add-reserved-memory-nodes.patch',
+                'package/kernel/mac80211/patches/ath11k/903-ath11k-support-setting-FW-memory-mode-via-DT.patch',
+            ):
+                self.assertIn(Path(protected), before)
+            self.assertIn(MODE.encode(), before[Path(DTS.replace('v2.dts', 'v1.dts'))])
+            self.assertNotIn(MODE.encode(), before[Path(DTS)])
+            expected = dict(before)
+            expected[Path(DTS)] = before[Path(DTS)].replace(
+                WIFI.encode(), WIFI.replace('};\n', MODE + '};\n').encode())
+            self.assertNotEqual(expected, before)
+            for _ in range(2):
+                subprocess.run(['python3', '-c', script], cwd=d, check=True)
+                self.assertEqual(expected, {p.relative_to(d): p.read_bytes()
+                                           for p in Path(d).rglob('*') if p.is_file()})
 
     @unittest.skipUnless(os.environ.get('MX4200_PREPARED_SOURCE'),
                          'set MX4200_PREPARED_SOURCE for real version rendering')
