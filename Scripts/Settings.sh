@@ -39,6 +39,22 @@ if result != path.read_bytes():
     path.write_bytes(result)
 PY
 
+# Apply v1 last so later common includes cannot override its 64 MiB Q6.
+python3 - <<'PY'
+from pathlib import Path
+
+path = Path('target/linux/qualcommax/dts/ipq8174-mx4200v1.dts')
+text = path.read_bytes()
+q6 = b'\n&q6_region {\n\treg = <0x0 0x4b000000 0x0 0x04000000>;\n};\n'
+if text.count(b'#include "ipq8074-512m.dtsi"') != 1:
+    raise SystemExit('ERROR: unexpected MX4200v1 memory layout')
+if b'&q6_region' in text:
+    if text.count(b'&q6_region') != 1 or not text.endswith(q6):
+        raise SystemExit('ERROR: unexpected MX4200v1 Q6 reservation')
+else:
+    path.write_bytes(text + q6)
+PY
+
 COLLECTION_MAKEFILES=$(find ./feeds/luci/collections/ -type f -name "Makefile" 2>/dev/null)
 if [ -n "$COLLECTION_MAKEFILES" ]; then
 	echo "$COLLECTION_MAKEFILES" | while IFS= read -r mkfile; do

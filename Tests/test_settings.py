@@ -20,6 +20,7 @@ class SettingsScriptTests(unittest.TestCase):
 
         fixtures = {
             DTS: WIFI,
+            DTS.replace('v2.dts', 'v1.dts'): '#include "ipq8074-512m.dtsi"\n',
             "package/luci-app-aurora-config/root/usr/share/aurora/default.template":
                 "option nav_type 'topbar'\noption struct_radius_base '1rem'\n",
             "feeds/luci/collections/luci/Makefile":
@@ -57,6 +58,7 @@ class SettingsScriptTests(unittest.TestCase):
                                for top in ('target', 'package/kernel')
                                for p in Path(d, top).rglob('*') if p.is_file()}
             platform_expected = dict(platform_before)
+            platform_expected[Path(DTS.replace('v2.dts', 'v1.dts'))] += Q6.encode()
             platform_expected[Path(DTS)] = dts_before.replace(
                 WIFI.encode(), WIFI.replace('};\n', MODE + '};\n').encode()) + Q6.encode()
             before = {p: Path(d, p).read_text() for p in replacements}
@@ -188,6 +190,23 @@ render:
         self.assertIn('VERSION="SNAPSHOT"', rendered['usr/lib/os-release'])
         self.assertIn(' ' + display + '\n', rendered['etc/banner'])
         self.assertNotIn('CONFIG_VERSIONOPT=y', (source / '.config').read_text())
+
+    def test_v1_q6_boundaries(self):
+        script = (ROOT / 'Scripts/Settings.sh').read_text().split("python3 - <<'PY'\n")[2].split('\nPY\n', 1)[0]
+        original = '#include "ipq8074-512m.dtsi"\n#include "ipq8174-mx4200.dtsi"\n'
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d, DTS.replace('v2.dts', 'v1.dts'))
+            path.parent.mkdir(parents=True)
+            for text in ('', original + Q6 + Q6,
+                         original + Q6.replace('0x04000000', '0x05f00000')):
+                path.write_text(text)
+                result = subprocess.run(['python3', '-c', script], cwd=d, capture_output=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(path.read_text(), text)
+            path.write_text(original)
+            for _ in range(2):
+                subprocess.run(['python3', '-c', script], cwd=d, check=True)
+                self.assertEqual(path.read_text(), original + Q6)
 
     def test_missing_fixture_fails(self):
         with tempfile.TemporaryDirectory() as d:
