@@ -32,7 +32,7 @@ jobs:
       WRT_BRANCH: master
     steps:
       - name: Check out repository
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
 
       - name: Install build dependencies
         env:
@@ -84,7 +84,7 @@ jobs:
           python3 "$GITHUB_WORKSPACE/Scripts/GoBootstrap.py" /mnt/build_wrt
 
       - name: Install Go bootstrap
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ steps.go-bootstrap.outputs.version }}
           check-latest: false
@@ -115,21 +115,21 @@ jobs:
 
       - name: Restore toolchain cache
         id: tools
-        uses: actions/cache/restore@main
+        uses: actions/cache/restore@v6
         with:
           key: ${{ steps.keys.outputs.tc-key }}
           path: /mnt/mx4200-cache/tc.tar.gz
 
       - name: Restore hostpkg cache
         id: hostpkg
-        uses: actions/cache/restore@main
+        uses: actions/cache/restore@v6
         with:
           key: ${{ steps.keys.outputs.hostpkg-key }}
           path: /mnt/mx4200-cache/hostpkg.tar.gz
 
       - name: Restore downloads and ccache
         id: rolling
-        uses: actions/cache/restore@main
+        uses: actions/cache/restore@v6
         with:
           key: ${{ steps.keys.outputs.rolling-prefix }}${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: ${{ steps.keys.outputs.rolling-prefix }}
@@ -196,7 +196,7 @@ jobs:
         id: record-upload
         if: ${{ !cancelled() && steps.record.outcome == 'success' }}
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mx4200-build-record-${{ github.run_id }}-${{ github.run_attempt }}
           path: /mnt/build_wrt/build-record/
@@ -218,7 +218,7 @@ jobs:
       - name: Save toolchain cache
         id: save-tc
         if: success() && steps.pack-tc.outputs.admitted == 'true'
-        uses: actions/cache/save@main
+        uses: actions/cache/save@v6
         continue-on-error: true
         with:
           key: ${{ steps.keys.outputs.tc-key }}
@@ -248,7 +248,7 @@ jobs:
       - name: Save hostpkg cache
         id: save-hostpkg
         if: success() && steps.pack-hostpkg.outputs.admitted == 'true'
-        uses: actions/cache/save@main
+        uses: actions/cache/save@v6
         continue-on-error: true
         with:
           key: ${{ steps.keys.outputs.hostpkg-key }}
@@ -278,7 +278,7 @@ jobs:
       - name: Save downloads and ccache
         id: save-rolling
         if: success() && steps.pack-rolling.outputs.admitted == 'true'
-        uses: actions/cache/save@main
+        uses: actions/cache/save@v6
         continue-on-error: true
         with:
           key: ${{ steps.rolling.outputs.cache-primary-key }}

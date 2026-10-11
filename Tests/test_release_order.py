@@ -152,12 +152,12 @@ class ReleaseOrderTests(unittest.TestCase):
                 for key, value in step.get('env', {}).items():
                     env[key] = re.sub(r'\$\{\{ steps\.([\w-]+)\.outputs\.([\w-]+) \}\}',
                                       lambda m: outputs[m[1]][m[2]], value)
-                if step.get('uses') == 'actions/upload-artifact@v4':
+                if step.get('uses') == 'actions/upload-artifact@v7':
                     self.assertEqual(step['with']['retention-days'], 30)
                     self.assertTrue((build / 'build-record/images.json').is_file())
                     rc = 7 if fault == 'record-upload' else 0
                 elif 'uses' in step:
-                    self.assertEqual(step['uses'], 'actions/cache/save@main')
+                    self.assertEqual(step['uses'], 'actions/cache/save@v6')
                     rc = 7 if fault == 'save-' + tier else 0
                     if not rc and fault != 'unconfirmed-' + tier:
                         saved = json.loads(state.read_text())
