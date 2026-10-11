@@ -9,7 +9,7 @@ ROOT = Path(__file__).parents[1]
 DTS = 'target/linux/qualcommax/dts/ipq8174-mx4200v2.dts'
 WIFI = '&wifi {\n\tstatus = "okay";\n\n\tqcom,ath11k-calibration-variant = "Linksys-MX4200v2";\n};\n'
 MODE = '\tqcom,ath11k-fw-memory-mode = <1>;\n'
-Q6 = '\n&q6_region {\n\treg = <0x0 0x4b000000 0x0 0x04b00000>;\n};\n'
+Q6 = '\n&q6_region {\n\treg = <0x0 0x4b000000 0x0 0x04000000>;\n};\n'
 
 
 class SettingsScriptTests(unittest.TestCase):
@@ -101,9 +101,9 @@ class SettingsScriptTests(unittest.TestCase):
                  changed.replace('<1>', '<0>'), changed.replace('<1>', '<2>'),
                  changed.replace(MODE, MODE + MODE),
                  WIFI + '&other {\n' + MODE + '};\n',
-                 changed + Q6.replace('0x04b00000', '0x04100000'),
+                 changed + Q6.replace('0x04000000', '0x04100000'),
                  changed + Q6 + Q6,
-                 changed + '\n&q6_region { reg = <0x0 0x4b000000 0x0 0x04b00000>; };\n']
+                 changed + '\n&q6_region { reg = <0x0 0x4b000000 0x0 0x04000000>; };\n']
         for content in cases:
             with self.subTest(content=content), tempfile.TemporaryDirectory() as d:
                 path = Path(d, DTS)

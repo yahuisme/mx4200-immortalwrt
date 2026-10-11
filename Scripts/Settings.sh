@@ -14,7 +14,7 @@ fi
 sed -i "s/nav_type '.*'/nav_type 'sidebar'/g; s/struct_radius_base '.*'/struct_radius_base '0.125rem'/g" "${AURORA_TEMPLATES[@]}"
 shopt -u nullglob
 
-# v2 experiment: native ath11k mode 1 with a 75 MiB Q6 carveout.
+# v2: native ath11k mode 1 with a 64 MiB Q6 carveout.
 python3 - <<'PY'
 from pathlib import Path
 
@@ -23,7 +23,7 @@ original = b'&wifi {\n\tstatus = "okay";\n\n\tqcom,ath11k-calibration-variant = 
 mode = b'\tqcom,ath11k-fw-memory-mode = <1>;\n'
 updated = original.replace(b'};\n', mode + b'};\n')
 text = path.read_bytes()
-q6 = b'\n&q6_region {\n\treg = <0x0 0x4b000000 0x0 0x04b00000>;\n};\n'
+q6 = b'\n&q6_region {\n\treg = <0x0 0x4b000000 0x0 0x04000000>;\n};\n'
 if b'&q6_region' in text:
     if text.count(b'&q6_region') != 1 or not text.endswith(q6):
         raise SystemExit('ERROR: unexpected MX4200v2 Q6 reservation')
