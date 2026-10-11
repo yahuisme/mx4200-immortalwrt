@@ -17,7 +17,7 @@
 
 `Settings.sh` 仅为 MX4200v2 的官方 `&wifi` 模板添加 `qcom,ath11k-fw-memory-mode = <1>;`，重复执行不再改写；模板、已有模式值或节点数量不符即失败，避免覆盖上游变化。官方 `903-ath11k-support-setting-FW-memory-mode-via-DT.patch` 原生支持该模式：每 radio 的 VDEV/peer 预算由 17/512 降为 8/128，多 SSID、Mesh 与客户端容量相应受限；128 不代表任何组合下都可接入 128 个客户端。
 
-v1 已用 mode 1，不改动；v2 不引入 `ipq8074-512m.dtsi`，不调整 reserved/preallocated memory、ring 或 SKB。固定预留区不变，不能回收其 MemTotal，也不承诺 30 MiB 或任何实测收益。非编译测试仅证明精确单行转换与幂等；实际收益和稳定性仍需冷启动、三 radio、QMI/校准日志及同负载内存对比验证。
+v1 沿用官方 mode 1 与 55 MiB Q6，不改动。v2 试验性将 Q6 从 95 MiB 缩至 75 MiB，起始地址保持 0x4b000000，静态释放 20 MiB；不新增 ramoops，不移动或缩减 ETR、M3 dump、tzapp 等其他预留区，不调整 ring/SKB。模板检查及静态固件加载边界不能证明运行时安全；实际回收量、冷启动校准及持续无线负载稳定性仍需实机验证，出现回归应恢复官方预留。
 
 ## 缓存
 
