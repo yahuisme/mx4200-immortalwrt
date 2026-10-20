@@ -1,0 +1,396 @@
+#!/usr/bin/env python3
+"""Safety tests use an isolated gh executable; never contact GitHub."""
+import importlib.util
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+HELPER = ROOT / 'scripts/cache_helper.py'
+spec = importlib.util.spec_from_file_location('cache_helper', HELPER)
+assert spec is not None and spec.loader is not None
+h = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(h)
+REF = 'refs/heads/main'
+
+
+def entry(i, key, size=100, ref=REF):
+    return dict(id=i, key=key, size_in_bytes=size, ref=ref)
+
+
+# The stub implements paginated API snapshots and stateful deletion, including
+# simulated API/CLI faults. Any unexpected command fails, including delete -y.
+GH = '''#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+p = Path(os.environ['MOCK_STATE'])
+s = json.loads(p.read_text())
+a = sys.argv[1:]
+s['calls'].append(a)
+if a == ['api', '--paginate', '--slurp', 'repos/{owner}/{repo}/actions/caches?per_page=100']:
+    s['reads'] += 1
+    p.write_text(json.dumps(s))
+    if s['reads'] in s.get('fail_reads', []): sys.exit(13)
+    entries = s['entries']
+    if s['reads'] == s.get('lose_read'):
+        entries = [e for e in entries if e['id'] != s['lose_id']]
+        s['entries'] = entries
+        p.write_text(json.dumps(s))
+    print(json.dumps([{'actions_caches': entries[n:n+2]} for n in range(0, len(entries), 2)] or [{'actions_caches': []}]))
+elif len(a) == 3 and a[:2] == ['cache', 'delete'] and a[2].isdigit():
+    if int(a[2]) == s.get('fail_delete'):
+        p.write_text(json.dumps(s)); sys.exit(19)
+    if not s.get('ignore_delete'):
+        s['entries'] = [e for e in s['entries'] if e['id'] != int(a[2])]
+    p.write_text(json.dumps(s))
+else:
+    p.write_text(json.dumps(s)); sys.exit(99)
+'''
+
+
+class HelperTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.base = Path(self.tmp.name)
+        gh = self.base / 'gh'
+        gh.write_text(GH)
+        gh.chmod(0o755)
+        self.state = self.base / 'state.json'
+        self.out = self.base / 'output'
+        self.archive = self.base / 'archive.tar.gz'
+        self.env = dict(os.environ, PATH=str(self.base) + os.pathsep + os.environ['PATH'],
+                        MOCK_STATE=str(self.state), GITHUB_OUTPUT=str(self.out), GITHUB_REF=REF)
+        self.reset([])
+
+    def reset(self, entries, **faults):
+        self.state.write_text(json.dumps(dict(entries=entries, calls=[], reads=0, **faults)))
+
+    def snapshot(self):
+        return json.loads(self.state.read_text())
+
+    def run_helper(self, *args):
+        result = subprocess.run([sys.executable, str(HELPER), *args], env=self.env,
+                                text=True, capture_output=True)
+        expected = 1 if args[0] == 'cleanup' and 'cleanup unverified' in result.stdout else 0
+        self.assertEqual(result.returncode, expected, result.stderr)
+        return result.stdout
+
+    def admit(self, size, prefix='cc-v1-mx4200-arm64.', key=None):
+        if size is not None:
+            with self.archive.open('wb') as f:
+                f.truncate(size)  # sparse fixture, not multi-GB allocated data
+        else:
+            self.archive.unlink(missing_ok=True)
+        self.log = self.run_helper('admit', prefix, str(self.archive), key or prefix + 'new')
+        return self.out.read_text().splitlines()[-1] == 'save=true'
+
+    def deletes(self):
+        return [c for c in self.snapshot()['calls'] if c[:2] == ['cache', 'delete']]
+
+    def test_ccache_three_gb_compressed_cap(self):
+        from unittest.mock import patch
+        from test_cache_key import load, SCRIPT
+        cache = load(SCRIPT)
+        self.assertEqual(cache.LIMITS['ccache'], 3_000_000_000)
+        self.assertEqual(h.SLOTS['cc-v1-mx4200-arm64.'], 3_000_000_000)
+        self.assertEqual(h.BUDGET, 10_000_000_000)
+        self.assertEqual(h.HEADROOM, 64 * 1024 * 1024)
+        packed = self.base / 'packed'
+        archive = packed / 'ccache.tar.gz'
+        # Stub compression only: test the real pack/admission size boundaries
+        # with sparse compressed-output fixtures, never allocate multi-GB data.
+        for size, accepted in ((3_000_000_000, True), (3_000_000_001, False)):
+            with self.subTest(size=size):
+                def compress(args, **kwargs):
+                    self.assertEqual(args[0], 'tar')
+                    self.assertEqual(args[args.index('-cf') + 1], str(archive))
+                    with archive.open('wb') as out:
+                        out.truncate(size)
+                with patch.object(cache.subprocess, 'run', side_effect=compress):
+                    cache.pack(self.base, packed, 'ccache', 'unused')
+                self.assertEqual(archive.exists(), accepted)
+                self.reset([])
+                self.assertEqual(self.admit(size), accepted, self.log)
+                self.assertFalse(self.deletes())
+
+    def test_download_three_gb_pack_and_admission_boundaries(self):
+        from unittest.mock import patch
+        from test_cache_key import load, SCRIPT
+        cache = load(SCRIPT)
+        self.assertEqual(cache.LIMITS['dl'], 3_000_000_000)
+        self.assertEqual(h.SLOTS['dl-v1-mx4200-arm64.'], 3_000_000_000)
+        packed = self.base / 'packed'
+        archive = packed / 'dl.tar.gz'
+        fixture = json.loads((ROOT / 'tests/fixtures/download-cache-inventory.json').read_text())
+        cases = [(size, True) for size in fixture['measured_bytes'].values()]
+        cases += [(3_000_000_000, True), (3_000_000_001, False)]
+        for size, accepted in cases:
+            with self.subTest(size=size):
+                def compress(args, **kwargs):
+                    self.assertEqual(args[0], 'tar')
+                    self.assertEqual(args[args.index('-cf') + 1], str(archive))
+                    with archive.open('wb') as output:
+                        output.truncate(size)
+                # Only compression is mocked; production pack applies the cap.
+                with patch.object(cache.subprocess, 'run', side_effect=compress):
+                    cache.pack(self.base, packed, 'dl', 'unused')
+                self.assertEqual(archive.exists(), accepted)
+                self.reset([])
+                self.assertEqual(self.admit(size, 'dl-v1-mx4200-arm64.'), accepted, self.log)
+                self.assertFalse(self.deletes())
+
+    def test_current_paginated_inventory_and_three_gb_double_generation(self):
+        from unittest.mock import patch
+        fixture = json.loads((ROOT / 'tests/fixtures/download-cache-inventory.json').read_text())
+        for distro, pages in fixture['snapshots'].items():
+            # Preserve the real paginated API response, including IDs and refs.
+            with patch.object(h.subprocess, 'check_output', return_value=json.dumps(pages)) as api:
+                entries = h.inv()
+            self.assertEqual(api.call_args.args[0][2:4], ['--paginate', '--slurp'])
+            self.assertEqual(len(entries), pages[0]['total_count'])
+            self.assertEqual(len({e['id'] for e in entries}), len(entries))
+            for maximal_old in (False, True):
+                inventory = [dict(e) for e in entries]
+                if maximal_old:
+                    for e in inventory:
+                        if h.owner(e['key']) == 'dl-v1-mx4200-arm64.':
+                            # Conservatively reserve an outer wrapper for the old
+                            # 3 GB inner archive as well as the new candidate.
+                            e['size_in_bytes'] = 3_000_000_000 + h.HEADROOM
+                for size in (fixture['measured_bytes'][distro], 3_000_000_000):
+                    with self.subTest(distro=distro, maximal_old=maximal_old, size=size):
+                        self.reset(inventory)
+                        self.assertTrue(self.admit(size, 'dl-v1-mx4200-arm64.'), self.log)
+                        self.assertFalse(self.deletes())
+                        self.assertEqual(self.snapshot()['entries'], inventory)
+
+    def test_all_tiers_at_caps_reject_every_replacement(self):
+        entries = [entry(i, prefix + 'old', size)
+                   for i, (prefix, size) in enumerate(h.SLOTS.items(), 1)]
+        for prefix, size in h.SLOTS.items():
+            with self.subTest(prefix=prefix):
+                self.assertGreater(sum(h.SLOTS.values()) + size + h.HEADROOM, h.BUDGET)
+                self.reset(entries)
+                self.assertFalse(self.admit(size, prefix), self.log)
+                self.assertIn('repository budget exceeded', self.log)
+                self.assertFalse(self.deletes())
+                self.assertEqual(self.snapshot()['entries'], entries)
+
+    def test_measured_download_replacement_fits_without_predeletion(self):
+        # API inventory and inner gzip from run 34922925962 (2026-09-15).
+        entries = [entry(1, 'tc-v1-mx4200-arm64-old', 1_568_383_907),
+                   entry(2, 'cc-v1-mx4200-arm64.old', 548_162_862),
+                   entry(3, 'mx4200-pax-v2-legacy-old', 1_568_156_316),
+                   entry(4, 'mx4200-pax-v2-legacy-cc.old', 547_492_660),
+                   entry(5, 'dl-v1-mx4200-arm64.old', 1_941_241_977)]
+        self.reset(entries)
+        self.assertTrue(self.admit(1_941_714_961, 'dl-v1-mx4200-arm64.'), self.log)
+        self.assertFalse(self.deletes())
+        self.assertEqual(self.snapshot()['entries'], entries)
+
+    def test_legacy_inventory_growth_boundary(self):
+        size = 1_941_714_961
+        used = h.BUDGET - size - h.HEADROOM
+        for extra, expected in ((0, True), (1, False)):
+            self.reset([entry(1, 'retired-cache', used + extra)])
+            self.assertEqual(self.admit(size, 'dl-v1-mx4200-arm64.'), expected)
+            self.assertFalse(self.deletes())
+
+    def test_missing_zero_oversize_and_ownership(self):
+        for size in (None, 0, h.SLOTS['cc-v1-mx4200-arm64.'] + 1):
+            with self.subTest(size=size):
+                self.assertFalse(self.admit(size))
+        self.assertFalse(self.admit(1, 'tc-v1-mx4200-arm64-', 'mx4200-pax-v2-legacy-new'))
+        self.assertFalse(self.admit(1, key='cc-v1-mx4200-arm64.'))
+        self.assertEqual(self.snapshot()['calls'], [])
+
+    def test_boundary_includes_margin_and_all_generations_refs(self):
+        size = 1_000_000_000
+        for prefix in h.SLOTS:
+            used = h.BUDGET - size - h.HEADROOM
+            for extra, expected in [(0, True), (1, False)]:
+                self.reset([entry(1, prefix+'old', used//2),
+                            entry(2, prefix+'older', used-used//2+extra, 'refs/heads/other')])
+                self.assertEqual(self.admit(size, prefix), expected)
+                self.assertFalse(self.deletes())
+
+    def test_legacy_unknown_charged_to_repository_budget(self):
+        for prefix in h.SLOTS:
+            cap = h.BUDGET
+            self.reset([entry(1, 'legacy', cap-1-h.HEADROOM)])
+            self.assertTrue(self.admit(1, prefix))
+            self.reset([entry(1, 'legacy', cap-h.HEADROOM)])
+            self.assertFalse(self.admit(1, prefix))
+
+    def test_full_slots_decline_compiler_replacement_without_predeletion(self):
+        entries = [entry(i, prefix + 'old', size)
+                   for i, (prefix, size) in enumerate(h.SLOTS.items(), 1)]
+        self.reset(entries)
+        self.assertGreater(sum(h.SLOTS.values()) +
+                           h.SLOTS['cc-v1-mx4200-arm64.'] + h.HEADROOM, h.BUDGET)
+        self.assertFalse(self.admit(h.SLOTS['cc-v1-mx4200-arm64.']))
+        self.assertIn('repository budget exceeded', self.log)
+        self.assertFalse(self.deletes())
+        self.assertEqual(self.snapshot()['entries'], entries)
+
+    def test_warm_inventory_and_cold_updates(self):
+        # Explicit synthetic 4.5 GB warm inventory, representative not a live
+        # measurement: 0.5 GB tc + 0.8 GB cc per target, 1.9 GB downloads.
+        warm = [entry(1, 'tc-v1-mx4200-arm64-old', 500_000_000),
+                entry(2, 'cc-v1-mx4200-arm64.old', 800_000_000),
+                entry(3, 'mx4200-pax-v2-legacy-old', 500_000_000),
+                entry(4, 'mx4200-pax-v2-legacy-cc.old', 800_000_000),
+                entry(5, 'dl-v1-mx4200-arm64.old', 1_900_000_000)]
+        self.assertEqual(sum(e['size_in_bytes'] for e in warm), 4_500_000_000)
+        for entries in (warm, []):
+            for prefix, size in h.SLOTS.items():
+                with self.subTest(warm=bool(entries), prefix=prefix):
+                    self.reset(entries)
+                    self.assertTrue(self.admit(size, prefix), self.log)
+        # Full cold sequential population at all archive caps, including each
+        # wrapper allowance, fits independently (no pre-delete credit).
+        entries = []
+        for prefix, size in h.SLOTS.items():
+            self.reset(entries)
+            self.assertTrue(self.admit(size, prefix), self.log)
+            entries.append(entry(len(entries)+1, prefix+'new', size+h.HEADROOM))
+        self.assertLessEqual(sum(e['size_in_bytes'] for e in entries), 10_000_000_000)
+
+    def test_legacy_oc_counts_against_single_budget(self):
+        size = 1_000_000_000
+        self.reset([entry(1, 'mx4200-pax-v2-legacy-old', h.BUDGET-size-h.HEADROOM)])
+        self.assertTrue(self.admit(size))
+        self.assertFalse(self.admit(size+1))
+        self.assertEqual(self.deletes(), [])
+
+    def test_paginated_inventory_and_admission_read_failure(self):
+        self.reset([entry(i, 'legacy'+str(i), 3_400_000_000) for i in range(1, 4)])
+        self.assertFalse(self.admit(1))  # third entry on page two matters
+        self.reset([], fail_reads=[1])
+        self.assertFalse(self.admit(1))
+        self.assertIn('::warning::', self.log)
+        self.assertFalse(self.deletes())
+
+    def caches(self):
+        return [entry(1, 'tc-v1-mx4200-arm64-new'), entry(2, 'tc-v1-mx4200-arm64-old'),
+                entry(3, 'mx4200-pax-v2-legacy-peer'), entry(4, 'cc-v1-mx4200-arm64.peer'),
+                entry(5, 'tc-v1-mx4200-arm64-older'), entry(6, 'legacy'),
+                entry(7, 'tc-v1-mx4200-arm64-other', ref='refs/heads/other'),
+                entry(8, 'dl-v1-mx4200-arm64.peer')]
+
+    def cleanup(self, key='tc-v1-mx4200-arm64-new', prefix='tc-v1-mx4200-arm64-'):
+        return self.run_helper('cleanup', prefix, key)
+
+    def test_delayed_save_visibility_rechecks_before_deleting(self):
+        from unittest.mock import patch
+        for prefix in h.SLOTS:
+            keep = prefix + 'new'
+            new = entry(1, keep)
+            old = entry(2, prefix + 'old')
+            peer = entry(3, 'unrelated')
+            for pending in ([], [entry(1, keep, size=0)],
+                            [entry(1, keep, ref='refs/heads/other')]):
+                with self.subTest(prefix=prefix, pending=pending):
+                    snapshots = [pending + [old, peer], pending + [old, peer],
+                                 [new, old, peer], [new, peer]]
+                    with patch.dict(os.environ, GITHUB_REF=REF), \
+                            patch.object(h, 'inv', side_effect=snapshots) as inv, \
+                            patch('time.sleep') as sleep, \
+                            patch.object(h.subprocess, 'run') as delete:
+                        delete.side_effect = lambda *a, **kw: self.assertEqual(inv.call_count, 3)
+                        self.assertTrue(h.cleanup(prefix, keep))
+                        self.assertEqual(inv.call_count, 4)
+                        self.assertEqual([c.args[0] for c in sleep.call_args_list], [2, 4])
+                        delete.assert_called_once_with(['gh', 'cache', 'delete', '2'], check=True)
+
+    def test_visibility_retry_is_bounded_and_fails_closed(self):
+        from unittest.mock import patch
+        prefix, keep = 'cc-v1-mx4200-arm64.', 'cc-v1-mx4200-arm64.new'
+        old = entry(2, prefix + 'old')
+        for pending in ([old], [entry(1, keep, size=0), old],
+                        [entry(1, keep, ref='refs/heads/other'), old]):
+            with patch.dict(os.environ, GITHUB_REF=REF), \
+                    patch.object(h, 'inv', return_value=pending) as inv, \
+                    patch('time.sleep') as sleep, \
+                    patch.object(h.subprocess, 'run') as delete:
+                self.assertFalse(h.cleanup(prefix, keep))
+                self.assertEqual(inv.call_count, 3)
+                self.assertEqual([c.args[0] for c in sleep.call_args_list], [2, 4])
+                delete.assert_not_called()
+        with patch.dict(os.environ, GITHUB_REF=REF), \
+                patch.object(h, 'inv', side_effect=[[old], OSError('API unavailable')]) as inv, \
+                patch('time.sleep') as sleep, \
+                patch.object(h.subprocess, 'run') as delete:
+            self.assertFalse(h.cleanup(prefix, keep))
+            self.assertEqual(inv.call_count, 2)
+            delete.assert_not_called()
+
+    def test_cleanup_success_pagination_and_peer_isolation(self):
+        self.reset(self.caches())
+        self.assertIn('cleanup verified', self.cleanup())
+        self.assertEqual(self.deletes(), [['cache', 'delete', '2'], ['cache', 'delete', '5']])
+        self.assertEqual({e['id'] for e in self.snapshot()['entries']}, {1, 3, 4, 6, 7, 8})
+        self.assertEqual(self.snapshot()['reads'], 2)
+        self.reset(self.caches())
+        self.assertIn('cleanup unverified', self.cleanup('mx4200-pax-v2-legacy-peer', 'mx4200-pax-v2-legacy-'))
+        self.assertFalse(self.deletes())
+
+    def test_missing_zero_wrong_ref_or_owner_new_key_never_deletes(self):
+        for mode in ('missing', 'zero', 'wrong_ref', 'wrong_owner', 'bad_ref'):
+            entries = self.caches()
+            if mode == 'missing': entries = entries[1:]
+            if mode == 'zero': entries[0]['size_in_bytes'] = 0
+            if mode == 'wrong_ref': entries[0]['ref'] = 'refs/heads/other'
+            self.env['GITHUB_REF'] = 'refs/pull/1/merge' if mode == 'bad_ref' else REF
+            self.reset(entries)
+            log = self.cleanup('mx4200-pax-v2-legacy-peer' if mode == 'wrong_owner' else 'tc-v1-mx4200-arm64-new')
+            self.assertIn('::warning::', log)
+            self.assertFalse(self.deletes())
+            self.assertEqual(self.snapshot()['entries'], entries)
+
+    def test_pre_delete_readback_failure_preserves_old(self):
+        self.reset(self.caches(), fail_reads=[1])
+        log = self.cleanup()
+        self.assertIn('retaining old caches', log)
+        self.assertFalse(self.deletes())
+        self.assertEqual(self.snapshot()['entries'], self.caches())
+
+    def test_peer_cleanup_during_readback_is_allowed(self):
+        self.reset(self.caches(), lose_read=2, lose_id=3)
+        log = self.cleanup()
+        self.assertIn('cleanup verified', log)
+        self.assertNotIn('::warning::', log)
+        self.assertEqual(self.deletes(), [['cache', 'delete', '2'], ['cache', 'delete', '5']])
+        self.assertEqual({e['id'] for e in self.snapshot()['entries']}, {1, 4, 6, 7, 8})
+
+    def test_post_delete_readback_and_delete_failures_warn_honestly(self):
+        for fault in ({'fail_reads': [2]}, {'fail_delete': 2},
+                      {'ignore_delete': True}, {'lose_read': 2, 'lose_id': 7},
+                      {'lose_read': 2, 'lose_id': 1}):
+            self.reset(self.caches(), **fault)
+            log = self.cleanup()
+            self.assertIn('::warning::', log)
+            self.assertNotIn('cleanup verified', log)
+            if fault.get('lose_id') != 1:
+                self.assertIn(1, [e['id'] for e in self.snapshot()['entries']])
+            if fault == {'fail_reads': [2]}:
+                self.assertIn('already deleted IDs=[2, 5]', log)
+            if fault == {'fail_delete': 2}:
+                self.assertEqual(self.snapshot()['entries'], self.caches())
+
+    def test_invalid_inventory_fails_closed(self):
+        for entries in ([entry(1, 'legacy', -1)], [entry(1, 'legacy', '100')],
+                        [entry(1, 'legacy'), entry(1, 'duplicate')]):
+            self.reset(entries)
+            self.assertFalse(self.admit(1))
+            self.assertIn('::warning::', self.cleanup())
+            self.assertFalse(self.deletes())
+
+
+if __name__ == '__main__':
+    unittest.main()

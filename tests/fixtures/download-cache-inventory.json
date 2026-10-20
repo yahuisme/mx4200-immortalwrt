@@ -1,0 +1,77 @@
+{
+  "provenance": "Read-only gh api --paginate --slurp actions/caches?per_page=100, 2026-10-11; yahuisme/w1700k-{distro}. Latest run measured inner gzip bytes; inventory includes outer archives.",
+  "snapshots": {
+    "openwrt": [
+      {
+        "total_count": 3,
+        "actions_caches": [
+          {
+            "id": 8794353337,
+            "ref": "refs/heads/main",
+            "key": "tc-v3-ubi2-891028d7d976b8ed5fb7a310da31780c04e9cc7a76bdac0ed02da407707500b1",
+            "version": "bd4b75a42e14868647c1fa35e53ed50d48ddb519249efdbb9965f757117536f6",
+            "last_accessed_at": "2026-10-11T11:17:03.231242Z",
+            "created_at": "2026-10-11T11:17:03.231242Z",
+            "size_in_bytes": 1569849389
+          },
+          {
+            "id": 8794349991,
+            "ref": "refs/heads/main",
+            "key": "cc-v3-ubi2.38132006164.1",
+            "version": "0c4683455f7f1cf65ad6b4a3072ddc8bacbad9cc09a55d0a7c06a9a208810468",
+            "last_accessed_at": "2026-10-11T11:16:51.498416Z",
+            "created_at": "2026-10-11T11:16:51.498416Z",
+            "size_in_bytes": 1099975833
+          },
+          {
+            "id": 8308906870,
+            "ref": "refs/heads/main",
+            "key": "dl-v3.36700460534.1",
+            "version": "aee9630ee9fd94e16acdd90006ea28f6ac6f38ca33bd7c605d62a15d0c26892f",
+            "last_accessed_at": "2026-10-11T10:27:40.657334Z",
+            "created_at": "2026-09-30T10:56:41.779885Z",
+            "size_in_bytes": 2134229693
+          }
+        ]
+      }
+    ],
+    "immortalwrt": [
+      {
+        "total_count": 3,
+        "actions_caches": [
+          {
+            "id": 8793444111,
+            "ref": "refs/heads/main",
+            "key": "cc-v3-ubi2.38131605032.1",
+            "version": "0c4683455f7f1cf65ad6b4a3072ddc8bacbad9cc09a55d0a7c06a9a208810468",
+            "last_accessed_at": "2026-10-11T10:31:25.441781Z",
+            "created_at": "2026-10-11T10:31:25.441781Z",
+            "size_in_bytes": 1084959466
+          },
+          {
+            "id": 8766516562,
+            "ref": "refs/heads/main",
+            "key": "tc-v3-ubi2-04807ff70280984bee990f01fca75a5a590d59aab555f073499b98ead2a35c4e",
+            "version": "bd4b75a42e14868647c1fa35e53ed50d48ddb519249efdbb9965f757117536f6",
+            "last_accessed_at": "2026-10-11T10:24:45.804287Z",
+            "created_at": "2026-10-10T11:00:15.620724Z",
+            "size_in_bytes": 1569308650
+          },
+          {
+            "id": 8259088239,
+            "ref": "refs/heads/main",
+            "key": "dl-v3.36553831798.1",
+            "version": "aee9630ee9fd94e16acdd90006ea28f6ac6f38ca33bd7c605d62a15d0c26892f",
+            "last_accessed_at": "2026-10-11T10:20:47.040675Z",
+            "created_at": "2026-09-29T11:01:38.629179Z",
+            "size_in_bytes": 2107594103
+          }
+        ]
+      }
+    ]
+  },
+  "measured_bytes": {
+    "openwrt": 2403742937,
+    "immortalwrt": 2356335427
+  }
+}

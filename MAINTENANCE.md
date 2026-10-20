@@ -1,37 +1,39 @@
 # 构建维护
 
 基于 ImmortalWrt 官方 `master` snapshot，构建 MX4200v1/v2。
-保留官方设备默认包及完整依赖，只添加指定应用、个人参数和有证据的必要修正；不继承旧项目额外软件包或 NSS。
+保留官方设备默认包及完整依赖，只添加指定应用、个人参数和必要修正。
 
 ## 文件职责
 
-- `Config/MX4200.txt`：设备、构建开关、中文 LuCI 与指定应用；依赖交给官方配方，保留 hci-uart 必需的 input-support。
-- `Scripts/Packages.sh`：获取 Aurora、HomeProxy、sing-box；在临时克隆删除前输出并记录实际包源提交。
-- `Scripts/BuildRecord.py`：保存最终配置、包清单、源码提交、镜像 SHA-256 与构建环境，仅作为保留 30 天的 Actions artifact；记录失败不阻断有效镜像发布。记录必须完整匹配实际 source/recipe、所有 Git feeds 和临时克隆时保留的三个 custom SHA。发布后核验四个附件的名称、大小、uploaded 状态及 SHA-256；缺少 digest 时流式下载核对，下载失败或 hash 不符不清理旧版，通过后才按原策略保留最新两版。
-- `Scripts/Settings.sh`、`files/`：主题、版本显示、管理地址与无线默认值；排除 attendedsysupgrade。
-- `Scripts/Temperature.py`：修正单路传感器读取失败中断其他无线温度的问题。
-- `Scripts/CheckDefaults.py`：defconfig 后核验全部设备默认包及虚拟提供者，并复用 `Config/MX4200.txt` 的显式 PACKAGE=y/n：指定应用必须 y，排除包不得 y/m。
-- `.github/workflows/MX4200.yml`：准备、构建、校验镜像与发布；GnuTLS/GoBootstrap 脚本处理构建前置要求。
+- `.github/workflows/MX4200.yml`：手动及每日构建；`ubuntu-24.04-arm` runner 上构建官方 Debian ARM64 Docker 环境。源码位于 `/bld/openwrt`，输出 `/bld/openwrt_bin`，`$DK_PROFILE` 指向 `/bld/user/default`。
+- `docker/`、`scripts/builder_fingerprint.py`：环境镜像与兼容指纹；不预置源码或工具链。外部 Go 固定在镜像内 `/usr/lib/go`，`scripts/check_go.py` 以实际官方 feed bootstrap 配方校验版本下限，不使用 runner setup-go。
+- `user/default/settings.ini`、`config.diff`、`custom.sh`、`files/`：官方源码地址、v1/v2 设备配置、定制入口与固件文件。硬件依赖交给官方配方，保留 hci-uart 所需 input-support。
+- `scripts/packages.sh`：获取 Aurora、HomeProxy、sing-box；删除临时克隆前记录三个实际 custom SHA 至 `.custom-revisions.tsv`。
+- `scripts/settings.sh`、`temperature.py`、`gnutls.py`：保留主题、显示版本、网络/Wi-Fi、DTS 内存、温度读取和 GnuTLS 既有行为。
+- `scripts/check_defaults.py`：defconfig 后检查全部设备默认包、虚拟提供者及显式 PACKAGE=y/n，stage 时再次检查。
+- `scripts/release_images.py`、`verify_release.py`：仅接收四个准确的 MX4200v1/v2 factory/sysupgrade 非空镜像；发布后校验名称、大小、状态、SHA-256，缺失 digest 时下载核对。
+- `scripts/build_record.py`：保存最终配置、source/feed/custom 实际 SHA、包清单、profiles、四图校验值与环境；30 天 Actions artifact，不把诊断文件加入 Release，失败保留部分证据且不阻断有效镜像发布。
 
-## ath11k 内存模式
+## 内存与发布边界
 
-`Settings.sh` 仅为 MX4200v2 的官方 `&wifi` 模板添加 `qcom,ath11k-fw-memory-mode = <1>;`，重复执行不再改写；模板、已有模式值或节点数量不符即失败，避免覆盖上游变化。官方 `903-ath11k-support-setting-FW-memory-mode-via-DT.patch` 原生支持该模式：每 radio 的 VDEV/peer 预算由 17/512 降为 8/128，多 SSID、Mesh 与客户端容量相应受限；128 不代表任何组合下都可接入 128 个客户端。
+保留 v1/v2 mode 1 与 64 MiB Q6（起始 `0x4b000000`），DTS 末尾覆盖避免公共 include 改写；v2 模板变化即失败。其他预留区及 ring/SKB 不变。静态验证不等于实机冷启动校准或持续负载验证。
 
-v1、v2 均使用 mode 1 与 64 MiB Q6，起始地址保持 0x4b000000；在设备 DTS 末尾设置预留区，避免公共 include 覆盖。其他预留区及 ring/SKB 不变。静态检查不替代实机冷启动校准与持续无线负载验证。
+Release 沿用 `MX4200_ImmortalWrt_日期_r版本` tag 与 `MX4200-ImmortalWrt-r版本-日期_时间` 标题，保留当前及最近前版。发布与 prune 前各一次仅检查本仓库 `main` 是否仍等于 `$GITHUB_SHA`，不检查上游是否前进；Release 显式绑定该 SHA。API 失败或回复无效时不做后续变更。
 
 ## 缓存
 
-三层缓存为 toolchain、hostpkg、dl + ccache；源码与最终配置参与精确匹配，下载及 ccache 滚动复用。
-按仓库 10GB 总预算保存，仅在新缓存确认可读后清理本层旧条目；超限不上传、不删除。
+完全分离 toolchain、ccache、download。精确工具链指纹含最终配置、qualcommax/generic 内核与构建输入、ARM 架构和受控 builder 指纹；排除 `generic/base-files`、`qualcommax/base-files`、`qualcommax/ipq807x/base-files` 运行时 overlay，不排除内核 patches/files。
 
-## 验证
+新命名空间为 `tc-v1-mx4200-arm64-`、`cc-v1-mx4200-arm64.`、`dl-v1-mx4200-arm64.`，不恢复旧 x86、hostpkg 或合并 rolling 归档。各压缩包上限 2/3/3 GB，总预算 10 GB（包括旧缓存），不足时不上传或预删；新保存 readback 成功后才清理本层同分支旧条目。download 使用编译前后清单判断变化，包含编译期间生成的 Go module 下载。
+
+## 本地验证
 
 ```sh
-python3 -m unittest discover -v
+/opt/test-tools/bin/run-bounded-test python3 -m unittest discover -s tests -v
 actionlint .github/workflows/MX4200.yml
 git diff --check
 ```
 
-真实配置检查设置 `MX4200_PREPARED_SOURCE`；原版源码设置 `MX4200_PRISTINE_SOURCE`（温度）、`GNUTLS_PRISTINE_SOURCE`（配方），设置模板用 `SETTINGS_PRISTINE_SOURCE`（包含原版设置文件、MX4200v1/v2 DTS、qualcommax 预留内存文件与 ath11k patches；测试完整 Settings 及平台文件字节边界）。温度测试需要 BusyBox。原生 LED 隔离测试设置 `MX4200_TEST_ROOTFS` 为已解包、可在宿主执行的 OpenWrt/ImmortalWrt rootfs，使用 root 执行 `python3 -m unittest Tests.test_native_leds -v`；测试将真实 UCI、ash、LED 服务与 diag 复制到临时 chroot，只模拟 sysfs/设备树，不挂载或操作宿主硬件。未设置时明确跳过，不能当作已验证。
-`HOMEPROXY_AUDIT` 的两提交源码布局见 [测试夹具说明](Tests/fixtures/hostpkg/README.md)。完整非编译验证须提供上述环境变量并检查跳过项。
-禁止本地编译时不要设置 `CACHE_OPENWRT_ROOT`，该项会实际编译 flock；推送、触发构建及发布须另行授权。
+完整非编译验证还需提供：`MX4200_PREPARED_SOURCE`（最终配置/packageinfo）、`IMMORTALWRT_SOURCE`（真实 cache 指纹域）、`MX4200_PRISTINE_SOURCE`（温度）、`GNUTLS_PRISTINE_SOURCE`、`SETTINGS_PRISTINE_SOURCE`（原版设置/DTS）、`MX4200_TEST_ROOTFS`（可执行原生 UCI/ash 的解包 rootfs）。缺失须报告跳过，不当成通过。测试只用临时 fixture、mock 编译/GitHub 边界；原生 LED 在独立 chroot 内执行。
+
+禁止本地真实固件或 host 工具编译，勿运行可能自动编译的 make defconfig。commit、push、CI dispatch 和 Release 均需另行授权。
