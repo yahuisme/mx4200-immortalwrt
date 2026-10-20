@@ -1,0 +1,17 @@
+{
+  "system": "immortalwrt",
+  "device": "MX4200",
+  "target": "qualcommax/ipq807x",
+  "images": [
+    "immortalwrt-qualcommax-ipq807x-linksys_mx4200v1-squashfs-factory.bin",
+    "immortalwrt-qualcommax-ipq807x-linksys_mx4200v1-squashfs-sysupgrade.bin",
+    "immortalwrt-qualcommax-ipq807x-linksys_mx4200v2-squashfs-factory.bin",
+    "immortalwrt-qualcommax-ipq807x-linksys_mx4200v2-squashfs-sysupgrade.bin"
+  ],
+  "cache_prefix": {
+    "tc": "tc-v1-mx4200-arm64-",
+    "cc": "cc-v1-mx4200-arm64.",
+    "dl": "dl-v1-mx4200-arm64."
+  },
+  "retired_cache_prefix": []
+}

@@ -5,6 +5,7 @@ checksum-verified Go bootstrap at `/usr/lib/go`, no preseeded source or toolchai
 The workflow inspects the image ID before running it and records a separate
 recipe/package/architecture fingerprint for exact toolchain cache compatibility.
 
+Cache archives use pigz for parallel gzip; speed gains require CI measurement.
 The prepared official feed's Go bootstrap floor is checked before configuration.
 Host LLVM is not installed; selecting `CONFIG_USE_LLVM_HOST=y` fails before download.
 

@@ -12,8 +12,17 @@ import subprocess
 import sys
 import time
 
-SLOTS = {'tc-v1-mx4200-arm64-': 2_000_000_000,
-         'cc-v1-mx4200-arm64.': 3_000_000_000, 'dl-v1-mx4200-arm64.': 3_000_000_000}
+try:
+    from .build_profile import load
+except ImportError:
+    try:
+        from scripts.build_profile import load
+    except ImportError:
+        from build_profile import load
+
+PROFILE = load(Path(__file__).resolve().parents[1] / 'user/default')
+SLOTS = {PROFILE['cache_prefix'][kind]: limit for kind, limit in
+         [('tc', 2_000_000_000), ('cc', 3_000_000_000), ('dl', 3_200_000_000)]}
 BUDGET = 10_000_000_000
 HEADROOM = 64 * 1024 * 1024
 
@@ -36,6 +45,10 @@ def inv():
 
 
 def owner(key):
+    # Retired toolchain keys share the standard prefix; charge as legacy,
+    # never restore/save/prune them as standard generations.
+    if any(key.startswith(prefix) for prefix in PROFILE.get('retired_cache_prefix', [])):
+        return None
     return next((p for p in sorted(SLOTS, key=len, reverse=True)
                  if key.startswith(p)), None)
 

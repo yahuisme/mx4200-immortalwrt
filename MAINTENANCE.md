@@ -12,7 +12,7 @@
 - `scripts/settings.sh`、`temperature.py`、`gnutls.py`：保留主题、显示版本、网络/Wi-Fi、DTS 内存、温度读取和 GnuTLS 既有行为。
 - `scripts/check_defaults.py`：defconfig 后检查全部设备默认包、虚拟提供者及显式 PACKAGE=y/n，stage 时再次检查。
 - `scripts/release_images.py`、`verify_release.py`：仅接收四个准确的 MX4200v1/v2 factory/sysupgrade 非空镜像；发布后校验名称、大小、状态、SHA-256，缺失 digest 时下载核对。
-- `scripts/build_record.py`：保存最终配置、source/feed/custom 实际 SHA、包清单、profiles、四图校验值与环境；30 天 Actions artifact，不把诊断文件加入 Release，失败保留部分证据且不阻断有效镜像发布。
+- `scripts/build_record.py`：按统一 `build.json` 格式保存 recipe/source/feed/custom SHA、builder 身份、最终配置摘要和四图校验值；保留 `revisions.json`、包清单及 profiles；30 天 Actions artifact，不把诊断文件加入 Release，失败保留部分证据且不阻断有效镜像发布。
 
 ## 内存与发布边界
 
@@ -24,7 +24,7 @@ Release 沿用 `MX4200_ImmortalWrt_日期_r版本` tag 与 `MX4200-ImmortalWrt-r
 
 完全分离 toolchain、ccache、download。精确工具链指纹含最终配置、qualcommax/generic 内核与构建输入、ARM 架构和受控 builder 指纹；排除 `generic/base-files`、`qualcommax/base-files`、`qualcommax/ipq807x/base-files` 运行时 overlay，不排除内核 patches/files。
 
-新命名空间为 `tc-v1-mx4200-arm64-`、`cc-v1-mx4200-arm64.`、`dl-v1-mx4200-arm64.`，不恢复旧 x86、hostpkg 或合并 rolling 归档。各压缩包上限 2/3/3 GB，总预算 10 GB（包括旧缓存），不足时不上传或预删；新保存 readback 成功后才清理本层同分支旧条目。download 使用编译前后清单判断变化，包含编译期间生成的 Go module 下载。
+新命名空间为 `tc-v1-mx4200-arm64-`、`cc-v1-mx4200-arm64.`、`dl-v1-mx4200-arm64.`，不恢复旧 x86、hostpkg 或合并 rolling 归档。各压缩包上限 2/3/3.2 GB，总预算 10 GB（包括旧缓存），不足时不上传或预删；新保存 readback 成功后才清理本层同分支旧条目。download 使用编译前后清单判断变化，包含编译期间生成的 Go module 下载。
 
 ## 本地验证
 

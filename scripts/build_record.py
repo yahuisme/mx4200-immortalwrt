@@ -1,53 +1,68 @@
 #!/usr/bin/env python3
-"""Collect local build inputs/outputs; retain partial evidence on failure."""
+"""Collect compact build provenance, retaining partial evidence on failure."""
+import hashlib
 import json
 import os
-import re
-try:
-    from .release_images import images
-except ImportError:
-    from release_images import images
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
 
+try:
+    from .build_profile import load
+    from .firmware_images import collect as collect_images
+except ImportError:
+    # Also support direct execution and importlib file-based test loaders.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from build_profile import load
+    from firmware_images import collect as collect_images
+
 
 def collect(source, destination):
-    # The collector runs as root in Docker; artifacts must be runner-readable.
     os.umask(0o022)
     source, destination = Path(source), Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
-    errors, revisions = [], []
+    errors, warnings, revisions = [], [], []
+
+    def write(name, data):
+        try:
+            (destination / name).write_text(data)
+        except OSError as exc:
+            errors.append(f'Write failed: {name}: {exc}')
+
+    def copy(path, name):
+        try:
+            if not path.is_file() or not path.stat().st_size:
+                errors.append('Missing or empty: ' + str(path))
+                return
+            target = destination / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, target)
+        except OSError as exc:
+            errors.append(f'Copy failed: {path}: {exc}')
 
     def revision(label, path):
         try:
             sha = subprocess.check_output(['git', '-C', str(path), 'rev-parse', '--verify', 'HEAD'], text=True).strip()
             url = subprocess.check_output(['git', '-C', str(path), 'remote', 'get-url', 'origin'], text=True).strip()
-            if not re.fullmatch(r'[0-9a-f]{40}', sha):
-                raise ValueError('malformed Git SHA: ' + label)
+            if not re.fullmatch(r'[0-9a-f]{40}', sha) or not url:
+                raise ValueError('invalid revision')
             revisions.append(dict(name=label, url=url, sha=sha))
         except (OSError, ValueError, subprocess.CalledProcessError):
             errors.append('Git revision unavailable: ' + label)
 
-    def copy(path, name):
-        try:
-            if path.is_file() and path.stat().st_size:
-                target = destination / name
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(path, target)
-            else:
-                errors.append('Missing or empty: ' + str(path))
-        except OSError as exc:
-            errors.append(f'Copy failed: {path}: {exc}')
-
+    try:
+        profile = load(Path(__file__).resolve().parents[1] / 'user/default')
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        profile = None
+        errors.append('Build profile unavailable: ' + str(exc))
     try:
         inventory = subprocess.check_output(
             ['dpkg-query', '-W', '-f=${Package}\t${Architecture}\t${Version}\n'], text=True)
         if not inventory.strip():
             errors.append('Empty container package inventory')
-        (destination / 'dpkg-packages.tsv').write_text(
-            '\n'.join(sorted(inventory.splitlines())) + '\n')
+        write('dpkg-packages.tsv', '\n'.join(sorted(inventory.splitlines())) + '\n')
     except (OSError, subprocess.CalledProcessError) as exc:
         errors.append(f'Container package inventory failed: {exc}')
 
@@ -57,52 +72,69 @@ def collect(source, destination):
         errors.append('No Git feed revisions')
     for feed in feeds:
         revision('feed/' + feed.name, feed)
-    # Compare the preparation log against actual Git checkouts, not remote HEAD.
-    copy(source / 'source-revisions.txt', 'source-revisions.txt')
-    try:
-        rows = [line.split() for line in (source / 'source-revisions.txt').read_text().splitlines()]
-        actual = {r['name'].replace('feed/', 'feeds/'): r['sha'] for r in revisions}
-        if (any(len(row) != 2 for row in rows) or len(rows) != len(actual)
-                or dict(rows) != actual):
-            errors.append('Source revision log differs from actual source/feeds')
-    except (OSError, ValueError):
-        errors.append('Source revision log unavailable or malformed')
     copy(source / '.config', 'final.config')
     copy(source / '.custom-revisions.tsv', 'custom-revisions.tsv')
     for name in ('feeds.conf', 'feeds.conf.default'):
         if (source / name).is_file():
             copy(source / name, name)
-    custom = source / '.custom-revisions.tsv'
-    if custom.is_file():
-        rows = [line.split('\t') for line in custom.read_text().splitlines()]
-        expected = {'yahuisme/packages', 'luci-theme-aurora', 'luci-app-aurora-config'}
-        if (len(rows) != len(expected)
-                or any(len(row) != 3 for row in rows)
-                or {row[0] for row in rows if row} != expected
+    custom = []
+    try:
+        rows = [line.split('\t') for line in (source / '.custom-revisions.tsv').read_text().splitlines()]
+        names = {'yahuisme/packages', 'luci-theme-aurora', 'luci-app-aurora-config'}
+        if (len(rows) != len(names) or any(len(row) != 3 for row in rows)
+                or {row[0] for row in rows if row} != names
                 or any(not row[1] or not re.fullmatch(r'[0-9a-f]{40}', row[2])
                        for row in rows if len(row) == 3)):
-            errors.append('Incomplete custom package revisions')
-    if custom.is_file() and not any(e == 'Incomplete custom package revisions' for e in errors):
-        revisions.extend(dict(name='custom/' + row[0], url=row[1], sha=row[2]) for row in rows)
-    (destination / 'revisions.json').write_text(json.dumps(revisions, indent=2) + '\n')
-    targets = source / 'bin/targets'
-    manifests = sorted(targets.glob('**/*.manifest'))
-    if not manifests:
-        errors.append('No package manifest')
-    for path in manifests + sorted(targets.glob('**/profiles.json')):
-        relative = path.relative_to(targets)
-        target = destination / 'targets' / relative
-        copy(path, str(target.relative_to(destination)))
-    checksums = []
-    try:
-        entries = images(targets / 'qualcommax/ipq807x')
-        (destination / 'images.json').write_text(json.dumps(entries, indent=2) + '\n')
-        checksums = [f"{entry['digest'].removeprefix('sha256:')}  qualcommax/ipq807x/{entry['name']}\n" for entry in entries]
+            raise ValueError('Incomplete custom package revisions')
+        custom = [dict(name='custom/' + name, url=url, sha=sha) for name, url, sha in rows]
     except (OSError, ValueError) as exc:
-        errors.append('MX4200 images invalid: ' + str(exc))
-    (destination / 'sha256sums').write_text(''.join(checksums))
-    (destination / 'diagnostics.json').write_text(json.dumps({'errors': errors}, indent=2) + '\n')
-    # Normalize modes even when the collector inherited a restrictive root umask.
+        errors.append('Custom revisions invalid: ' + str(exc))
+    revisions.extend(custom)
+    write('revisions.json', json.dumps(revisions, indent=2) + '\n')
+
+    targets = source / 'bin/targets'
+    entries = []
+    if profile:
+        directory = targets / profile['target']
+        manifests = sorted(directory.glob('*.manifest'))
+        if not manifests:
+            errors.append('No package manifest')
+        for path in manifests + [directory / 'profiles.json']:
+            copy(path, str(Path('targets') / path.relative_to(targets)))
+        try:
+            entries = collect_images(targets, profile)
+        except (OSError, ValueError) as exc:
+            errors.append('Firmware images invalid: ' + str(exc))
+    write('sha256sums', ''.join(f"{e['digest'].removeprefix('sha256:')}  {profile['target']}/{e['name']}\n" for e in entries) if profile else '')
+
+    environment = {}
+    try:
+        environment = dict(line.split('=', 1) for line in (destination / 'environment.txt').read_text().splitlines())
+    except (OSError, ValueError):
+        warnings.append('Runner environment record unavailable or malformed')
+    def env(key, variable):
+        return environment.get(key) or os.environ.get(variable)
+    recipe = {key: env(key, var) for key, var in (
+        ('repository', 'GITHUB_REPOSITORY'), ('workflow_sha', 'GITHUB_SHA'),
+        ('run_id', 'GITHUB_RUN_ID'), ('run_attempt', 'GITHUB_RUN_ATTEMPT'))}
+    builder = {key: env(key, var) for key, var in (
+        ('runner_os', 'RUNNER_OS'), ('runner_arch', 'RUNNER_ARCH'),
+        ('image_id', 'IMAGE_ID'), ('builder_fingerprint', 'BUILDER_FINGERPRINT'))}
+    if not all(recipe.values()) or not all(builder.values()):
+        warnings.append('Incomplete optional recipe/builder identity')
+    config = None
+    try:
+        with (source / '.config').open('rb') as stream:
+            config = dict(path='final.config', digest='sha256:' + hashlib.file_digest(stream, 'sha256').hexdigest())
+    except OSError:
+        pass  # The missing/copy diagnostic was recorded above.
+    record = dict(version=1, recipe=recipe, source=next((r for r in revisions if r['name'] == 'source'), None),
+                  feeds=[r for r in revisions if r['name'].startswith('feed/')],
+                  custom_sources=custom, builder=builder, config=config, images=entries)
+    if profile:
+        record.update(system=profile['system'], device=profile['device'], target=profile['target'])
+    write('build.json', json.dumps(record, indent=2) + '\n')
+    write('diagnostics.json', json.dumps(dict(errors=errors, warnings=warnings), indent=2) + '\n')
     for path in [destination, *destination.rglob('*')]:
         if not path.is_symlink():
             path.chmod(0o755 if path.is_dir() else 0o644)

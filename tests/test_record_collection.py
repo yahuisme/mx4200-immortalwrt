@@ -25,7 +25,9 @@ def prepare(base):
         subprocess.run(['git', 'init', '-q', str(path)], check=True)
         subprocess.run(['git', '-C', str(path), '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-qm', 'fixture'], check=True)
         subprocess.run(['git', '-C', str(path), 'remote', 'add', 'origin', 'https://example.invalid/local'], check=True)
-    (base/'source-revisions.txt').write_text(''.join(f'{name} {subprocess.check_output(["git", "-C", str(path), "rev-parse", "HEAD"], text=True).strip()}\n' for name, path in [('source', base), ('feeds/packages', base/'feeds/packages')]))
+    profiles = base/'bin/targets/qualcommax/ipq807x/profiles.json'
+    if not profiles.exists():
+        profiles.write_text('{}\n')
     (base/'bin/targets/qualcommax/ipq807x/fixture.manifest').write_text('fixture - 1\n')
     (base/'.custom-revisions.tsv').write_text(''.join(f'{name}\thttps://example.invalid/{name}\t'+'a'*40+'\n' for name in ('yahuisme/packages','luci-theme-aurora','luci-app-aurora-config')))
 
@@ -62,8 +64,8 @@ class BuildRecordTests(unittest.TestCase):
                     sha = subprocess.check_output(['git', '-C', tmp, 'rev-parse', 'HEAD'], text=True).strip()
                     self.assertEqual(revisions[0]['sha'], sha)
 
-    def test_malformed_custom_and_stale_source_records_keep_partial_evidence(self):
-        for fault in ('empty', 'missing-row', 'duplicate', 'bad-sha', 'blank-row', 'stale-source', 'duplicate-source'):
+    def test_malformed_custom_records_keep_partial_evidence(self):
+        for fault in ('empty', 'missing-row', 'duplicate', 'bad-sha', 'blank-row'):
             with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
                 base = Path(tmp)
                 safety.ReleaseTests().fixture(base)
@@ -75,10 +77,7 @@ class BuildRecordTests(unittest.TestCase):
                 if fault == 'duplicate': custom.write_text('\n'.join([lines[0], lines[0], lines[2]]) + '\n')
                 if fault == 'bad-sha': custom.write_text(custom.read_text().replace('a' * 40, 'not-a-sha', 1))
                 if fault == 'blank-row': custom.write_text(custom.read_text() + '\n')
-                source = base / 'source-revisions.txt'
-                if fault == 'stale-source':
-                    source.write_text(source.read_text().replace(source.read_text().split()[1], 'f' * 40, 1))
-                if fault == 'duplicate-source': source.write_text(source.read_text() + source.read_text().splitlines()[0] + '\n')
+                # Source/feed identities are read from Git, not a duplicate text log.
                 result = subprocess.run(['python3', str(ROOT / 'scripts/build_record.py'), tmp,
                                          str(base / 'record')], capture_output=True, text=True)
                 self.assertNotEqual(result.returncode, 0)
