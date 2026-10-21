@@ -6,7 +6,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from test_cache_workflow import STEPS, step, render
+from test_cache_workflow import STEPS, step, render, render_env
 import test_release_safety as release
 from test_cache_workflow import ROOT
 from test_cache_helper import GH, entry
@@ -28,7 +28,7 @@ class CachePublicationIntegrationTests(unittest.TestCase):
             self.assertNotRegex(item.get('if', ''), r'\b(always|failure|cancelled)\(')
             self.assertFalse(item.get('continue-on-error', False))
 
-    def replay(self, fault):
+    def replay(self, fault, tc_hit='false', tb_hit='false'):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             release.ReleaseTests().fixture(base)
@@ -42,12 +42,12 @@ class CachePublicationIntegrationTests(unittest.TestCase):
             cc.parent.mkdir(parents=True)
             cc.write_text('#!/bin/sh\nexit 0\n')
             cc.chmod(0o755)
-            for directory in ('ccarchive', 'tcarchive', 'dlarchive', 'dlcache'):
+            for directory in ('ccarchive', 'tcarchive', 'dlarchive', 'dlcache', 'tbarchive'):
                 (base / directory).mkdir()
             state = base / 'state.json'
             old = [entry(1, 'cc-v1-mx4200-arm64.old'), entry(2, 'tc-v1-mx4200-arm64-old'), entry(3, 'dl-v1-mx4200-arm64.old')]
             state.write_text(json.dumps(dict(entries=old, calls=[], reads=0,
-                                             fail_reads=[2] if fault == 'readback' else [])))
+                                             fail_reads=[2] if fault == 'readback' else [8] if fault == 'bootstrap_readback' else [])))
             gh = GH.replace("if a == ['api', '--paginate'", """if a[:2] == ['api', 'repos/fixture/repo/git/ref/heads/main']:
     p.write_text(json.dumps(s)); print(os.environ['GITHUB_SHA']); sys.exit(0)
 elif a[0] == 'api' and '/releases/tags/' in a[1]:
@@ -71,7 +71,16 @@ elif a == ['api', '--paginate'""")
             # Real nested compile shell and stage; compiler, Docker and archive
             # compressor are external boundaries. No firmware build/network occurs.
             prefix = '''
-make() { [ "$FAULT" != compile ]; }
+make() { printf 'make %s\n' "$*" >> "$RUNNER_TEMP/bootstrap-calls"; [ "$FAULT" != compile ]; }
+python3() {
+    if [ "$1" = /cache-scripts/bootstrap_cache.py ]; then
+        printf 'bootstrap pack\n' >> "$RUNNER_TEMP/bootstrap-calls"
+        [ "$FAULT" != bootstrap_pack ] || return 29
+        truncate -s 100 tbarchive/bootstrap.tar.gz
+    else
+        command python3 "$@"
+    fi
+}
 docker_exec() {
     shift
     if [ "$1" = python3 ] && [ "$2" = /cache-scripts/build_record.py ]; then
@@ -85,13 +94,16 @@ docker_exec() {
     fi
 }
 sudo() { "$@"; }
-export -f make docker_exec sudo
+export -f make docker_exec sudo python3
 '''
             subprocess.run(['python3', str(ROOT/'scripts/dlcache.py'), 'snapshot',
                             str(base/'dlcache'), str(base/'dlcache-before.json')], check=True,
                            capture_output=True)
             (base/'dlcache/new-download').write_bytes(b'fixture download')
-            values = {'steps.tc.outputs.cache-hit': 'false',
+            values = {'steps.tc.outputs.cache-hit': tc_hit,
+                      'steps.tb.outputs.cache-hit': tb_hit,
+                      'steps.tb_inputs.outputs.key': 'tb-v1-mx4200-arm64-new',
+                      'secrets.RELEASE_TOKEN': 'fixture-token',
                       'steps.inputs.outputs.key': 'tc-v1-mx4200-arm64-new',
                       'steps.gh.outputs.cache-primary-key': 'cc-v1-mx4200-arm64.new',
                       'steps.dl.outputs.cache-primary-key': 'dl-v1-mx4200-arm64.new',
@@ -124,12 +136,13 @@ export -f make docker_exec sudo
                 executed.append(name)
                 if 'run' in item:
                     result = subprocess.run(['bash', '-eo', 'pipefail', '-c', prefix + render(item['run'], values)],
-                                            cwd=base, env=env, text=True, capture_output=True)
+                                            cwd=base, env=dict(env, **render_env(item, values)), text=True, capture_output=True)
                     rc = result.returncode
                     logs.append(name + '\n' + result.stdout + result.stderr)
                 else:
                     self.assertIn(item['uses'], ('actions/cache/save@v6', 'actions/upload-artifact@v7'))
                     rc = 23 if ((fault == 'save' and item['uses'] == 'actions/cache/save@v6') or
+                                   (fault == 'bootstrap_save' and item.get('with', {}).get('path') == 'tbarchive') or
                                    (fault == 'upload' and item['uses'] == 'actions/upload-artifact@v7')) else 0
                     if not rc and item['uses'] == 'actions/cache/save@v6':
                         inventory = json.loads(state.read_text())
@@ -146,10 +159,22 @@ export -f make docker_exec sudo
                             values[f"steps.{item['id']}.outputs.{k}"] = v
                         output.unlink()
                 successful = successful and rc == 0
-            return outcomes, executed, json.loads(state.read_text()), '\n'.join(logs)
+            calls = (base / 'bootstrap-calls').read_text() if (base / 'bootstrap-calls').exists() else ''
+            return outcomes, executed, json.loads(state.read_text()), '\n'.join(logs) + '\n' + calls
+
+    def test_compile_cache_state_branches_use_production_env(self):
+        for tc, tb, want_make, want_pack in (('false', 'false', True, True),
+                                             ('false', 'true', True, False),
+                                             ('true', '', False, False)):
+            with self.subTest(tc=tc, tb=tb):
+                outcomes, _, _, log = self.replay('none', tc_hit=tc, tb_hit=tb)
+                calls = [line for line in log.splitlines() if line.startswith('make ')]
+                self.assertEqual(any(line.startswith('make tools/ccache/compile') for line in calls), want_make, log)
+                self.assertEqual('bootstrap pack' in log, want_pack, log)
+                self.assertEqual(outcomes['Publish firmware and prune releases'], 'success', log)
 
     def test_full_compile_stage_cache_publish_failure_matrix(self):
-        for fault in ('none', 'compile', 'validation', 'cancel', 'package', 'save', 'readback', 'publish', 'metadata', 'upload'):
+        for fault in ('none', 'compile', 'validation', 'cancel', 'package', 'save', 'readback', 'publish', 'metadata', 'upload', 'bootstrap_pack', 'bootstrap_save', 'bootstrap_readback'):
             with self.subTest(fault=fault):
                 outcomes, executed, inventory, log = self.replay(fault)
                 published = fault not in ('compile', 'validation', 'cancel')
@@ -159,9 +184,19 @@ export -f make docker_exec sudo
                                  'failure' if fault == 'publish' else 'success' if published else 'skipped', log)
                 if fault in ('none', 'publish', 'metadata', 'upload'):
                     self.assertEqual({item['key'] for item in inventory['entries']},
-                                     {'cc-v1-mx4200-arm64.new', 'tc-v1-mx4200-arm64-new', 'dl-v1-mx4200-arm64.new'}, log)
+                                     {'cc-v1-mx4200-arm64.new', 'tc-v1-mx4200-arm64-new',
+                                      'tb-v1-mx4200-arm64-new', 'dl-v1-mx4200-arm64.new'}, log)
                     self.assertLess(executed.index('Prune old download caches'),
                                     executed.index('Publish firmware and prune releases'))
+                elif fault == 'bootstrap_pack':
+                    self.assertEqual({item['key'] for item in inventory['entries']},
+                                     {'cc-v1-mx4200-arm64.new', 'tc-v1-mx4200-arm64-new',
+                                      'dl-v1-mx4200-arm64.new'}, log)
+                    self.assertEqual(outcomes['Check bootstrap cache budget'], 'skipped', log)
+                elif fault in ('bootstrap_save', 'bootstrap_readback'):
+                    self.assertEqual(outcomes['Check download cache budget'], 'skipped', log)
+                    self.assertIn(3, {item['id'] for item in inventory['entries']}, log)
+                    self.assertEqual(outcomes['Publish firmware and prune releases'], 'success', log)
                 else:
                     self.assertTrue({1, 2, 3} <= {item['id'] for item in inventory['entries']}, log)
                 if fault in ('save', 'readback'):

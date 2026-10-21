@@ -23,6 +23,8 @@ except ImportError:
 PROFILE = load(Path(__file__).resolve().parents[1] / 'user/default')
 SLOTS = {PROFILE['cache_prefix'][kind]: limit for kind, limit in
          [('tc', 2_000_000_000), ('cc', 3_000_000_000), ('dl', 3_200_000_000)]}
+# Independent early bootstrap; keep the existing profile and cache keys intact.
+SLOTS['tb-v1-mx4200-arm64-'] = 1_000_000_000
 BUDGET = 10_000_000_000
 HEADROOM = 64 * 1024 * 1024
 

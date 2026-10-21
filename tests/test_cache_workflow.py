@@ -21,7 +21,32 @@ def render(text, values):
     return re.sub(r'\$\{\{\s*(.*?)\s*\}\}', lambda m: values.get(m[1], 'fixture'), text)
 
 
+def render_env(item, values):
+    """Render this workflow's trusted boolean/string env expressions only."""
+    def value(match):
+        expression = match[1].strip()
+        if expression in values:
+            return values[expression]
+        expression = re.sub(r'steps\.[\w.-]+', lambda m: repr(values.get(m[0], '')), expression)
+        result = eval(expression.replace('&&', ' and '), {'__builtins__': {}})
+        if not isinstance(result, bool):
+            raise ValueError('unsupported workflow environment expression')
+        return str(result).lower()
+    return {name: re.sub(r'\$\{\{\s*(.*?)\s*\}\}', value, text)
+            for name, text in item.get('env', {}).items()}
+
+
 class WorkflowTests(unittest.TestCase):
+    def test_production_bootstrap_environment_for_all_cache_states(self):
+        for tc, tb, recheck, save in (('false', 'false', 'true', 'true'),
+                                     ('false', 'true', 'true', 'false'),
+                                     ('true', '', 'false', 'false')):
+            values = {'steps.tc.outputs.cache-hit': tc, 'steps.tb.outputs.cache-hit': tb,
+                      'steps.tb_inputs.outputs.key': 'tb-fixture'}
+            actual = render_env(step('Compile firmware'), values)
+            self.assertEqual(actual, {'BOOTSTRAP_KEY': 'tb-fixture',
+                                     'BOOTSTRAP_RECHECK': recheck, 'BOOTSTRAP_SAVE': save})
+
     def test_compile_nested_block(self):
         block = step('Compile firmware')['run']
         for case, hot, pre, main, fallback, stats, expected in (
@@ -228,11 +253,11 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(workflow['concurrency'], {'group': 'mx4200-build', 'cancel-in-progress': False})
         self.assertNotIn('strategy', workflow['jobs']['build'])
         previous = -1
-        for kind, path in [('cc', 'ccarchive'), ('tc', 'tcarchive'), ('dl', 'dlarchive')]:
+        for kind, path in [('cc', 'ccarchive'), ('tc', 'tcarchive'), ('tb', 'tbarchive'), ('dl', 'dlarchive')]:
             admission = step(kind + '_budget')
             save = next(s for s in STEPS if s.get('uses') == 'actions/cache/save@v6'
                         and s['with']['path'] == path)
-            cleanup = step('Prune old ' + {'tc': 'toolchain', 'cc': 'compiler', 'dl': 'download'}[kind] + ' caches')
+            cleanup = step('Prune old ' + {'tc': 'toolchain', 'cc': 'compiler', 'tb': 'bootstrap', 'dl': 'download'}[kind] + ' caches')
             self.assertLess(previous, STEPS.index(admission))
             self.assertEqual(STEPS.index(save), STEPS.index(admission) + 1)
             self.assertEqual(STEPS.index(cleanup), STEPS.index(save) + 1)
