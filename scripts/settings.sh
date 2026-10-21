@@ -14,47 +14,6 @@ fi
 sed -i "s/nav_type '.*'/nav_type 'sidebar'/g; s/struct_radius_base '.*'/struct_radius_base '0.125rem'/g" "${AURORA_TEMPLATES[@]}"
 shopt -u nullglob
 
-# v2: native ath11k mode 1 with a 64 MiB Q6 carveout.
-python3 - <<'PY'
-from pathlib import Path
-
-path = Path('target/linux/qualcommax/dts/ipq8174-mx4200v2.dts')
-original = b'&wifi {\n\tstatus = "okay";\n\n\tqcom,ath11k-calibration-variant = "Linksys-MX4200v2";\n};\n'
-mode = b'\tqcom,ath11k-fw-memory-mode = <1>;\n'
-updated = original.replace(b'};\n', mode + b'};\n')
-text = path.read_bytes()
-q6 = b'\n&q6_region {\n\treg = <0x0 0x4b000000 0x0 0x04000000>;\n};\n'
-if b'&q6_region' in text:
-    if text.count(b'&q6_region') != 1 or not text.endswith(q6):
-        raise SystemExit('ERROR: unexpected MX4200v2 Q6 reservation')
-    text = text[:-len(q6)]
-if text.count(b'&wifi') != 1:
-    raise SystemExit('ERROR: unexpected MX4200v2 wifi node')
-if text.count(original) == 1 and b'qcom,ath11k-fw-memory-mode' not in text:
-    text = text.replace(original, updated)
-elif text.count(updated) != 1 or text.count(b'qcom,ath11k-fw-memory-mode') != 1:
-    raise SystemExit('ERROR: unexpected MX4200v2 ath11k memory mode/template')
-result = text + q6
-if result != path.read_bytes():
-    path.write_bytes(result)
-PY
-
-# Apply v1 last so later common includes cannot override its 64 MiB Q6.
-python3 - <<'PY'
-from pathlib import Path
-
-path = Path('target/linux/qualcommax/dts/ipq8174-mx4200v1.dts')
-text = path.read_bytes()
-q6 = b'\n&q6_region {\n\treg = <0x0 0x4b000000 0x0 0x04000000>;\n};\n'
-if text.count(b'#include "ipq8074-512m.dtsi"') != 1:
-    raise SystemExit('ERROR: unexpected MX4200v1 memory layout')
-if b'&q6_region' in text:
-    if text.count(b'&q6_region') != 1 or not text.endswith(q6):
-        raise SystemExit('ERROR: unexpected MX4200v1 Q6 reservation')
-else:
-    path.write_bytes(text + q6)
-PY
-
 COLLECTION_MAKEFILES=$(find ./feeds/luci/collections/ -type f -name "Makefile" 2>/dev/null)
 if [ -n "$COLLECTION_MAKEFILES" ]; then
 	echo "$COLLECTION_MAKEFILES" | while IFS= read -r mkfile; do

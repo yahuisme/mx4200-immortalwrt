@@ -8,8 +8,6 @@ from pathlib import Path
 ROOT = Path(__file__).parents[1]
 DTS = 'target/linux/qualcommax/dts/ipq8174-mx4200v2.dts'
 WIFI = '&wifi {\n\tstatus = "okay";\n\n\tqcom,ath11k-calibration-variant = "Linksys-MX4200v2";\n};\n'
-MODE = '\tqcom,ath11k-fw-memory-mode = <1>;\n'
-Q6 = '\n&q6_region {\n\treg = <0x0 0x4b000000 0x0 0x04000000>;\n};\n'
 
 
 class SettingsScriptTests(unittest.TestCase):
@@ -58,9 +56,8 @@ class SettingsScriptTests(unittest.TestCase):
                                for top in ('target', 'package/kernel')
                                for p in Path(d, top).rglob('*') if p.is_file()}
             platform_expected = dict(platform_before)
-            platform_expected[Path(DTS.replace('v2.dts', 'v1.dts'))] += Q6.encode()
-            platform_expected[Path(DTS)] = dts_before.replace(
-                WIFI.encode(), WIFI.replace('};\n', MODE + '};\n').encode()) + Q6.encode()
+            platform_expected[Path(DTS.replace('v2.dts', 'v1.dts'))] = platform_before[Path(DTS.replace('v2.dts', 'v1.dts'))]
+            platform_expected[Path(DTS)] = dts_before
             before = {p: Path(d, p).read_text() for p in replacements}
             self.assertIn('PRETTY_NAME="%D %V"',
                           before["package/base-files/files/usr/lib/os-release"])
@@ -95,52 +92,10 @@ class SettingsScriptTests(unittest.TestCase):
             self.assertEqual(after, {p.relative_to(d): p.read_bytes()
                                     for p in Path(d).rglob("*") if p.is_file()})
 
-    def test_memory_mode_rejects_changed_templates_without_writing(self):
-        # Run the exact embedded transformation, without unrelated settings.
-        script = (ROOT / 'scripts/settings.sh').read_text().split("python3 - <<'PY'\n", 1)[1].split('\nPY\n', 1)[0]
-        changed = WIFI.replace('};\n', MODE + '};\n')
-        cases = [None, WIFI.replace('okay', 'disabled'), WIFI + WIFI,
-                 changed.replace('<1>', '<0>'), changed.replace('<1>', '<2>'),
-                 changed.replace(MODE, MODE + MODE),
-                 WIFI + '&other {\n' + MODE + '};\n',
-                 changed + Q6.replace('0x04000000', '0x04100000'),
-                 changed + Q6 + Q6,
-                 changed + '\n&q6_region { reg = <0x0 0x4b000000 0x0 0x04000000>; };\n']
-        for content in cases:
-            with self.subTest(content=content), tempfile.TemporaryDirectory() as d:
-                path = Path(d, DTS)
-                path.parent.mkdir(parents=True)
-                if content is not None:
-                    path.write_text(content)
-                result = subprocess.run(['python3', '-c', script], cwd=d, capture_output=True)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertEqual(path.read_text() if path.exists() else None, content)
-
-    @unittest.skipUnless(os.environ.get('SETTINGS_PRISTINE_SOURCE'),
-                         'set SETTINGS_PRISTINE_SOURCE for real DTS boundary checks')
-    def test_real_memory_mode_changes_only_one_v2_line(self):
-        import shutil
-        source = Path(os.environ['SETTINGS_PRISTINE_SOURCE'])
-        script = (ROOT / 'scripts/settings.sh').read_text().split("python3 - <<'PY'\n", 1)[1].split('\nPY\n', 1)[0]
-        with tempfile.TemporaryDirectory() as d:
-            shutil.copytree(source, d, dirs_exist_ok=True)
-            before = {p.relative_to(d): p.read_bytes() for p in Path(d).rglob('*') if p.is_file()}
-            for protected in (
-                'target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8074-512m.dtsi',
-                'target/linux/qualcommax/patches-6.18/0102-arm64-dts-ipq8074-add-reserved-memory-nodes.patch',
-                'package/kernel/mac80211/patches/ath11k/903-ath11k-support-setting-FW-memory-mode-via-DT.patch',
-            ):
-                self.assertIn(Path(protected), before)
-            self.assertIn(MODE.encode(), before[Path(DTS.replace('v2.dts', 'v1.dts'))])
-            self.assertNotIn(MODE.encode(), before[Path(DTS)])
-            expected = dict(before)
-            expected[Path(DTS)] = before[Path(DTS)].replace(
-                WIFI.encode(), WIFI.replace('};\n', MODE + '};\n').encode()) + Q6.encode()
-            self.assertNotEqual(expected, before)
-            for _ in range(2):
-                subprocess.run(['python3', '-c', script], cwd=d, check=True)
-                self.assertEqual(expected, {p.relative_to(d): p.read_bytes()
-                                           for p in Path(d).rglob('*') if p.is_file()})
+    def test_settings_does_not_modify_official_memory_defaults(self):
+        script = (ROOT / 'scripts/settings.sh').read_text()
+        self.assertNotIn('qcom,ath11k-fw-memory-mode', script)
+        self.assertNotIn('&q6_region', script)
 
     @unittest.skipUnless(os.environ.get('MX4200_PREPARED_SOURCE'),
                          'set MX4200_PREPARED_SOURCE for real version rendering')
@@ -190,23 +145,6 @@ render:
         self.assertIn('VERSION="SNAPSHOT"', rendered['usr/lib/os-release'])
         self.assertIn(' ' + display + '\n', rendered['etc/banner'])
         self.assertNotIn('CONFIG_VERSIONOPT=y', (source / '.config').read_text())
-
-    def test_v1_q6_boundaries(self):
-        script = (ROOT / 'scripts/settings.sh').read_text().split("python3 - <<'PY'\n")[2].split('\nPY\n', 1)[0]
-        original = '#include "ipq8074-512m.dtsi"\n#include "ipq8174-mx4200.dtsi"\n'
-        with tempfile.TemporaryDirectory() as d:
-            path = Path(d, DTS.replace('v2.dts', 'v1.dts'))
-            path.parent.mkdir(parents=True)
-            for text in ('', original + Q6 + Q6,
-                         original + Q6.replace('0x04000000', '0x05f00000')):
-                path.write_text(text)
-                result = subprocess.run(['python3', '-c', script], cwd=d, capture_output=True)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertEqual(path.read_text(), text)
-            path.write_text(original)
-            for _ in range(2):
-                subprocess.run(['python3', '-c', script], cwd=d, check=True)
-                self.assertEqual(path.read_text(), original + Q6)
 
     def test_missing_fixture_fails(self):
         with tempfile.TemporaryDirectory() as d:

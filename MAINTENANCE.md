@@ -16,7 +16,7 @@
 
 ## 内存与发布边界
 
-保留 v1/v2 mode 1 与 64 MiB Q6（起始 `0x4b000000`），DTS 末尾覆盖避免公共 include 改写；v2 模板变化即失败。其他预留区及 ring/SKB 不变。静态验证不等于实机冷启动校准或持续负载验证。
+v1/v2 的 ath11k memory mode 与 Q6 预留完全使用 ImmortalWrt 官方设备 DTS 及 `ipq8074-512m.dtsi` 默认值，不在 Settings hook 中覆盖或调整。其他预留区及 ring/SKB 不变。静态验证不等于实机冷启动校准或持续负载验证。
 
 Release 沿用 `MX4200_ImmortalWrt_日期_r版本` tag 与 `MX4200-ImmortalWrt-r版本-日期_时间` 标题，保留当前及最近前版。发布与 prune 前各一次仅检查本仓库 `main` 是否仍等于 `$GITHUB_SHA`，不检查上游是否前进；Release 显式绑定该 SHA。API 失败或回复无效时不做后续变更。
 
