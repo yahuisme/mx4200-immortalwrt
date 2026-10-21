@@ -39,6 +39,18 @@ class DefaultPackageTests(unittest.TestCase):
         absent = re.sub(r'^CONFIG_PACKAGE_([^=]+)=n$', '', config, flags=re.M)
         check(absent, '', requested)
 
+    def test_usteer_is_rejected_without_recipe_exclusions(self):
+        # Package policy is checked on the resolved config, not on optional
+        # historical '=n' lines in config.diff. Both built-in and module fail.
+        for package in ('usteer', 'luci-app-usteer', 'luci-i18n-usteer-zh-cn'):
+            for value in ('y', 'm'):
+                with self.subTest(package=package, value=value):
+                    config = ('CONFIG_MODULE_DEFAULT_driver=y\nCONFIG_PACKAGE_driver=m\n'
+                              f'CONFIG_PACKAGE_{package}={value}\n')
+                    with self.assertRaisesRegex(ValueError, re.escape(package)):
+                        check(config, '', '')
+        check('CONFIG_MODULE_DEFAULT_driver=y\nCONFIG_PACKAGE_driver=m\n', '', '')
+
     def test_formal_workflow_runs_gate_with_recipe(self):
         import subprocess
         import tempfile
@@ -61,7 +73,8 @@ class DefaultPackageTests(unittest.TestCase):
                 if fault == 'missing-app':
                     broken = broken.replace('CONFIG_PACKAGE_luci-app-homeproxy=y', '')
                 if fault == 'excluded-module':
-                    broken = broken.replace('CONFIG_PACKAGE_usteer=n', 'CONFIG_PACKAGE_usteer=m')
+                    broken += '\nCONFIG_PACKAGE_usteer=m\n'
+                    self.assertNotEqual(broken, config)
                 (build / '.config').write_text(broken)
                 result = subprocess.run(['bash', '-ec', command], cwd=build,
                                         env=dict(os.environ, DK_PROFILE=str(root / 'user/default')),

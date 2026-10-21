@@ -30,9 +30,10 @@ class OfficialMigrationTests(unittest.TestCase):
             'luci-app-aurora-config', 'luci-app-homeproxy', 'luci-app-ttyd',
             'luci-app-wol', 'luci-theme-aurora',
         })
-        for package in ('usteer', 'luci-app-usteer', 'luci-i18n-usteer-zh-cn',
-                        'luci-app-attendedsysupgrade'):
-            self.assertIn('CONFIG_PACKAGE_' + package + '=n', config)
+        self.assertIn('CONFIG_PACKAGE_luci-app-attendedsysupgrade=n', config)
+        for package in ('usteer', 'luci-app-usteer', 'luci-i18n-usteer-zh-cn'):
+            for value in ('y', 'm'):
+                self.assertNotIn('CONFIG_PACKAGE_' + package + '=' + value, config)
 
     @unittest.skipUnless(os.environ.get('MX4200_PREPARED_SOURCE'),
                          'set MX4200_PREPARED_SOURCE for native defconfig closure')

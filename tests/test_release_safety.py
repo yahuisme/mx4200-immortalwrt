@@ -51,7 +51,9 @@ class ReleaseTests(unittest.TestCase):
                 if case=='wrong-version': data['version_code']='SNAPSHOT'
                 config=(base/'.config').read_text()
                 if case=='missing-app': config=config.replace('CONFIG_PACKAGE_luci-app-homeproxy=y','')
-                if case=='excluded-module': config=config.replace('CONFIG_PACKAGE_usteer=n','CONFIG_PACKAGE_usteer=m')
+                if case=='excluded-module':
+                    config += '\nCONFIG_PACKAGE_usteer=m\n'
+                    self.assertNotEqual(config, (base/'.config').read_text())
                 if case=='missing-default': config=config.replace('CONFIG_PACKAGE_fixture-driver=m','')
                 (base/'.config').write_text(config)
                 (out/'profiles.json').write_text(json.dumps(data))

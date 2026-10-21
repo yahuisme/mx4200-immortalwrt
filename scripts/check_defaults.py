@@ -5,8 +5,15 @@ import re
 import sys
 
 
+FORBIDDEN_PACKAGES = ('usteer', 'luci-app-usteer', 'luci-i18n-usteer-zh-cn')
+
+
 def check(config, packageinfo, requested=""):
     values = dict(re.findall(r'^CONFIG_([^=]+)=(.*)$', config, re.M))
+    forbidden = [package for package in FORBIDDEN_PACKAGES
+                 if values.get('PACKAGE_' + package) in ('y', 'm')]
+    if forbidden:
+        raise ValueError('forbidden packages selected: ' + ', '.join(forbidden))
     defaults = sorted(key.removeprefix('MODULE_DEFAULT_') for key, value in values.items()
                       if key.startswith('MODULE_DEFAULT_') and value == 'y')
     if not defaults:
