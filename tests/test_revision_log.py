@@ -9,7 +9,7 @@ from test_cache_workflow import render, step
 class RevisionLogTests(unittest.TestCase):
     def test_nested_prepare_logs_and_failures(self):
         block = render(step('inputs')['run'], {})
-        for phase in ('', 'fetch', 'git-access', 'feed-revision', 'update', 'install', 'custom', 'go-floor', 'defconfig', 'defaults', 'download'):
+        for phase in ('', 'fetch', 'git-access', 'feed-revision', 'update', 'install', 'custom', 'go-floor', 'defconfig', 'defaults'):
             with self.subTest(phase=phase), tempfile.TemporaryDirectory() as tmp:
                 base = Path(tmp)
                 source = base / 'source'
@@ -61,7 +61,7 @@ class RevisionLogTests(unittest.TestCase):
                 '''
                 result = subprocess.run(['bash', '-eo', 'pipefail', '-c', stub + block],
                                         cwd=base, env=env, text=True, capture_output=True)
-                expected = 1 if phase in ('update', 'install', 'download') else (19 if phase else 0)
+                expected = 1 if phase in ('update', 'install') else (19 if phase else 0)
                 self.assertEqual(result.returncode, expected, result.stderr)
                 calls = (base / 'calls').read_text()
                 if phase:
@@ -96,10 +96,23 @@ class RevisionLogTests(unittest.TestCase):
                                     env=dict(os.environ, REPO_BRANCH='fixture', REPO_URL='fixture-url'), capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             for sha in expected.values():
-                self.assertEqual(result.stdout.count(sha), 2, result.stdout)
+                self.assertEqual(result.stdout.count(sha), 1, result.stdout)
             self.assertIn('Source fixture-url/fixture:', result.stdout)
             self.assertNotIn('Donor ', result.stdout)
-            self.assertEqual(len(result.stdout.splitlines()), 2 * len(paths))
-            recorded=dict(line.split() for line in (root/'source-revisions.txt').read_text().splitlines())
-            self.assertEqual(recorded, {'source' if name=='.' else name: sha for name,sha in expected.items()})
+            self.assertEqual(len(result.stdout.splitlines()), len(paths))
+            self.assertFalse((root / 'source-revisions.txt').exists())
+            # Production provenance reads the actual Git trees, never a duplicate log file.
+            import json
+            from test_record_contract import RecordContract
+            record_root = root / 'record-fixture'
+            fixture = RecordContract()
+            fixture.fixture(record_root)
+            result = fixture.run_record(record_root)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            record = json.loads((record_root / 'record/build.json').read_text())
+            for item, path in [(record['source'], record_root),
+                               (record['feeds'][0], record_root / 'feeds/packages')]:
+                actual = subprocess.check_output(['git', '-C', str(path), 'rev-parse', '--verify', 'HEAD'], text=True).strip()
+                self.assertEqual(item['sha'], actual)
+            self.assertFalse((record_root / 'source-revisions.txt').exists())
             self.assertEqual(list(root.glob('*.lock')), [])

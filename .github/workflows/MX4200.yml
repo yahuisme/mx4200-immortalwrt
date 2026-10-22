@@ -91,14 +91,11 @@ jobs:
           bash $DK_PROFILE/custom.sh
           python3 /cache-scripts/check_go.py "$DK_OPENWRT" /usr/lib/go
           # Log actual source/feed revisions after customization; fail on broken Git access.
-          : > source-revisions.txt
           revision=$(git rev-parse --verify HEAD)
-          printf "source %s\n" "$revision" | tee -a source-revisions.txt
           printf "Source %s/%s: %s\n" "$REPO_URL" "$REPO_BRANCH" "$revision"
           for feed in feeds/*; do
             [ -e "$feed/.git" ] || continue
             revision=$(git -C "$feed" rev-parse --verify HEAD)
-            printf "feeds/%s %s\n" "${feed##*/}" "$revision" | tee -a source-revisions.txt
             printf "Feed %s: %s\n" "${feed##*/}" "$revision"
           done
           make defconfig
@@ -108,7 +105,6 @@ jobs:
             echo "::error::Host LLVM selected: builder needs clang, llc, llvm-dis, opt and llvm-strip; review include/bpf.mk" >&2
             exit 1
           fi
-          make download -j8 || exit 1
         '
         KEY=$(docker_exec DK python3 /cache-scripts/cache.py key "$DK_OPENWRT" /tcarchive "$BUILDER_FINGERPRINT")
         echo "key=tc-v1-mx4200-arm64-$KEY" >> "$GITHUB_OUTPUT"
@@ -144,6 +140,17 @@ jobs:
       env:
         BOOTSTRAP_KEY: ${{ steps.tb_inputs.outputs.key }}
       run: docker_exec DK python3 /cache-scripts/bootstrap_cache.py restore "$DK_OPENWRT" /tbarchive "$BOOTSTRAP_KEY"
+
+    - name: Download sources
+      run: |
+        # Restore host tools before download; keep cold download work for compilation.
+        # shellcheck disable=SC2016
+        docker_exec DK bash -e -c '
+          cd $DK_OPENWRT
+          umask 022
+          git config --global tar.umask 0022
+          make download -j8 || exit 1
+        '
 
     - name: Compile firmware
       env:

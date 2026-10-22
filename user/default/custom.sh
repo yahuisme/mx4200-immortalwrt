@@ -6,7 +6,6 @@ if [ -f scripts/projectsmirrors.json ]; then
     sed -i '/.cn\//d; /tencent/d; /aliyun/d' scripts/projectsmirrors.json
 fi
 (cd package && bash /cache-scripts/packages.sh)
-python3 /cache-scripts/gnutls.py "$DK_OPENWRT"
 python3 /cache-scripts/temperature.py "$DK_OPENWRT"
 bash /cache-scripts/settings.sh
 # Newly imported recipes must be reindexed by the final defconfig.

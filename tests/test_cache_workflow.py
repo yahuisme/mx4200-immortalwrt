@@ -69,7 +69,11 @@ class WorkflowTests(unittest.TestCase):
                     cc.chmod(0o755)
                 env = dict(os.environ, DK_OPENWRT=tmp, LOG=str(base / 'calls'),
                            PRE=str(pre), MAIN=str(main), FALLBACK=str(fallback),
-                           STATS=str(stats), STUB=str(stub))
+                           STATS=str(stats), STUB=str(stub),
+                           **render_env(step('Compile firmware'), {
+                               'steps.tc.outputs.cache-hit': 'true' if hot else 'false',
+                               'steps.tb.outputs.cache-hit': 'true',
+                               'steps.tb_inputs.outputs.key': 'tb-fixture'}))
                 prefix = '''
                 docker_exec() { shift; "$@"; }
                 nproc() { printf '4\\n'; }
@@ -185,7 +189,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(len(names), len(set(names)))
         source = step('inputs')
         self.assertEqual(source['name'], 'Prepare source and cache key')
-        self.assertLess(source['run'].index('make download'), source['run'].index('KEY=$(docker_exec'))
+        self.assertNotIn('make download', source['run'])
+        self.assertLess(source['run'].index('make defconfig'), source['run'].index('KEY=$(docker_exec'))
         self.assertEqual(STEPS.index(step('tc')), STEPS.index(source) + 1)
 
     def test_source_key_success_and_failure(self):

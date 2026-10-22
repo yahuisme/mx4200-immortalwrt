@@ -71,7 +71,8 @@ elif a == ['api', '--paginate'""")
             # Real nested compile shell and stage; compiler, Docker and archive
             # compressor are external boundaries. No firmware build/network occurs.
             prefix = '''
-make() { printf 'make %s\n' "$*" >> "$RUNNER_TEMP/bootstrap-calls"; [ "$FAULT" != compile ]; }
+make() { printf 'make %s\n' "$*" >> "$RUNNER_TEMP/bootstrap-calls"; if [ "$1" = download ]; then [ "$FAULT" != download ]; else [ "$FAULT" != compile ]; fi; }
+git() { [ "$*" = 'config --global tar.umask 0022' ]; }
 python3() {
     if [ "$1" = /cache-scripts/bootstrap_cache.py ]; then
         printf 'bootstrap pack\n' >> "$RUNNER_TEMP/bootstrap-calls"
@@ -94,7 +95,7 @@ docker_exec() {
     fi
 }
 sudo() { "$@"; }
-export -f make docker_exec sudo python3
+export -f make docker_exec sudo python3 git
 '''
             subprocess.run(['python3', str(ROOT/'scripts/dlcache.py'), 'snapshot',
                             str(base/'dlcache'), str(base/'dlcache-before.json')], check=True,
@@ -126,7 +127,7 @@ export -f make docker_exec sudo python3
                 # Only trusted repository comparisons and repr-quoted local
                 # fixture values are evaluated, never external/event input.
                 return eval(expression.replace('&&', ' and '), {'__builtins__': {}})
-            for item in STEPS[STEPS.index(step('Compile firmware')):]:
+            for item in STEPS[STEPS.index(step('Download sources')):]:
                 name = item['name']
                 if fault == 'cancel' and name == 'Prepare build caches':
                     cancelled = True
@@ -173,11 +174,26 @@ export -f make docker_exec sudo python3
                 self.assertEqual('bootstrap pack' in log, want_pack, log)
                 self.assertEqual(outcomes['Publish firmware and prune releases'], 'success', log)
 
+    def test_download_failure_never_compiles_stages_or_publishes(self):
+        for tc, tb in (('true', ''), ('false', 'true'), ('false', 'false')):
+            with self.subTest(tc=tc, tb=tb):
+                outcomes, _, inventory, log = self.replay('download', tc_hit=tc, tb_hit=tb)
+                self.assertEqual(outcomes['Download sources'], 'failure', log)
+                for name in ('Compile firmware', 'Validate and stage firmware',
+                             'Publish firmware and prune releases'):
+                    self.assertEqual(outcomes[name], 'skipped', log)
+                self.assertFalse(any(call[:2] == ['release', 'create']
+                                     for call in inventory['calls']), log)
+
     def test_full_compile_stage_cache_publish_failure_matrix(self):
-        for fault in ('none', 'compile', 'validation', 'cancel', 'package', 'save', 'readback', 'publish', 'metadata', 'upload', 'bootstrap_pack', 'bootstrap_save', 'bootstrap_readback'):
+        for fault in ('none', 'download', 'compile', 'validation', 'cancel', 'package', 'save', 'readback', 'publish', 'metadata', 'upload', 'bootstrap_pack', 'bootstrap_save', 'bootstrap_readback'):
             with self.subTest(fault=fault):
                 outcomes, executed, inventory, log = self.replay(fault)
-                published = fault not in ('compile', 'validation', 'cancel')
+                published = fault not in ('download', 'compile', 'validation', 'cancel')
+                if fault == 'download':
+                    self.assertEqual(outcomes['Download sources'], 'failure', log)
+                    self.assertEqual(outcomes['Compile firmware'], 'skipped', log)
+                    self.assertEqual(outcomes['Validate and stage firmware'], 'skipped', log)
                 creates = [call for call in inventory['calls'] if call[:2] == ['release', 'create']]
                 self.assertEqual(bool(creates), published, log)
                 self.assertEqual(outcomes['Publish firmware and prune releases'],
