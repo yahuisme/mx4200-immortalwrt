@@ -3,9 +3,9 @@ name: MX4200 ImmortalWrt Builds
 on:
   workflow_dispatch:
 
-  # GitHub Actions uses UTC; daily 12:00 Hong Kong time = 04:00 UTC.
+  # GitHub Actions uses UTC; weekly Sunday 00:00 Hong Kong time = Saturday 16:00 UTC.
   schedule:
-    - cron: '0 4 * * *'
+    - cron: '0 16 * * 6'
 concurrency:
   group: mx4200-build
   cancel-in-progress: false
