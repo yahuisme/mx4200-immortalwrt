@@ -21,8 +21,9 @@ class OfficialMigrationTests(unittest.TestCase):
         self.assertIn('SOURCE_REF=', text)
         self.assertIn('SOURCE_TAG', text[text.index('RELEASE_NOTES='):])
         self.assertIn('SOURCE_URL', text[text.index('RELEASE_NOTES='):])
-        self.assertIn('MX4200_ImmortalWrt_${SOURCE_TAG}_', text)
-        self.assertIn('MX4200-ImmortalWrt-${SOURCE_TAG}-r', text)
+        self.assertIn('SOURCE_VERSION="${SOURCE_TAG#v}"', text)
+        self.assertIn('VERSION="MX4200-ImmortalWrt-${SOURCE_VERSION}-r${WRT_REV}-${WRT_DATE/-/_}"', text)
+        self.assertIn('printf \'%s\\n\' "$VERSION" > firmware/title.txt', text)
         self.assertEqual(workflow['jobs']['build']['runs-on'], 'ubuntu-24.04-arm')
         self.assertNotIn('集成 NSS', (ROOT / '.github/workflows/MX4200.yml').read_text())
 

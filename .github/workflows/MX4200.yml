@@ -215,10 +215,11 @@ jobs:
         WRT_REV=$(jq -er '.version_code | capture("^r(?<revision>[0-9]+)-[0-9a-f]+$").revision' openwrt_bin/targets/qualcommax/ipq807x/profiles.json)
         SOURCE_TAG="$(cat build-record/source-tag.txt)"
         [[ "$SOURCE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+        SOURCE_VERSION="${SOURCE_TAG#v}"
         SOURCE_URL="https://github.com/immortalwrt/immortalwrt/tree/$SOURCE_TAG"
-        VERSION="MX4200_ImmortalWrt_${SOURCE_TAG}_${WRT_DATE}_r${WRT_REV}"
+        VERSION="MX4200-ImmortalWrt-${SOURCE_VERSION}-r${WRT_REV}-${WRT_DATE/-/_}"
         printf '%s\n' "$VERSION" > firmware/version.txt
-        printf '%s\n' "MX4200-ImmortalWrt-${SOURCE_TAG}-r${WRT_REV}-${WRT_DATE/-/_}" > firmware/title.txt
+        printf '%s\n' "$VERSION" > firmware/title.txt
         RELEASE_NOTES="firmware/release-notes.md"
         cat > "$RELEASE_NOTES" <<EOF
         ## Linksys MX4200 系列 ImmortalWrt 固件
@@ -341,7 +342,7 @@ jobs:
         python3 scripts/verify_release.py "$VERSION" firmware/*.bin
         # Recheck before pruning, before removing older standard releases.
         current_main
-        PREFIX="MX4200_"
+        PREFIX="MX4200-ImmortalWrt-"
         # Keep the current release plus the most recently published predecessor.
         if releases=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100") &&
           old_tags=$(jq -er --arg current "$VERSION" --arg pattern "^${PREFIX}" '
