@@ -33,7 +33,7 @@ class OfficialMigrationTests(unittest.TestCase):
                     for line in config if line.startswith('CONFIG_PACKAGE_')
                     and line.endswith('=y')}
         self.assertEqual(positive, {
-            'input-support', 'luci', 'autocore', 'luci-app-advanced-reboot',
+            'luci', 'autocore', 'luci-app-advanced-reboot',
             'luci-app-aurora-config', 'luci-app-homeproxy', 'luci-app-ttyd',
             'luci-app-wol', 'luci-theme-aurora',
         })

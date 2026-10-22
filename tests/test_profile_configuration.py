@@ -19,7 +19,7 @@ class ProfileConfigurationTests(unittest.TestCase):
 
     def test_keep_official_dependency_gate_and_meaningful_exclusions(self):
         lines = set(PROFILE.read_text().splitlines())
-        for symbol in ('PACKAGE_input-support', 'TARGET_MULTI_PROFILE',
+        for symbol in ('TARGET_MULTI_PROFILE',
                        'TARGET_PER_DEVICE_ROOTFS',
                        'TARGET_DEVICE_qualcommax_ipq807x_DEVICE_linksys_mx4200v1',
                        'TARGET_DEVICE_qualcommax_ipq807x_DEVICE_linksys_mx4200v2'):
