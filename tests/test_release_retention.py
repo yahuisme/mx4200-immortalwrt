@@ -75,12 +75,12 @@ class ReleaseRetention(unittest.TestCase):
                     (p / f'immortalwrt-qualcommax-ipq807x-linksys_{device}-squashfs-{kind}.bin').write_bytes(b'fixture image')
             env = dict(os.environ, PATH=d + ':' + os.environ['PATH'], IMAGES=d,
                        CALLS=str(p / 'calls'), ROWS=str(p / 'rows'), FAULT=fault,
-                       WRT_RELEASE_NAME='MX4200_current', WRT_RELEASE_TITLE='fixture',
+                       WRT_RELEASE_NAME='MX4200-ImmortalWrt-current', WRT_RELEASE_TITLE='fixture',
                        GITHUB_SHA='a' * 40, GITHUB_REPOSITORY='fixture/repo', RELEASE_NOTES='fixture')
             (p / 'firmware').mkdir()
             for image in p.glob('*.bin'): image.rename(p / 'firmware' / image.name)
             env['IMAGES'] = str(p / 'firmware')
-            (p / 'firmware/version.txt').write_text('MX4200_current')
+            (p / 'firmware/version.txt').write_text('MX4200-ImmortalWrt-current')
             (p / 'firmware/title.txt').write_text('fixture')
             (p / 'firmware/release-notes.md').write_text('fixture')
             (p / 'scripts').symlink_to(ROOT / 'scripts')
@@ -91,7 +91,7 @@ class ReleaseRetention(unittest.TestCase):
             return result, [a[2] for a in calls if a[:2] == ['release', 'delete']]
 
     def test_readback_failures_protect_old_releases(self):
-        pages = [[row('MX4200_current', 10), row('MX4200_previous', 9), row('MX4200_old', 1)]]
+        pages = [[row('MX4200-ImmortalWrt-current', 10), row('MX4200-ImmortalWrt-previous', 9), row('MX4200-ImmortalWrt-old', 1)]]
         for fault in ('readback', 'malformed', 'missing', 'extra', 'name', 'duplicate',
                       'size', 'state', 'digest', 'tag', 'draft', 'prerelease',
                       'download-corrupt', 'download-failed'):
@@ -101,38 +101,41 @@ class ReleaseRetention(unittest.TestCase):
                 self.assertEqual(deleted, [])
         result, deleted = self.replay(pages, 'no-digest')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(deleted, ['MX4200_old'])
+        self.assertEqual(deleted, ['MX4200-ImmortalWrt-previous', 'MX4200-ImmortalWrt-old'])
 
     def test_zero_one_two_three(self):
         for count in range(4):
-            rows = [row('MX4200_current', 10)] if count else []
-            rows += [row(f'MX4200_old{i}', i) for i in range(1, count)]
+            rows = [row('MX4200-ImmortalWrt-current', 10)] if count else []
+            rows += [row(f'MX4200-ImmortalWrt-old{i}', i) for i in range(1, count)]
             result, deleted = self.replay([rows])
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(deleted, ['MX4200_old1'] if count == 3 else [])
+            self.assertEqual(deleted,
+                             (['MX4200-ImmortalWrt-old1'] if count == 2 else
+                              ['MX4200-ImmortalWrt-old2', 'MX4200-ImmortalWrt-old1']
+                              if count == 3 else []))
 
     def test_pagination_publication_order_and_protected_releases(self):
-        pages = [[row('MX4200_old', 1), row('Other_keep', 20), row('MX4200_draft', 21, draft=True)],
-                 [row('MX4200_previous', 9), row('MX4200_current', 10),
+        pages = [[row('MX4200-ImmortalWrt-old', 1), row('Other_keep', 20), row('MX4200_draft', 21, draft=True)],
+                 [row('MX4200-ImmortalWrt-previous', 9), row('MX4200-ImmortalWrt-current', 10),
                   row('MX4200_preview', 22, prerelease=True)]]
         result, deleted = self.replay(pages)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(deleted, ['MX4200_old'])
+        self.assertEqual(deleted, ['MX4200-ImmortalWrt-previous', 'MX4200-ImmortalWrt-old'])
 
     def test_failures_never_delete_from_partial_inventory(self):
-        pages = [[row('MX4200_current', 10), row('MX4200_previous', 9), row('MX4200_old', 1)]]
+        pages = [[row('MX4200-ImmortalWrt-current', 10), row('MX4200-ImmortalWrt-previous', 9), row('MX4200-ImmortalWrt-old', 1)]]
         for fault in ('create', 'list'):
             result, deleted = self.replay(pages, fault)
             self.assertEqual(deleted, [])
             self.assertEqual(result.returncode != 0, fault == 'create')
-        for data in ([], [[row('MX4200_old', 1)]], {'malformed': True}):
+        for data in ([], [[row('MX4200-ImmortalWrt-old', 1)]], {'malformed': True}):
             result, deleted = self.replay(data)
             self.assertEqual(deleted, [])
             self.assertIn('::warning::', result.stdout)
 
     def test_delete_failure_is_visible(self):
-        result, deleted = self.replay([[row('MX4200_current', 10), row('MX4200_previous', 9),
-                                       row('MX4200_old', 1)]], 'delete')
-        self.assertEqual(deleted, ['MX4200_old'])
+        result, deleted = self.replay([[row('MX4200-ImmortalWrt-current', 10), row('MX4200-ImmortalWrt-previous', 9),
+                                       row('MX4200-ImmortalWrt-old', 1)]], 'delete')
+        self.assertEqual(deleted, ['MX4200-ImmortalWrt-previous', 'MX4200-ImmortalWrt-old'])
         self.assertEqual(result.returncode, 0)
         self.assertIn('::warning::Failed to delete release', result.stdout)
