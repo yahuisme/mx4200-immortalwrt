@@ -1,6 +1,6 @@
 # MX4200 ImmortalWrt
 
-基于 [ImmortalWrt 官方 v25.12.2 stable release](https://github.com/immortalwrt/immortalwrt/tree/v25.12.2)，适用于 Linksys MX4200v1 / MX4200v2。
+基于 [ImmortalWrt 官方最新 stable release](https://github.com/immortalwrt/immortalwrt/releases)，适用于 Linksys MX4200v1 / MX4200v2。
 
 固件下载见 [Releases](https://github.com/yahuisme/mx4200-immortalwrt/releases)。请选择对应硬件版本的镜像：
 

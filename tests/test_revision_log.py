@@ -14,11 +14,12 @@ class RevisionLogTests(unittest.TestCase):
                 base = Path(tmp)
                 source = base / 'source'
                 (source / 'scripts').mkdir(parents=True)
+                (base / 'build-record').mkdir()
                 profile = base / 'profile'
                 (profile / 'tree').mkdir(parents=True)
                 (profile / 'files').mkdir()
                 (source / 'feeds/luci/.git').mkdir(parents=True)
-                (profile / 'settings.ini').write_text('REPO_URL=https://github.com/immortalwrt/immortalwrt\nREPO_REF=refs/tags/v25.12.2\n')
+                (profile / 'settings.ini').write_text('REPO_URL=https://github.com/immortalwrt/immortalwrt\nREPO_REF=latest-release\n')
                 (source / 'feeds.conf.default').write_text('# fixture\n')
                 (profile / 'config.diff').write_text('CONFIG_TEST=y\n')
                 (profile / 'custom.sh').write_text('[ "$FAIL" != custom ] || exit 19\n')
@@ -35,6 +36,11 @@ class RevisionLogTests(unittest.TestCase):
                 docker_exec() { shift; "$@"; }
                 git() {
                   printf 'git %s\\n' "$*" >> "$LOG"
+                  if [ "$1" = ls-remote ]; then
+                    [ "$FAIL" != fetch ] || return 19
+                    printf '1 refs/tags/v25.12.2\\n'
+                    return 0
+                  fi
                   [ "$1" != "$FAIL" ] || return 19
                   if [ "$*" = 'rev-parse --verify HEAD' ]; then
                     [ "$FAIL" != git-access ] || return 19
@@ -59,9 +65,10 @@ class RevisionLogTests(unittest.TestCase):
                 }
                 export -f git mountpoint make python3
                 '''
-                result = subprocess.run(['bash', '-eo', 'pipefail', '-c', stub + block],
+                phase_block = block.replace('/build-record/source-tag.txt', str(base / 'build-record/source-tag.txt'))
+                result = subprocess.run(['bash', '-eo', 'pipefail', '-c', stub + phase_block],
                                         cwd=base, env=env, text=True, capture_output=True)
-                expected = 1 if phase in ('update', 'install') else (19 if phase else 0)
+                expected = 1 if phase in ('fetch', 'update', 'install') else (19 if phase else 0)
                 self.assertEqual(result.returncode, expected, result.stderr)
                 calls = (base / 'calls').read_text()
                 if phase:
@@ -93,11 +100,11 @@ class RevisionLogTests(unittest.TestCase):
                 expected[path] = git('rev-parse', 'HEAD')
             block = block.replace('/tmp/yahuisme-packages', str(root / 'tmp/yahuisme-packages'))
             result = subprocess.run(['bash', '-e', '-c', render(block, {})], cwd=root,
-                                    env=dict(os.environ, REPO_REF='refs/tags/v25.12.2', REPO_URL='fixture-url'), capture_output=True, text=True)
+                                    env=dict(os.environ, REPO_REF='latest-release', REPO_URL='fixture-url'), capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             for sha in expected.values():
                 self.assertEqual(result.stdout.count(sha), 1, result.stdout)
-            self.assertIn('Source fixture-url/refs/tags/v25.12.2:', result.stdout)
+            self.assertIn('Source fixture-url/latest-release:', result.stdout)
             self.assertNotIn('Donor ', result.stdout)
             self.assertEqual(len(result.stdout.splitlines()), len(paths))
             self.assertFalse((root / 'source-revisions.txt').exists())

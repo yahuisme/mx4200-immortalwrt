@@ -19,6 +19,8 @@ class ReleaseTests(unittest.TestCase):
         (base/'.config').write_text(config+'\nCONFIG_MODULE_DEFAULT_fixture-driver=y\nCONFIG_PACKAGE_fixture-driver=m\n')
         (base/'tmp').mkdir()
         (base/'tmp/.packageinfo').write_text('')
+        (base/'build-record').mkdir()
+        (base/'build-record/source-tag.txt').write_text('v25.12.2\n')
         for device in ('mx4200v1','mx4200v2'):
             for kind in ('factory','sysupgrade'):
                 (output/f'immortalwrt-qualcommax-ipq807x-linksys_{device}-squashfs-{kind}.bin').write_bytes(b'fixture-not-firmware')

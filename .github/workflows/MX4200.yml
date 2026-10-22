@@ -67,14 +67,20 @@ jobs:
         docker_exec DK bash -e -c '
           . $DK_PROFILE/settings.ini
           [[ $REPO_URL && $REPO_REF ]] || { echo "::error::Missing REPO_URL or REPO_REF"; exit 1; }
-          [[ $REPO_REF =~ ^refs/tags/[A-Za-z0-9._-]+$ ]] || { echo "::error::REPO_REF must be an exact tag ref"; exit 1; }
+          [[ $REPO_REF = latest-release ]] || { echo "::error::REPO_REF must be latest-release"; exit 1; }
           umask 022
           git config --global tar.umask 0022
           mkdir -p $DK_OPENWRT
           cd $DK_OPENWRT
           if [ ! -d .git ]; then git init; fi
           git remote set-url origin $REPO_URL 2>&- || git remote add origin $REPO_URL
-          git fetch origin "$REPO_REF"
+          SOURCE_TAG=$(git ls-remote --tags --refs "$REPO_URL" "refs/tags/v*" | awk -F/ "\$3 ~ /^v[0-9]+\\.[0-9]+\\.[0-9]+$/ {print \$3}" | sort -V | tail -1)
+          [[ $SOURCE_TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::No stable release tag found"; exit 1; }
+          SOURCE_REF="refs/tags/$SOURCE_TAG"
+          echo "SOURCE_TAG=$SOURCE_TAG"
+          echo "SOURCE_REF=$SOURCE_REF"
+          echo "$SOURCE_TAG" > /build-record/source-tag.txt
+          git fetch --depth=1 origin "$SOURCE_REF"
           git checkout -f --detach FETCH_HEAD
           git reset --hard FETCH_HEAD
           # Remove ALL builder-preseeded patches, feeds, overlays and ABI files.
@@ -207,6 +213,9 @@ jobs:
         python3 scripts/release_images.py stage openwrt_bin/targets firmware
         WRT_DATE="$(TZ=Asia/Hong_Kong date +'%y.%m.%d-%H.%M.%S')"
         WRT_REV=$(jq -er '.version_code | capture("^r(?<revision>[0-9]+)-[0-9a-f]+$").revision' openwrt_bin/targets/qualcommax/ipq807x/profiles.json)
+        SOURCE_TAG="$(cat build-record/source-tag.txt)"
+        [[ "$SOURCE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+        SOURCE_URL="https://github.com/immortalwrt/immortalwrt/tree/$SOURCE_TAG"
         VERSION="MX4200_ImmortalWrt_${WRT_DATE}_r${WRT_REV}"
         printf '%s\n' "$VERSION" > firmware/version.txt
         printf '%s\n' "MX4200-ImmortalWrt-r${WRT_REV}-${WRT_DATE/-/_}" > firmware/title.txt
@@ -214,7 +223,7 @@ jobs:
         cat > "$RELEASE_NOTES" <<EOF
         ## Linksys MX4200 系列 ImmortalWrt 固件
 
-        - 源码：[ImmortalWrt v25.12.2](https://github.com/immortalwrt/immortalwrt/tree/v25.12.2)
+        - 源码：[$SOURCE_TAG]($SOURCE_URL)
         - 构建时间：$(TZ=Asia/Hong_Kong date '+%Y-%m-%d %H:%M:%S %Z')
         - 机型：Linksys MX4200v1 / MX4200v2，请选择对应硬件版本的镜像。
         - 镜像：\`factory.bin\` 用于从原厂固件刷入，\`sysupgrade.bin\` 用于从已有 ImmortalWrt 升级。

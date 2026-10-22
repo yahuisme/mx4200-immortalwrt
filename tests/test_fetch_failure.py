@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class FetchFailureTests(unittest.TestCase):
     def test_fetch_failure_stops_before_reset(self):
         lines = (ROOT / '.github/workflows/MX4200.yml').read_text().splitlines()
-        start = next(i for i, line in enumerate(lines) if 'git fetch origin ' in line)
+        start = next(i for i, line in enumerate(lines) if 'git fetch --depth=1 origin' in line)
         end = next(i for i in range(start, len(lines)) if 'git clean -ffdx' in lines[i])
         fragment = '\n'.join(line.strip() for line in lines[start:end + 1])
         with tempfile.TemporaryDirectory() as directory:
@@ -32,7 +32,7 @@ class FetchFailureTests(unittest.TestCase):
             tracked.write_text('must survive failed fetch')
             head = git('rev-parse', 'HEAD')
             result = subprocess.run(['bash', '-e', '-c', fragment + '\nprintf CONTINUED'],
-                                    cwd=root, env=dict(os.environ, REPO_BRANCH='main'),
+                                    cwd=root, env=dict(os.environ, REPO_REF='latest-release'),
                                     text=True, capture_output=True)
             self.assertIn('fatal:', result.stderr)
             self.assertNotEqual(result.returncode, 0, result.stdout)
