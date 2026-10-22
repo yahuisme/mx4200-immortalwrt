@@ -66,16 +66,17 @@ jobs:
         # shellcheck disable=SC2016
         docker_exec DK bash -e -c '
           . $DK_PROFILE/settings.ini
-          [[ $REPO_URL && $REPO_BRANCH ]] || { echo "::error::Missing REPO_URL or REPO_BRANCH"; exit 1; }
+          [[ $REPO_URL && $REPO_REF ]] || { echo "::error::Missing REPO_URL or REPO_REF"; exit 1; }
+          [[ $REPO_REF =~ ^refs/tags/[A-Za-z0-9._-]+$ ]] || { echo "::error::REPO_REF must be an exact tag ref"; exit 1; }
           umask 022
           git config --global tar.umask 0022
           mkdir -p $DK_OPENWRT
           cd $DK_OPENWRT
           if [ ! -d .git ]; then git init; fi
           git remote set-url origin $REPO_URL 2>&- || git remote add origin $REPO_URL
-          git fetch origin "+refs/heads/$REPO_BRANCH:refs/remotes/origin/$REPO_BRANCH"
-          git checkout -f -B "$REPO_BRANCH" "origin/$REPO_BRANCH"
-          git reset --hard "origin/$REPO_BRANCH"
+          git fetch origin "$REPO_REF"
+          git checkout -f --detach FETCH_HEAD
+          git reset --hard FETCH_HEAD
           # Remove ALL builder-preseeded patches, feeds, overlays and ABI files.
           git clean -ffdx
           mountpoint $DK_BIN || { echo "::error::not mounted" >&2; exit 1; }
@@ -92,7 +93,7 @@ jobs:
           python3 /cache-scripts/check_go.py "$DK_OPENWRT" /usr/lib/go
           # Log actual source/feed revisions after customization; fail on broken Git access.
           revision=$(git rev-parse --verify HEAD)
-          printf "Source %s/%s: %s\n" "$REPO_URL" "$REPO_BRANCH" "$revision"
+          printf "Source %s/%s: %s\n" "$REPO_URL" "$REPO_REF" "$revision"
           for feed in feeds/*; do
             [ -e "$feed/.git" ] || continue
             revision=$(git -C "$feed" rev-parse --verify HEAD)
@@ -213,7 +214,7 @@ jobs:
         cat > "$RELEASE_NOTES" <<EOF
         ## Linksys MX4200 系列 ImmortalWrt 固件
 
-        - 源码：[ImmortalWrt master](https://github.com/immortalwrt/immortalwrt)
+        - 源码：[ImmortalWrt v25.12.2](https://github.com/immortalwrt/immortalwrt/tree/v25.12.2)
         - 构建时间：$(TZ=Asia/Hong_Kong date '+%Y-%m-%d %H:%M:%S %Z')
         - 机型：Linksys MX4200v1 / MX4200v2，请选择对应硬件版本的镜像。
         - 镜像：\`factory.bin\` 用于从原厂固件刷入，\`sysupgrade.bin\` 用于从已有 ImmortalWrt 升级。

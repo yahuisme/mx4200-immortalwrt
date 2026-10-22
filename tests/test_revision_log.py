@@ -18,7 +18,7 @@ class RevisionLogTests(unittest.TestCase):
                 (profile / 'tree').mkdir(parents=True)
                 (profile / 'files').mkdir()
                 (source / 'feeds/luci/.git').mkdir(parents=True)
-                (profile / 'settings.ini').write_text('REPO_URL=https://github.com/immortalwrt/immortalwrt\nREPO_BRANCH=master\n')
+                (profile / 'settings.ini').write_text('REPO_URL=https://github.com/immortalwrt/immortalwrt\nREPO_REF=refs/tags/v25.12.2\n')
                 (source / 'feeds.conf.default').write_text('# fixture\n')
                 (profile / 'config.diff').write_text('CONFIG_TEST=y\n')
                 (profile / 'custom.sh').write_text('[ "$FAIL" != custom ] || exit 19\n')
@@ -93,11 +93,11 @@ class RevisionLogTests(unittest.TestCase):
                 expected[path] = git('rev-parse', 'HEAD')
             block = block.replace('/tmp/yahuisme-packages', str(root / 'tmp/yahuisme-packages'))
             result = subprocess.run(['bash', '-e', '-c', render(block, {})], cwd=root,
-                                    env=dict(os.environ, REPO_BRANCH='fixture', REPO_URL='fixture-url'), capture_output=True, text=True)
+                                    env=dict(os.environ, REPO_REF='refs/tags/v25.12.2', REPO_URL='fixture-url'), capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             for sha in expected.values():
                 self.assertEqual(result.stdout.count(sha), 1, result.stdout)
-            self.assertIn('Source fixture-url/fixture:', result.stdout)
+            self.assertIn('Source fixture-url/refs/tags/v25.12.2:', result.stdout)
             self.assertNotIn('Donor ', result.stdout)
             self.assertEqual(len(result.stdout.splitlines()), len(paths))
             self.assertFalse((root / 'source-revisions.txt').exists())

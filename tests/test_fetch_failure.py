@@ -22,7 +22,7 @@ class FetchFailureTests(unittest.TestCase):
             git('-c', 'user.name=test', '-c', 'user.email=test@example.invalid',
                 'commit', '--allow-empty', '-m', 'fixture')
             sha = git('rev-parse', 'HEAD')
-            git('update-ref', 'refs/remotes/origin/main', sha)
+            git('update-ref', 'refs/tags/v25.12.2', sha)
             git('remote', 'add', 'origin', str(root / 'missing-remote'))
             tracked = root / 'tracked'
             tracked.write_text('original')

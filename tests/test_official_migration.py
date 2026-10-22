@@ -1,4 +1,4 @@
-"""Official snapshot defaults and intentional customization requirements."""
+"""Official stable-source defaults and intentional customization requirements."""
 import os
 from pathlib import Path
 import unittest
@@ -13,7 +13,9 @@ class OfficialMigrationTests(unittest.TestCase):
         workflow = yaml.safe_load((ROOT / '.github/workflows/MX4200.yml').read_text())
         settings = (ROOT / 'user/default/settings.ini').read_text()
         self.assertIn('REPO_URL="https://github.com/immortalwrt/immortalwrt.git"', settings)
-        self.assertIn('REPO_BRANCH="master"', settings)
+        self.assertIn('REPO_REF="refs/tags/v25.12.2"', settings)
+        self.assertNotIn('REPO_BRANCH=', settings)
+        self.assertIn('v25.12.2', (ROOT / 'README.md').read_text())
         self.assertEqual(workflow['jobs']['build']['runs-on'], 'ubuntu-24.04-arm')
         self.assertNotIn('集成 NSS', (ROOT / '.github/workflows/MX4200.yml').read_text())
 
