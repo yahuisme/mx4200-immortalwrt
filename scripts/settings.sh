@@ -51,10 +51,7 @@ if ! grep -Fq "$WRT_IP" "$CFG_FILE"; then
 	exit 1
 fi
 
-sed -i "s/%D %V %C/%D %C/g" ./package/base-files/files/etc/openwrt_release
-sed -i 's/%D %V %C/%D %C/g; s/^PRETTY_NAME="%D %V"$/PRETTY_NAME="%D %C"/' ./package/base-files/files/usr/lib/os-release
-sed -i "s/%D %V, %C/%D %C/g" ./package/base-files/files/etc/banner
-
+# Keep upstream stable version placeholders intact.
 if [ -f "./include/version.mk" ]; then
 	sed -i 's/ImmortalWRT/ImmortalWrt/g' ./include/version.mk
 fi

@@ -11,7 +11,7 @@ WIFI = '&wifi {\n\tstatus = "okay";\n\n\tqcom,ath11k-calibration-variant = "Link
 
 
 class SettingsScriptTests(unittest.TestCase):
-    def test_complete_settings_hides_version_in_display_templates(self):
+    def test_complete_settings_preserves_stable_version_templates(self):
         # Set this to a pristine snapshot of real upstream files for integration
         # coverage; the default fixture keeps the same full-script contract.
         import shutil
@@ -37,11 +37,11 @@ class SettingsScriptTests(unittest.TestCase):
             "package/base-files/files/etc/banner": "%D %V, %C\n",
             "include/version.mk": "VERSION_DIST:=ImmortalWRT\n",
         }
-        replacements = {
-            "package/base-files/files/etc/openwrt_release": ("%D %V %C", "%D %C"),
-            "package/base-files/files/usr/lib/os-release": ("%D %V %C", "%D %C"),
-            "package/base-files/files/etc/banner": ("%D %V, %C", "%D %C"),
-        }
+        version_files = (
+            "package/base-files/files/etc/openwrt_release",
+            "package/base-files/files/usr/lib/os-release",
+            "package/base-files/files/etc/banner",
+        )
         with tempfile.TemporaryDirectory() as d:
             upstream = os.environ.get("SETTINGS_PRISTINE_SOURCE")
             if upstream:
@@ -58,7 +58,11 @@ class SettingsScriptTests(unittest.TestCase):
             platform_expected = dict(platform_before)
             platform_expected[Path(DTS.replace('v2.dts', 'v1.dts'))] = platform_before[Path(DTS.replace('v2.dts', 'v1.dts'))]
             platform_expected[Path(DTS)] = dts_before
-            before = {p: Path(d, p).read_text() for p in replacements}
+            before = {p: Path(d, p).read_text() for p in (
+                "package/base-files/files/etc/openwrt_release",
+                "package/base-files/files/usr/lib/os-release",
+                "package/base-files/files/etc/banner",
+            )}
             self.assertIn('PRETTY_NAME="%D %V"',
                           before["package/base-files/files/usr/lib/os-release"])
             version_before = Path(d, "include/version.mk").read_text()
@@ -74,12 +78,8 @@ class SettingsScriptTests(unittest.TestCase):
             self.assertIn("encryption='psk2+ccmp'", wifi)
             self.assertIn("ssid='MX4200'", wifi)
             self.assertIn("key='12345678'", wifi)
-            for relative, (old, new) in replacements.items():
-                self.assertIn(old, before[relative], relative)
-                self.assertEqual(Path(d, relative).read_text(),
-                                 before[relative].replace(old, new).replace(
-                                     'PRETTY_NAME="%D %V"', 'PRETTY_NAME="%D %C"'),
-                                 relative)
+            for relative in version_files:
+                self.assertEqual(Path(d, relative).read_text(), before[relative], relative)
             self.assertIn("192.168.10.1", Path(d,
                 "package/base-files/files/bin/config_generate").read_text())
             self.assertEqual(Path(d, "include/version.mk").read_text(),

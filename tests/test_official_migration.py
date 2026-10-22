@@ -21,6 +21,8 @@ class OfficialMigrationTests(unittest.TestCase):
         self.assertIn('SOURCE_REF=', text)
         self.assertIn('SOURCE_TAG', text[text.index('RELEASE_NOTES='):])
         self.assertIn('SOURCE_URL', text[text.index('RELEASE_NOTES='):])
+        self.assertIn('MX4200_ImmortalWrt_${SOURCE_TAG}_', text)
+        self.assertIn('MX4200-ImmortalWrt-${SOURCE_TAG}-r', text)
         self.assertEqual(workflow['jobs']['build']['runs-on'], 'ubuntu-24.04-arm')
         self.assertNotIn('集成 NSS', (ROOT / '.github/workflows/MX4200.yml').read_text())
 
