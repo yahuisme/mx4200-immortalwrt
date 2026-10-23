@@ -43,6 +43,6 @@
 
 ## 构建
 
-每日自动构建。
+每周日自动构建。
 
 也可手动运行 Actions。使用 Ubuntu 24.04 ARM64 runner 与 Debian ARM64 Docker 环境，仅发布两个硬件版本各自的 `factory.bin` 与 `sysupgrade.bin`，保留最近两版。
