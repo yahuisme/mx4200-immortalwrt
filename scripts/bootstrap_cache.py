@@ -20,11 +20,11 @@ except ImportError:
         import cache_config
 
 EPOCH = 946684800
-# MX4200 production post-customization lock (ImmortalWrt e695009c15c6):
+# MX4200 production post-customization lock (ImmortalWrt v25.12.2):
 # canonical path/permission/content records after the complete custom.sh path,
 # including MX mirror filtering. Unknown inventories bind to the full TC_KEY.
 REVIEWED = {
-    '1d1a2fcab2656795ae1ed1177d7926fd6d54782abb6e3de2e9c6d11149231d7d',
+    '5e09e8d00cbee466260d9391bab5d5f38a41ed7a439e553a9ee49a517deb435f',
 }
 FIXED_INPUTS = ('Makefile', 'rules.mk', 'package/Makefile', 'target/Makefile',
                 'toolchain/Makefile', *('include/' + name for name in (
@@ -122,7 +122,7 @@ def key(root, builder, tc_key):
     independent = source in REVIEWED and values.get('CONFIG_BUILD_ALL_HOST_TOOLS') != 'y'
     environment = {name: os.environ.get(name) for name in ENVIRONMENT}
     host = os.uname()
-    data = ['bootstrap-v2', builder, [host.sysname, host.release, host.version, host.machine], str(root), EPOCH,
+    data = ['bootstrap-v3', builder, [host.sysname, host.release, host.version, host.machine], str(root), EPOCH,
             hashlib.sha256(Path(__file__).read_bytes()).hexdigest(), environment,
             hashlib.sha256(cache_config.policy_bytes()).hexdigest(),
             hashlib.sha256(cache_config.fingerprint_bytes(raw)).hexdigest(), stat.S_IMODE((root / '.config').stat().st_mode),

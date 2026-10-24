@@ -40,7 +40,7 @@ class BootstrapTests(unittest.TestCase):
     def test_mx_reviewed_lock_is_post_custom_not_bare_sibling_source(self):
         m = self.module()
         self.assertEqual(m.REVIEWED, {
-            '1d1a2fcab2656795ae1ed1177d7926fd6d54782abb6e3de2e9c6d11149231d7d'})
+            '5e09e8d00cbee466260d9391bab5d5f38a41ed7a439e553a9ee49a517deb435f'})
 
     @unittest.skipUnless(os.environ.get('MX_PREPARED_SOURCE'),
                          'set MX_PREPARED_SOURCE to exact post-custom MX source')
@@ -426,6 +426,19 @@ class BootstrapTests(unittest.TestCase):
         b = self.cli('key', self.root, self.cache, 'builder', 'tc-two')
         self.assertEqual(b.returncode, 0, b.stderr)
         self.assertNotEqual(a.stdout, b.stdout)
+
+
+@unittest.skipUnless(os.environ.get('BOOTSTRAP_SOURCE'), 'requires customized source')
+class PreparedBootstrapTests(unittest.TestCase):
+    def test_current_customized_inventory_supports_independent_reuse(self):
+        spec = importlib.util.spec_from_file_location('prepared_bootstrap', SCRIPT)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        root = Path(os.environ['BOOTSTRAP_SOURCE'])
+        self.assertIn(module.inventory(root), module.REVIEWED)
+        self.assertEqual(module.key(root, 'builder', 'tc-one'),
+                         module.key(root, 'builder', 'tc-two'))
 
 
 if __name__ == '__main__':

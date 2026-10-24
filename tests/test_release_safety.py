@@ -115,7 +115,7 @@ elif a[:2]!=['release','delete']: sys.exit(99)
                 self.assertEqual(bool(creates),case in ('fresh','advance','recheck-error','create-error','verify-error'))
                 self.assertEqual(len(gates),2 if case in ('fresh','advance','recheck-error') else 1)
                 self.assertEqual([a[2] for a in deletes],
-                                 ['MX4200-ImmortalWrt-previous', 'MX4200-ImmortalWrt-old']
+                                 ['MX4200-ImmortalWrt-old', 'MX4200-ImmortalWrt-previous']
                                  if case == 'fresh' else [])
                 if creates:
                     self.assertEqual(creates[0][creates[0].index('--target')+1],'a'*40)

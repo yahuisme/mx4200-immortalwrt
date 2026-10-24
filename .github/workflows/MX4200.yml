@@ -349,7 +349,6 @@ jobs:
           old_tags=$(jq -er --arg current "$VERSION" --arg pattern "$RELEASE_PATTERN" '
             flatten | map(select(.draft == false and .prerelease == false and
               (.tag_name | test($pattern)))) |
-            sort_by(.published_at, .id) | reverse |
             if any(.tag_name == $current) then
               [.[] | select(.tag_name != $current)] | map(.tag_name) | join("\n")
             else error("Published release missing from inventory") end

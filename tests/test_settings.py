@@ -1,4 +1,9 @@
-"""Small regression checks for Settings.sh's required failure contract."""
+"""Regression checks for settings and official stable version rendering.
+
+SETTINGS_PRISTINE_SOURCE supplies pristine stable files plus LuCI/Aurora.
+MX4200_PREPARED_SOURCE supplies a tagged stable Git tree with version/version.date
+and .config; the render harness runs no build targets or compilation.
+"""
 import os
 import subprocess
 import tempfile
@@ -6,13 +11,13 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
-DTS = 'target/linux/qualcommax/dts/ipq8174-mx4200v2.dts'
+DTS = 'target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8174-mx4200v2.dts'
 WIFI = '&wifi {\n\tstatus = "okay";\n\n\tqcom,ath11k-calibration-variant = "Linksys-MX4200v2";\n};\n'
 
 
 class SettingsScriptTests(unittest.TestCase):
     def test_complete_settings_preserves_stable_version_templates(self):
-        # Set this to a pristine snapshot of real upstream files for integration
+        # Set SETTINGS_PRISTINE_SOURCE to pristine real stable files for integration
         # coverage; the default fixture keeps the same full-script contract.
         import shutil
 
@@ -105,11 +110,15 @@ class SettingsScriptTests(unittest.TestCase):
         epoch = subprocess.check_output(['./scripts/get_source_date_epoch.sh'],
                                         cwd=source, text=True).strip()
         self.assertRegex(revision, r'^r[0-9]+-[0-9a-f]{7,40}$')
-        self.assertEqual(epoch, subprocess.check_output(
-            ['git', 'log', '-1', '--format=%ct'], cwd=source, text=True).strip())
-        self.assertTrue(subprocess.check_output(
-            ['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip().startswith(
-                revision.split('-', 1)[1]))
+        # Stable releases pin these files; their revision/date can predate tag HEAD.
+        self.assertEqual(revision, (source / 'version').read_text().strip())
+        self.assertEqual(epoch, (source / 'version.date').read_text().strip())
+        self.assertRegex(epoch, r'^[0-9]+$')
+        tag = subprocess.check_output(
+            ['git', 'describe', '--tags', '--exact-match', 'HEAD'],
+            cwd=source, text=True).strip()
+        self.assertRegex(tag, r'^v[0-9]+\.[0-9]+\.[0-9]+$')
+        stable = tag.removeprefix('v')
         # Execute the actual upstream VERSION_SED_SCRIPT, without any build targets.
         harness = '''empty:=
 space:=$(empty) $(empty)
@@ -135,15 +144,17 @@ render:
                 rendered[name] = subprocess.check_output(
                     ['make', '--no-print-directory', '-s', '-f', str(makefile), 'render',
                      'TEMPLATE=package/base-files/files/' + name], cwd=source, text=True)
-        display = 'ImmortalWrt ' + revision
+        display = 'ImmortalWrt ' + stable + ' ' + revision
         self.assertIn("DISTRIB_DESCRIPTION='" + display + "'", rendered['etc/openwrt_release'])
-        self.assertIn("DISTRIB_RELEASE='SNAPSHOT'", rendered['etc/openwrt_release'])
-        self.assertIn('PRETTY_NAME="' + display + '"', rendered['usr/lib/os-release'])
+        self.assertIn("DISTRIB_RELEASE='" + stable + "'", rendered['etc/openwrt_release'])
+        self.assertIn("DISTRIB_REVISION='" + revision + "'", rendered['etc/openwrt_release'])
+        self.assertIn('PRETTY_NAME="ImmortalWrt ' + stable + '"', rendered['usr/lib/os-release'])
         self.assertIn('OPENWRT_RELEASE="' + display + '"', rendered['usr/lib/os-release'])
         self.assertIn('BUILD_ID="' + revision + '"', rendered['usr/lib/os-release'])
         self.assertIn('OPENWRT_BUILD_DATE="' + epoch + '"', rendered['usr/lib/os-release'])
-        self.assertIn('VERSION="SNAPSHOT"', rendered['usr/lib/os-release'])
-        self.assertIn(' ' + display + '\n', rendered['etc/banner'])
+        self.assertIn('VERSION="' + stable + '"', rendered['usr/lib/os-release'])
+        self.assertIn('VERSION_ID="' + stable + '"', rendered['usr/lib/os-release'])
+        self.assertIn(' ImmortalWrt ' + stable + ', ' + revision, rendered['etc/banner'])
         self.assertNotIn('CONFIG_VERSIONOPT=y', (source / '.config').read_text())
 
     def test_missing_fixture_fails(self):
