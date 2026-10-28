@@ -113,7 +113,10 @@ class ExternalPackageTests(unittest.TestCase):
                             for tag, repo in module.REPOSITORIES.items()}
             module.snapshot(root, fixture / 'apk-wrapper', repositories)
             image = root / 'rootfs'
-            shutil.copytree(fixture / 'mx4200-root', image, symlinks=True,
+            pristine = os.environ.get('MX_BTF_ROOT_FIXTURE')
+            self.assertTrue(pristine, 'set MX_BTF_ROOT_FIXTURE to the isolated APK root fixture')
+            assert pristine
+            shutil.copytree(pristine, image, symlinks=True,
                             ignore=shutil.ignore_patterns('dev', 'proc', 'sys'))
             command = [str(fixture / 'apk-wrapper'), '--root', str(image), '--keys-dir',
                        str(root / '.external-packages/keys'), '--arch', module.ARCH,
@@ -159,7 +162,7 @@ class ExternalPackageTests(unittest.TestCase):
             config = root / 'build_dir/target-aarch64/linux-qualcommax_ipq807x/linux-6.12.103/.config'
             config.parent.mkdir(parents=True)
             required = ('BPF', 'BPF_SYSCALL', 'BPF_JIT', 'CGROUPS', 'CGROUP_BPF',
-                        'NET_NS', 'NET_SCHED', 'NET_CLS_ACT', 'NET_XGRESS', 'DEBUG_INFO_BTF')
+                        'NET_NS', 'NET_SCHED', 'NET_CLS_ACT', 'NET_XGRESS')
             good = (''.join('CONFIG_' + symbol + '=y\n' for symbol in required) +
                     ''.join('CONFIG_' + symbol + '=m\n' for symbol in
                             ('NF_TABLES', 'NF_TABLES_INET', 'NFT_CT', 'NFT_QUEUE', 'NETFILTER_NETLINK_QUEUE')))
@@ -168,6 +171,11 @@ class ExternalPackageTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, symbol):
                     module.verify_kernel(root)
             config.write_text(good)
+            # Header parser fixture only; no kernel was compiled by this test.
+            import struct
+            blob = root / 'build_dir/target-aarch64/vmlinux-btf-6.12.103/vmlinux-btf'
+            blob.parent.mkdir(parents=True)
+            blob.write_bytes(struct.pack('<HBB5I', 0xeb9f, 1, 0, 24, 0, 12, 12, 1) + b'\0' * 13)
             module.verify_kernel(root)
 
 

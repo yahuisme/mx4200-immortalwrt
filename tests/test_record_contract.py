@@ -25,7 +25,7 @@ def external_provenance_fixture():
     """Synthetic metadata only: these hashes/versions do not attest real APKs."""
     packages = {
         'daeuniverse': ['honk', 'luci-app-honk', 'luci-lib-daeuniverse',
-                        'luci-i18n-daeuniverse-zh-cn', 'vmlinux-btf-builtin'],
+                        'luci-i18n-daeuniverse-zh-cn'],
         'eamonxg': ['luci-theme-aurora', 'luci-app-aurora-config',
                     'luci-i18n-aurora-config-zh-cn'],
     }

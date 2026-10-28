@@ -17,7 +17,7 @@ REPOSITORIES = {
         'key': 'https://openwrt.daeuniverse.org/public-key.pem',
         'key_sha256': '5aae30568b7e08f86ea3e72a19fa281d835ba4eff8ab38849abcd2b0884c6cd5',
         'packages': ['honk', 'luci-app-honk', 'luci-lib-daeuniverse',
-                     'luci-i18n-daeuniverse-zh-cn', 'vmlinux-btf-builtin'],
+                     'luci-i18n-daeuniverse-zh-cn'],
     },
     'eamonxg': {
         'url': 'https://openwrt.eamonxg.fun/snapshots/apk',
@@ -46,6 +46,10 @@ def put(root, name, text):
 
 def prepare(root):
     root = Path(root).resolve()
+    # This small upstream recipe compiles against this build's kernel headers
+    # and .config; no foreign SDK BTF or enlarged kernel partition is used.
+    recipe = Path(__file__).resolve().parent / 'vmlinux-btf'
+    shutil.copytree(recipe, root / 'package/vmlinux-btf', dirs_exist_ok=True)
     packages = ' '.join(f'{p}@{tag}' for tag, repo in REPOSITORIES.items() for p in repo['packages'])
     repositories = ' '.join('--repository-config "@' + tag + ' file://$(TOPDIR)/.external-packages/' +
                             tag + '/packages.adb"' for tag in REPOSITORIES)
@@ -179,6 +183,9 @@ def verify_root(root, provenance):
     for name in retired:
         if name in installed or any(re.split(r'[@=~<>]', line)[0] == name for line in world):
             raise ValueError('Retired proxy package in rootfs: ' + name)
+    if 'vmlinux-btf-builtin' in installed or 'vmlinux-btf' not in installed:
+        raise ValueError('Expected same-build detached BTF package, not built-in BTF provider')
+    verify_btf(root / 'usr/lib/debug/boot/vmlinux')
     for row in record['packages']:
         if installed.get(row['name']) != row['version']:
             raise ValueError('Missing or wrong official APK version: ' + row['name'])
@@ -194,18 +201,38 @@ def verify_root(root, provenance):
             raise ValueError('Missing or wrong runtime signing key: ' + feed['name'])
     return installed
 
+def verify_btf(path):
+    import struct
+    path = Path(path)
+    if not path.is_file() or path.is_symlink():
+        raise ValueError('Missing same-build detached BTF: ' + str(path))
+    data = path.read_bytes()
+    if len(data) < 24:
+        raise ValueError('Truncated detached BTF')
+    magic, version, flags, header, types, types_len, strings, strings_len = struct.unpack_from('<HBB5I', data)
+    if (magic != 0xeb9f or version != 1 or flags or header < 24 or not types_len or not strings_len
+            or header + types + types_len > len(data) or header + strings + strings_len > len(data)):
+        raise ValueError('Invalid detached BTF header')
+
+
 def verify_kernel(root):
     configs = list(Path(root).glob('build_dir/target-*/linux-qualcommax_ipq807x/linux-*/.config'))
     if len(configs) != 1:
         raise ValueError('Expected one compiled MX4200 kernel configuration')
     values = configs[0].read_text().splitlines()
     for symbol in ('BPF', 'BPF_SYSCALL', 'BPF_JIT', 'CGROUPS', 'CGROUP_BPF',
-                   'NET_NS', 'NET_SCHED', 'NET_CLS_ACT', 'NET_XGRESS', 'DEBUG_INFO_BTF'):
+                   'NET_NS', 'NET_SCHED', 'NET_CLS_ACT', 'NET_XGRESS'):
         if 'CONFIG_' + symbol + '=y' not in values:
             raise ValueError('Required Honk kernel capability missing: ' + symbol)
     for symbol in ('NF_TABLES', 'NF_TABLES_INET', 'NFT_CT', 'NFT_QUEUE', 'NETFILTER_NETLINK_QUEUE'):
         if not any('CONFIG_' + symbol + '=' + value in values for value in ('y', 'm')):
             raise ValueError('Required Honk kernel capability missing: ' + symbol)
+    if 'CONFIG_DEBUG_INFO_BTF=y' in values:
+        raise ValueError('Embedded BTF must stay disabled for the MX4200 kernel partition')
+    blobs = list(Path(root).glob('build_dir/target-*/vmlinux-btf-*/vmlinux-btf'))
+    if len(blobs) != 1:
+        raise ValueError('Missing or ambiguous same-build detached BTF output')
+    verify_btf(blobs[0])
 
 
 if __name__ == '__main__':

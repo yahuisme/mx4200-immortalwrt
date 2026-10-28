@@ -39,7 +39,7 @@ class OfficialMigrationTests(unittest.TestCase):
             'luci-app-ttyd', 'luci-app-wol', 'libstdcpp',
             'kmod-veth', 'kmod-sched-core', 'kmod-sched-bpf',
             'kmod-nft-core', 'kmod-nft-queue', 'kmod-nfnetlink-queue',
-            'kmod-nf-conntrack', 'v2ray-geoip', 'v2ray-geosite',
+            'kmod-nf-conntrack', 'v2ray-geoip', 'v2ray-geosite', 'vmlinux-btf',
         })
         self.assertIn('CONFIG_PACKAGE_luci-app-attendedsysupgrade=n', config)
         for package in ('luci-app-homeproxy', 'luci-i18n-homeproxy-zh-cn', 'sing-box',
@@ -47,10 +47,10 @@ class OfficialMigrationTests(unittest.TestCase):
                         'luci-i18n-aurora-config-zh-cn'):
             self.assertFalse(any(line.startswith('CONFIG_PACKAGE_' + package + '=')
                                  for line in config), package)
-        for symbol in ('KERNEL_DEBUG_INFO', 'KERNEL_DEBUG_INFO_BTF', 'KERNEL_CGROUPS',
+        for symbol in ('DWARVES', 'KERNEL_CGROUPS',
                        'KERNEL_CGROUP_BPF', 'KERNEL_NAMESPACES', 'KERNEL_NET_NS'):
             self.assertIn('CONFIG_' + symbol + '=y', config)
-        self.assertIn('# CONFIG_KERNEL_DEBUG_INFO_REDUCED is not set', config)
+        self.assertIn('# CONFIG_KERNEL_DEBUG_INFO_BTF is not set', config)
         for package in ('usteer', 'luci-app-usteer', 'luci-i18n-usteer-zh-cn'):
             for value in ('y', 'm'):
                 self.assertNotIn('CONFIG_PACKAGE_' + package + '=' + value, config)

@@ -1,0 +1,75 @@
+"""MX4200 kernel stays within native partition; Honk uses same-build detached BTF."""
+import importlib.util
+from pathlib import Path
+import tempfile
+import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def helper():
+    spec = importlib.util.spec_from_file_location('external_packages', ROOT / 'scripts/external_packages.py')
+    assert spec and spec.loader
+    result = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(result)
+    return result
+
+
+class DetachedBtfTests(unittest.TestCase):
+    def test_no_embedded_btf_or_foreign_btf_provider(self):
+        config = (ROOT / 'user/default/config.diff').read_text()
+        self.assertIn('# CONFIG_KERNEL_DEBUG_INFO_BTF is not set', config)
+        self.assertIn('CONFIG_DWARVES=y', config)
+        self.assertIn('CONFIG_PACKAGE_vmlinux-btf=y', config)
+        self.assertNotIn('CONFIG_KERNEL_DEBUG_INFO_BTF=y', config)
+        module = helper()
+        self.assertNotIn('vmlinux-btf-builtin', module.REPOSITORIES['daeuniverse']['packages'])
+
+    def test_same_build_btf_blob_is_required(self):
+        module = helper()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = root / 'build_dir/target-aarch64/linux-qualcommax_ipq807x/linux-6.12.103/.config'
+            config.parent.mkdir(parents=True)
+            required = ('BPF', 'BPF_SYSCALL', 'BPF_JIT', 'CGROUPS', 'CGROUP_BPF',
+                        'NET_NS', 'NET_SCHED', 'NET_CLS_ACT', 'NET_XGRESS')
+            config.write_text(''.join('CONFIG_' + symbol + '=y\n' for symbol in required) +
+                ''.join('CONFIG_' + symbol + '=m\n' for symbol in
+                        ('NF_TABLES', 'NF_TABLES_INET', 'NFT_CT', 'NFT_QUEUE', 'NETFILTER_NETLINK_QUEUE')))
+            with self.assertRaisesRegex(ValueError, 'BTF'):
+                module.verify_kernel(root)
+            blob = root / 'package/vmlinux-btf/Makefile'
+            blob.parent.mkdir(parents=True)
+            blob.write_text('fixture is not BTF output\n')
+            with self.assertRaisesRegex(ValueError, 'BTF'):
+                module.verify_kernel(root)
+
+    def test_btf_header_rejects_truncation_and_embedded_kernel(self):
+        import struct
+        module = helper()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'vmlinux'
+            for data in (b'', b'not BTF', struct.pack('<HBB5I', 0xeb9f, 1, 0, 24, 0, 12, 12, 1)):
+                path.write_bytes(data)
+                with self.assertRaisesRegex(ValueError, 'BTF'):
+                    module.verify_btf(path)
+            # Structural parser fixture, not a compiled target blob.
+            path.write_bytes(struct.pack('<HBB5I', 0xeb9f, 1, 0, 24, 0, 12, 12, 1) + b'\0' * 13)
+            module.verify_btf(path)
+
+    def test_upstream_sources_are_pinned_and_kernel_abi_bound(self):
+        recipe = ROOT / 'scripts/vmlinux-btf'
+        # Exact provenance is asserted against the reviewed source archive in
+        # the integration run; keep the recipe's source ownership explicit here.
+        self.assertIn('b41770520cef00652738cdfbbdda44d4de77f3f5', (recipe / 'SOURCES.md').read_text())
+        makefile = (recipe / 'Makefile').read_text()
+        self.assertIn('EXTRA_DEPENDS:=kernel (=$(LINUX_VERSION)~$(LINUX_VERMAGIC)-r$(LINUX_RELEASE))', makefile)
+        self.assertIn('-include $(LINUX_DIR)/include/linux/kconfig.h', makefile)
+        self.assertIn('--btf_encode_detached=', makefile)
+        self.assertIn('$(PKG_BUILD_DIR)/vmlinux-btf', makefile)
+        for name in ('shadow_btf_core.c', 'shadow_btf_modules.c', 'shadow_btf_private.c'):
+            self.assertTrue((recipe / 'src' / name).is_file())
+
+
+if __name__ == '__main__':
+    unittest.main()
