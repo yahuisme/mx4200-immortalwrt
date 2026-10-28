@@ -24,7 +24,11 @@ class ImageStageTests(unittest.TestCase):
                 name = f'immortalwrt-qualcommax-ipq807x-linksys_{device}-squashfs-{kind}.bin'
                 (directory / name).write_bytes(name.encode())
         data: dict = dict(target='qualcommax/ipq807x', version_code='r123-abcdef',
-                    profiles={'linksys_mx4200v1': {}, 'linksys_mx4200v2': {}})
+                    profiles={f'linksys_{device}': {'images': [
+                        dict(name=p.name, type=kind, filesystem='squashfs', size=p.stat().st_size)
+                        for kind in ('factory', 'sysupgrade')
+                        for p in [directory / f'immortalwrt-qualcommax-ipq807x-linksys_{device}-squashfs-{kind}.bin']]}
+                        for device in ('mx4200v1', 'mx4200v2')})
         (directory / 'profiles.json').write_text(json.dumps(data))
         return targets, directory, data
 
@@ -80,6 +84,28 @@ class ImageStageTests(unittest.TestCase):
                 if case == 'extra-device': data['profiles']['other'] = {}
                 if case == 'revision': data['version_code'] = 'SNAPSHOT'
                 (directory / 'profiles.json').write_text('{' if case == 'malformed' else json.dumps(data))
+                output = root / 'firmware'
+                with self.assertRaises(ValueError):
+                    release_images.stage(targets, output)
+                self.assertFalse(output.exists())
+
+    def test_rejects_mismatched_image_metadata_before_copy(self):
+        for case in ('missing', 'duplicate', 'name', 'type', 'filesystem', 'size', 'device', 'truncated'):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                targets, directory, data = self.fixture(root)
+                images = data['profiles']['linksys_mx4200v1']['images']
+                if case == 'missing': images.pop()
+                if case == 'duplicate': images.append(dict(images[0]))
+                if case == 'name': images[0]['name'] = 'other-factory.bin'
+                if case == 'type': images[0]['type'] = 'sysupgrade'
+                if case == 'filesystem': images[0]['filesystem'] = 'ext4'
+                if case == 'size': images[0]['size'] += 1
+                if case == 'device':
+                    other = data['profiles']['linksys_mx4200v2']['images']
+                    data['profiles']['linksys_mx4200v2']['images'], images[:] = images[:], other
+                if case == 'truncated': (directory / images[0]['name']).write_bytes(b'truncated')
+                (directory / 'profiles.json').write_text(json.dumps(data))
                 output = root / 'firmware'
                 with self.assertRaises(ValueError):
                     release_images.stage(targets, output)

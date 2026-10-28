@@ -31,6 +31,17 @@ def stage(targets, output):
         raise ValueError('unexpected target/profiles')
     if not re.fullmatch(r'r[0-9]+-[0-9a-f]+', data['version_code']):
         raise ValueError('unexpected version_code')
+    for device, profile in data['profiles'].items():
+        images = profile.get('images', [])
+        expected = {f'immortalwrt-qualcommax-ipq807x-{device}-squashfs-{kind}.bin': kind
+                    for kind in ('factory', 'sysupgrade')}
+        if len(images) != 2 or {entry.get('name') for entry in images} != set(expected):
+            raise ValueError('unexpected image metadata: ' + device)
+        for entry in images:
+            if (entry.get('type') != expected[entry['name']]
+                    or entry.get('filesystem') != 'squashfs'
+                    or entry.get('size') != (directory / entry['name']).stat().st_size):
+                raise ValueError('image metadata differs from output: ' + entry['name'])
     output.mkdir()
     for path in selected:
         shutil.copyfile(path, output / path.name)

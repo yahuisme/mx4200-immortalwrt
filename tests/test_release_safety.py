@@ -25,7 +25,11 @@ class ReleaseTests(unittest.TestCase):
             for kind in ('factory','sysupgrade'):
                 (output/f'immortalwrt-qualcommax-ipq807x-linksys_{device}-squashfs-{kind}.bin').write_bytes(b'fixture-not-firmware')
         data={'target':'qualcommax/ipq807x','version_code':'r123-abcdef',
-              'profiles':{'linksys_mx4200v1':{},'linksys_mx4200v2':{}}}
+              'profiles':{f'linksys_{device}': {'images': [
+                  dict(name=p.name, type=kind, filesystem='squashfs', size=p.stat().st_size)
+                  for kind in ('factory','sysupgrade')
+                  for p in [output/f'immortalwrt-qualcommax-ipq807x-linksys_{device}-squashfs-{kind}.bin']]}
+                  for device in ('mx4200v1','mx4200v2')}}
         (output/'profiles.json').write_text(json.dumps(data))
         return output,data
 
