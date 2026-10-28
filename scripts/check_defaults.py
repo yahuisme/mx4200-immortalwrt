@@ -5,7 +5,8 @@ import re
 import sys
 
 
-FORBIDDEN_PACKAGES = ('usteer', 'luci-app-usteer', 'luci-i18n-usteer-zh-cn')
+FORBIDDEN_PACKAGES = ('usteer', 'luci-app-usteer', 'luci-i18n-usteer-zh-cn',
+                      'luci-app-homeproxy', 'luci-i18n-homeproxy-zh-cn', 'sing-box')
 
 
 def check(config, packageinfo, requested=""):

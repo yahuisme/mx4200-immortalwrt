@@ -1,6 +1,6 @@
 """Regression checks for settings and official stable version rendering.
 
-SETTINGS_PRISTINE_SOURCE supplies pristine stable files plus LuCI/Aurora.
+SETTINGS_PRISTINE_SOURCE supplies pristine stable files plus LuCI.
 MX4200_PREPARED_SOURCE supplies a tagged stable Git tree with version/version.date
 and .config; the render harness runs no build targets or compilation.
 """
@@ -24,10 +24,8 @@ class SettingsScriptTests(unittest.TestCase):
         fixtures = {
             DTS: WIFI,
             DTS.replace('v2.dts', 'v1.dts'): '#include "ipq8074-512m.dtsi"\n',
-            "package/luci-app-aurora-config/root/usr/share/aurora/default.template":
-                "option nav_type 'topbar'\noption struct_radius_base '1rem'\n",
             "feeds/luci/collections/luci/Makefile":
-                "DEPENDS:=luci-theme-bootstrap\n# attendedsysupgrade\n",
+                "DEPENDS:= +luci-base +luci-theme-bootstrap +luci-mod-admin-full\n# attendedsysupgrade\n",
             "feeds/luci/modules/luci-mod-system/htdocs/flash.js":
                 "const ip = '192.168.1.1';\n",
             "package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc":
@@ -76,6 +74,11 @@ class SettingsScriptTests(unittest.TestCase):
             result = subprocess.run(["bash", str(ROOT / "scripts/settings.sh")],
                                     cwd=d, env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            collection = Path(d, "feeds/luci/collections/luci/Makefile").read_text()
+            self.assertNotIn("luci-theme-bootstrap", collection)
+            self.assertNotIn("luci-theme-aurora", collection)
+            self.assertIn("+luci-base", collection)
+            self.assertIn("+luci-mod-admin-full", collection)
             self.assertEqual(platform_expected, {p.relative_to(d): p.read_bytes()
                              for top in ('target', 'package/kernel')
                              for p in Path(d, top).rglob('*') if p.is_file()})
@@ -89,6 +92,11 @@ class SettingsScriptTests(unittest.TestCase):
                 "package/base-files/files/bin/config_generate").read_text())
             self.assertEqual(Path(d, "include/version.mk").read_text(),
                              version_before.replace("ImmortalWRT", "ImmortalWrt"))
+            # Even if a cached source recipe remains, APK-owned templates must
+            # not be edited; the first invocation above ran without this tree.
+            cached_template = Path(d, 'package/luci-app-aurora-config/root/usr/share/aurora/default.template')
+            cached_template.parent.mkdir(parents=True, exist_ok=True)
+            cached_template.write_text("option nav_type 'mega-menu'\noption struct_radius_base '0.5rem'\n")
             after = {p.relative_to(d): p.read_bytes() for p in Path(d).rglob("*")
                      if p.is_file()}
             result = subprocess.run(["bash", str(ROOT / "scripts/settings.sh")],
@@ -159,8 +167,7 @@ render:
 
     def test_missing_fixture_fails(self):
         with tempfile.TemporaryDirectory() as d:
-            for p in ("package/luci-app-aurora-config/root/usr/share/aurora",
-                      "feeds/luci/collections", "feeds/luci/modules/luci-mod-system",
+            for p in ("feeds/luci/collections", "feeds/luci/modules/luci-mod-system",
                       "package/network/config/wifi-scripts/files/lib/wifi"):
                 Path(d, p).mkdir(parents=True)
             env = os.environ | {"WRT_IP": "192.168.1.1", "WRT_THEME": "aurora",
@@ -168,7 +175,7 @@ render:
             r = subprocess.run(["bash", str(ROOT / "scripts/settings.sh")], cwd=d,
                                env=env, capture_output=True, text=True)
             self.assertNotEqual(r.returncode, 0)
-            self.assertIn("Aurora templates not found", r.stderr)
+            self.assertIn("flash.js not found", r.stderr)
 
 
 if __name__ == "__main__":

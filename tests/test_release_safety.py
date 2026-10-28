@@ -56,7 +56,7 @@ class ReleaseTests(unittest.TestCase):
                 if case=='wrong-profile': data['profiles']['other']=data['profiles'].pop('linksys_mx4200v1')
                 if case=='wrong-version': data['version_code']='SNAPSHOT'
                 config=(base/'.config').read_text()
-                if case=='missing-app': config=config.replace('CONFIG_PACKAGE_luci-app-homeproxy=y','')
+                if case=='missing-app': config=config.replace('CONFIG_PACKAGE_luci-app-ttyd=y','')
                 if case=='excluded-module':
                     config += '\nCONFIG_PACKAGE_usteer=m\n'
                     self.assertNotEqual(config, (base/'.config').read_text())

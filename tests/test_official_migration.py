@@ -29,18 +29,28 @@ class OfficialMigrationTests(unittest.TestCase):
 
     def test_optional_donor_components_follow_official_defaults(self):
         config = (ROOT / 'user/default/config.diff').read_text().splitlines()
-        # Only requested applications, their UI collection and the official
-        # hci-uart dependency gate belong in the fragment. Dependencies are
-        # selected by real recipes, not an inherited donor package list.
+        # External signed APKs are not source selectors. Their runtime and
+        # kernel dependencies must already be available in the local rootfs.
         positive = {line.split('=', 1)[0].removeprefix('CONFIG_PACKAGE_')
                     for line in config if line.startswith('CONFIG_PACKAGE_')
                     and line.endswith('=y')}
         self.assertEqual(positive, {
             'luci', 'autocore', 'luci-app-advanced-reboot',
-            'luci-app-aurora-config', 'luci-app-homeproxy', 'luci-app-ttyd',
-            'luci-app-wol', 'luci-theme-aurora',
+            'luci-app-ttyd', 'luci-app-wol', 'libstdcpp',
+            'kmod-veth', 'kmod-sched-core', 'kmod-sched-bpf',
+            'kmod-nft-core', 'kmod-nft-queue', 'kmod-nfnetlink-queue',
+            'kmod-nf-conntrack', 'v2ray-geoip', 'v2ray-geosite',
         })
         self.assertIn('CONFIG_PACKAGE_luci-app-attendedsysupgrade=n', config)
+        for package in ('luci-app-homeproxy', 'luci-i18n-homeproxy-zh-cn', 'sing-box',
+                        'honk', 'honk-go', 'luci-theme-aurora', 'luci-app-aurora-config',
+                        'luci-i18n-aurora-config-zh-cn'):
+            self.assertFalse(any(line.startswith('CONFIG_PACKAGE_' + package + '=')
+                                 for line in config), package)
+        for symbol in ('KERNEL_DEBUG_INFO', 'KERNEL_DEBUG_INFO_BTF', 'KERNEL_CGROUPS',
+                       'KERNEL_CGROUP_BPF', 'KERNEL_NAMESPACES', 'KERNEL_NET_NS'):
+            self.assertIn('CONFIG_' + symbol + '=y', config)
+        self.assertIn('# CONFIG_KERNEL_DEBUG_INFO_REDUCED is not set', config)
         for package in ('usteer', 'luci-app-usteer', 'luci-i18n-usteer-zh-cn'):
             for value in ('y', 'm'):
                 self.assertNotIn('CONFIG_PACKAGE_' + package + '=' + value, config)
@@ -61,7 +71,7 @@ class OfficialMigrationTests(unittest.TestCase):
             self.assertIn('CONFIG_PACKAGE_' + package + '=y', config)
         for package in ('kmod-bonding', 'proto-bonding', 'kmod-fs-btrfs', 'kmod-fuse',
                         'kmod-wireguard', 'kmod-inet-mptcp-diag', 'kmod-mtd-rw',
-                        'kmod-dummy', 'kmod-veth', 'kmod-tcp-bbr',
+                        'kmod-dummy', 'kmod-tcp-bbr',
                         'exfat-fsck', 'exfat-mkfs', 'fdisk', 'gdisk', 'smartmontools',
                         'smartmontools-drivedb', 'iperf3', 'htop', 'ip-full',
                         'openssh-keygen', 'openssh-sftp-server', 'openssl-util',
@@ -74,9 +84,8 @@ class OfficialMigrationTests(unittest.TestCase):
                 self.assertTrue(line in config, line)
         for device in ('mx4200v1', 'mx4200v2'):
             self.assertIn('CONFIG_TARGET_DEVICE_qualcommax_ipq807x_DEVICE_linksys_' + device + '=y', config)
-        for package in ('luci-i18n-homeproxy-zh-cn', 'luci-i18n-aurora-config-zh-cn',
-                        'luci-i18n-advanced-reboot-zh-cn', 'luci-i18n-wol-zh-cn',
-                        'luci-i18n-ttyd-zh-cn', 'sing-box', 'ath11k-firmware-ipq8074',
+        for package in ('luci-i18n-advanced-reboot-zh-cn', 'luci-i18n-wol-zh-cn',
+                        'luci-i18n-ttyd-zh-cn', 'ath11k-firmware-ipq8074',
                         'wpad-openssl', 'kmod-ath11k-ahb'):
             self.assertIn('CONFIG_PACKAGE_' + package + '=y', config)
         self.assertFalse(any(line.startswith('CONFIG_PACKAGE_kmod-qca-nss-') and line.endswith('=y') for line in config))

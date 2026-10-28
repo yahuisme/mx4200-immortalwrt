@@ -35,7 +35,7 @@ class CachePublicationIntegrationTests(unittest.TestCase):
             (base / "bin").symlink_to(base / "openwrt_bin")
             prepare(base)
             if fault == 'metadata':
-                (base / '.custom-revisions.tsv').unlink()
+                (base / '.external-packages/provenance.json').unlink()
             if fault == 'validation':
                 (base / '.config').write_text('CONFIG_TARGET_wrong=y\n')
             cc = base / 'staging_dir/host/bin/ccache'

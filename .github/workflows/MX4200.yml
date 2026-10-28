@@ -119,8 +119,7 @@ jobs:
           cp $DK_PROFILE/config.diff .config
           echo "CONFIG_CCACHE_DIR=\"/ghcache\"" >> .config
           cp -r "$DK_PROFILE/files/" .
-          # The runner mounts the source profile read-only; this is the only
-          # persistent customization revision file consumed by build_record.py.
+          # Prepare signed external APKs and device defaults before defconfig.
           bash $DK_PROFILE/custom.sh
           python3 /cache-scripts/check_go.py "$DK_OPENWRT" /usr/lib/go
           # Log actual source/feed revisions after customization; fail on broken Git access.
@@ -254,7 +253,7 @@ jobs:
         - 构建时间：$(TZ=Asia/Hong_Kong date '+%Y-%m-%d %H:%M:%S %Z')
         - 机型：Linksys MX4200v1 / MX4200v2，请选择对应硬件版本的镜像。
         - 镜像：\`factory.bin\` 用于从原厂固件刷入，\`sysupgrade.bin\` 用于从已有 ImmortalWrt 升级。
-        - 定制：中文 LuCI、Aurora、HomeProxy、sing-box 及既定网络与无线设置。
+        - 定制：中文 LuCI、Aurora、Honk 及既定网络与无线设置。
 
         [默认设置与使用说明](https://github.com/yahuisme/mx4200-immortalwrt#默认设置)
         EOF

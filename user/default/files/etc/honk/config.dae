@@ -1,0 +1,40 @@
+global {
+    wan_interface: auto
+    lan_interface: br-lan
+    data_dir: '/etc/honk/data'
+    log_level: info
+    log_file: ''
+    dial_mode: domain++
+    auto_config_kernel_parameter: true
+    bootstrap_resolver: '1.1.1.1:53'
+    nfqueue_enable: true
+}
+
+dns {
+    upstream {
+        local: 'udp://127.0.0.1:53'
+    }
+    routing {
+        request {
+            fallback: local
+        }
+        response {
+            fallback: local
+        }
+    }
+}
+
+routing {
+    dip(geoip: private) -> direct(must)
+    fallback: direct
+}
+
+experimental {
+    native_api {
+        enabled: true
+        listen: '192.168.10.1:9527'
+        password_auth: true
+        config_write: true
+        ui: 'embedded'
+    }
+}

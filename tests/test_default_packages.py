@@ -51,6 +51,15 @@ class DefaultPackageTests(unittest.TestCase):
                         check(config, '', '')
         check('CONFIG_MODULE_DEFAULT_driver=y\nCONFIG_PACKAGE_driver=m\n', '', '')
 
+    def test_retired_proxy_packages_are_rejected(self):
+        for package in ('luci-app-homeproxy', 'luci-i18n-homeproxy-zh-cn', 'sing-box'):
+            for value in ('y', 'm'):
+                with self.subTest(package=package, value=value):
+                    config = ('CONFIG_MODULE_DEFAULT_driver=y\nCONFIG_PACKAGE_driver=m\n'
+                              f'CONFIG_PACKAGE_{package}={value}\n')
+                    with self.assertRaisesRegex(ValueError, re.escape(package)):
+                        check(config, '', '')
+
     def test_formal_workflow_runs_gate_with_recipe(self):
         import subprocess
         import tempfile
@@ -71,7 +80,7 @@ class DefaultPackageTests(unittest.TestCase):
             for fault in ('', 'missing-app', 'excluded-module'):
                 broken = config
                 if fault == 'missing-app':
-                    broken = broken.replace('CONFIG_PACKAGE_luci-app-homeproxy=y', '')
+                    broken = broken.replace('CONFIG_PACKAGE_luci-app-ttyd=y', '')
                 if fault == 'excluded-module':
                     broken += '\nCONFIG_PACKAGE_usteer=m\n'
                     self.assertNotEqual(broken, config)

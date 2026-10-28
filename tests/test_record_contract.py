@@ -21,6 +21,35 @@ def module(name):
     return result
 
 
+def external_provenance_fixture():
+    """Synthetic metadata only: these hashes/versions do not attest real APKs."""
+    packages = {
+        'daeuniverse': ['honk', 'luci-app-honk', 'luci-lib-daeuniverse',
+                        'luci-i18n-daeuniverse-zh-cn', 'vmlinux-btf-builtin'],
+        'eamonxg': ['luci-theme-aurora', 'luci-app-aurora-config',
+                    'luci-i18n-aurora-config-zh-cn'],
+    }
+    return {
+        'version': 1,
+        'architecture': 'aarch64_cortex-a53',
+        'repositories': [dict(name=name, url=f'https://example.invalid/fixture/{name}',
+                              index_sha256='a' * 64, key_sha256='b' * 64)
+                         for name in packages],
+        'packages': [dict(name=name, version='1.0-fixture-r1',
+                          arch='aarch64_cortex-a53' if name == 'honk' else 'noarch',
+                          repository=repository, filename=f'{name}-1.0-fixture-r1.apk',
+                          sha256='c' * 64)
+                     for repository, names in packages.items() for name in names],
+    }
+
+
+def write_external_fixture(base):
+    path = base / '.external-packages/provenance.json'
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(json.dumps(external_provenance_fixture()) + '\n')
+    return path
+
+
 class RecordContract(unittest.TestCase):
     def fixture(self, base):
         profile = json.loads((ROOT / 'user/default/build.json').read_text())
@@ -31,9 +60,7 @@ class RecordContract(unittest.TestCase):
                             'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture', '--allow-empty'], check=True)
             subprocess.run(['git', '-C', str(path), 'remote', 'add', 'origin', 'https://example.invalid/local'], check=True)
         (base / '.config').write_text('CONFIG_FIXTURE=y\n')
-        (base / '.custom-revisions.tsv').write_text(''.join(
-            f'{name}\thttps://example.invalid/{name}\t' + 'a' * 40 + '\n'
-            for name in ('yahuisme/packages', 'luci-theme-aurora', 'luci-app-aurora-config')))
+        write_external_fixture(base)
         target = base / 'bin/targets' / profile['target']
         target.mkdir(parents=True)
         (target / 'fixture.manifest').write_text('fixture - 1\n')
@@ -64,7 +91,13 @@ class RecordContract(unittest.TestCase):
             self.assertEqual(record['recipe']['workflow_sha'], 'b' * 40)
             self.assertEqual(record['builder']['image_id'], environment['image_id'])
             self.assertEqual(record['source'], revisions[0])
-            self.assertEqual(record['feeds'] + record['custom_sources'], revisions[1:])
+            self.assertEqual(record['feeds'], revisions[1:])
+            self.assertEqual(record['custom_sources'], [])
+            self.assertEqual(record['external_packages'], external_provenance_fixture())
+            self.assertEqual((base / 'record/external-packages.json').read_bytes(),
+                             (base / '.external-packages/provenance.json').read_bytes())
+            self.assertEqual({row['name'] for row in revisions}, {'source', 'feed/packages'})
+            self.assertFalse((base / 'record/custom-revisions.tsv').exists())
             self.assertEqual(record['target'], profile['target'])
             self.assertEqual(record['config']['digest'], 'sha256:' + hashlib.sha256((base / '.config').read_bytes()).hexdigest())
             self.assertEqual({e['name'] for e in record['images']}, {p.name for p in paths})
@@ -73,7 +106,7 @@ class RecordContract(unittest.TestCase):
             self.assertFalse((base / 'record/source-revisions.txt').exists())
 
     def test_partial_failures_keep_config_revisions_and_diagnostics(self):
-        for fault in ('empty', 'symlink', 'extra', 'wrong-name', 'missing', 'profiles', 'custom', 'git'):
+        for fault in ('empty', 'symlink', 'extra', 'wrong-name', 'missing', 'profiles', 'external', 'git'):
             with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
                 base = Path(tmp)
                 profile, paths = self.fixture(base)
@@ -86,7 +119,7 @@ class RecordContract(unittest.TestCase):
                 if fault == 'wrong-name': image.rename(image.parent / ('wrong-' + image.name))
                 if fault == 'missing': image.unlink()
                 if fault == 'profiles': (image.parent / 'profiles.json').unlink()
-                if fault == 'custom': (base / '.custom-revisions.tsv').write_text('\n')
+                if fault == 'external': (base / '.external-packages/provenance.json').write_text('\n')
                 if fault == 'git': (base / '.git').rename(base / 'hidden-git')
                 result = self.run_record(base)
                 self.assertNotEqual(result.returncode, 0)

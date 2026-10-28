@@ -8,6 +8,7 @@ import tempfile
 import unittest
 
 from test_cache_workflow import ROOT, step
+from test_record_contract import external_provenance_fixture, write_external_fixture
 class safety:
     class ReleaseTests:
         def fixture(self, base):
@@ -29,13 +30,13 @@ def prepare(base):
     if not profiles.exists():
         profiles.write_text('{}\n')
     (base/'bin/targets/qualcommax/ipq807x/fixture.manifest').write_text('fixture - 1\n')
-    (base/'.custom-revisions.tsv').write_text(''.join(f'{name}\thttps://example.invalid/{name}\t'+'a'*40+'\n' for name in ('yahuisme/packages','luci-theme-aurora','luci-app-aurora-config')))
+    write_external_fixture(base)
 
 
 
 class BuildRecordTests(unittest.TestCase):
     def test_actual_helper_success_and_missing_metadata(self):
-        for missing in ('', '.config', '.custom-revisions.tsv', 'manifest', 'feed'):
+        for missing in ('', '.config', '.external-packages/provenance.json', 'manifest', 'feed'):
             with self.subTest(missing=missing), tempfile.TemporaryDirectory() as tmp:
                 base = Path(tmp)
                 output, _ = safety.ReleaseTests().fixture(base)
@@ -60,40 +61,85 @@ class BuildRecordTests(unittest.TestCase):
                         self.assertEqual(path.stat().st_mode & 0o444, 0o444)
                 if not missing:
                     revisions = json.loads((record / 'revisions.json').read_text())
-                    self.assertEqual({r['name'] for r in revisions}, {'source', 'feed/packages', 'custom/yahuisme/packages', 'custom/luci-theme-aurora', 'custom/luci-app-aurora-config'})
+                    self.assertEqual({r['name'] for r in revisions}, {'source', 'feed/packages'})
+                    self.assertEqual(json.loads((record / 'external-packages.json').read_text()),
+                                     external_provenance_fixture())
+                    self.assertEqual(json.loads((record / 'build.json').read_text())['custom_sources'], [])
+                    self.assertFalse((record / 'custom-revisions.tsv').exists())
                     sha = subprocess.check_output(['git', '-C', tmp, 'rev-parse', 'HEAD'], text=True).strip()
                     self.assertEqual(revisions[0]['sha'], sha)
+                else:
+                    self.assertIsNotNone(json.loads((record / 'build.json').read_text())['source'])
+                if missing == '.external-packages/provenance.json':
+                    self.assertIsNone(json.loads((record / 'build.json').read_text())['external_packages'])
 
-    def test_malformed_custom_records_keep_partial_evidence(self):
-        for fault in ('empty', 'missing-row', 'duplicate', 'bad-sha', 'blank-row'):
+    def test_malformed_external_records_keep_partial_evidence(self):
+        faults = {
+            'null': lambda data: None,
+            'list': lambda data: [],
+            'version': lambda data: dict(data, version=2),
+            'boolean-version': lambda data: dict(data, version=True),
+            'architecture': lambda data: dict(data, architecture='x86_64'),
+            'missing-repositories': lambda data: {k: v for k, v in data.items() if k != 'repositories'},
+            'repositories-not-list': lambda data: dict(data, repositories={}),
+            'missing-repository': lambda data: dict(data, repositories=data['repositories'][:-1]),
+            'duplicate-repository': lambda data: dict(data, repositories=[data['repositories'][0]] * 2),
+            'extra-repository': lambda data: dict(data, repositories=data['repositories'] + [dict(data['repositories'][0], name='other')]),
+            'null-repository': lambda data: dict(data, repositories=[None, data['repositories'][1]]),
+            'packages-not-list': lambda data: dict(data, packages={}),
+            'missing-package': lambda data: dict(data, packages=data['packages'][:-1]),
+            'duplicate-package': lambda data: dict(data, packages=[data['packages'][0]] + data['packages'][:-1]),
+            'extra-package': lambda data: dict(data, packages=data['packages'] + [dict(data['packages'][0], name='other')]),
+            'null-package': lambda data: dict(data, packages=[None] + data['packages'][1:]),
+        }
+        for field, value in (
+                ('url', ''), ('url', 'http://example.invalid/repository'),
+                ('url', 'https:///repository'), ('url', 'https://user:password@example.invalid/repo'),
+                ('index_sha256', 'a' * 63), ('index_sha256', 'g' * 64),
+                ('key_sha256', None), ('key_sha256', 'b' * 65)):
+            faults[f'repository-{field}-{value}'] = lambda data, field=field, value=value: dict(
+                data, repositories=[dict(data['repositories'][0], **{field: value}), data['repositories'][1]])
+        for field, value in (
+                ('version', ''), ('version', '  '), ('version', 1),
+                ('arch', 'x86_64'), ('repository', 'other'), ('repository', 'eamonxg'),
+                ('sha256', 'short'), ('sha256', 'g' * 64), ('sha256', None),
+                ('filename', ''), ('filename', '../honk.apk'), ('filename', 'different.apk')):
+            faults[f'package-{field}-{value}'] = lambda data, field=field, value=value: dict(
+                data, packages=[dict(data['packages'][0], **{field: value})] + data['packages'][1:])
+        for fault in ('empty', 'invalid-json', *faults):
             with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
                 base = Path(tmp)
                 safety.ReleaseTests().fixture(base)
                 prepare(base)
-                custom = base / '.custom-revisions.tsv'
-                lines = custom.read_text().splitlines()
-                if fault == 'empty': custom.write_text('')
-                if fault == 'missing-row': custom.write_text('\n'.join(lines[:-1]) + '\n')
-                if fault == 'duplicate': custom.write_text('\n'.join([lines[0], lines[0], lines[2]]) + '\n')
-                if fault == 'bad-sha': custom.write_text(custom.read_text().replace('a' * 40, 'not-a-sha', 1))
-                if fault == 'blank-row': custom.write_text(custom.read_text() + '\n')
+                provenance = base / '.external-packages/provenance.json'
+                if fault == 'empty': provenance.write_text('')
+                elif fault == 'invalid-json': provenance.write_text('{')
+                else: provenance.write_text(json.dumps(faults[fault](external_provenance_fixture())))
                 # Source/feed identities are read from Git, not a duplicate text log.
                 result = subprocess.run(['python3', str(ROOT / 'scripts/build_record.py'), tmp,
                                          str(base / 'record')], capture_output=True, text=True)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertTrue(json.loads((base / 'record/diagnostics.json').read_text())['errors'])
+                self.assertTrue(any('External package provenance invalid:' in error for error in
+                                    json.loads((base / 'record/diagnostics.json').read_text())['errors']))
                 self.assertTrue((base / 'record/sha256sums').read_text())
                 self.assertEqual((base / 'record/final.config').read_bytes(), (base / '.config').read_bytes())
+                record = json.loads((base / 'record/build.json').read_text())
+                self.assertIsNone(record['external_packages'])
+                self.assertEqual(record['custom_sources'], [])
+                self.assertEqual({r['name'] for r in json.loads((base / 'record/revisions.json').read_text())},
+                                 {'source', 'feed/packages'})
+                if fault != 'empty':
+                    self.assertEqual((base / 'record/external-packages.json').read_bytes(), provenance.read_bytes())
 
     def test_copy_errors_retain_later_evidence(self):
-        for collision in ('final.config', 'targets'):
+        for collision in ('final.config', 'targets', 'external-packages.json'):
             with self.subTest(collision=collision), tempfile.TemporaryDirectory() as tmp:
                 base = Path(tmp)
                 output, _ = safety.ReleaseTests().fixture(base)
                 prepare(base)
                 record = base / 'record'
                 record.mkdir()
-                if collision == 'final.config':
+                if collision in ('final.config', 'external-packages.json'):
                     (record / collision).mkdir()
                 else:
                     (record / collision).write_text('not a directory')
@@ -102,8 +148,11 @@ class BuildRecordTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 errors = json.loads((record / 'diagnostics.json').read_text())['errors']
                 self.assertTrue(any('Copy failed:' in error for error in errors))
-                self.assertEqual((record / 'custom-revisions.tsv').read_bytes(),
-                                 (base / '.custom-revisions.tsv').read_bytes())
+                if collision != 'external-packages.json':
+                    self.assertEqual((record / 'external-packages.json').read_bytes(),
+                                     (base / '.external-packages/provenance.json').read_bytes())
+                self.assertEqual(json.loads((record / 'build.json').read_text())['external_packages'],
+                                 external_provenance_fixture())
                 self.assertIn(hashlib.sha256((output / IMAGE).read_bytes()).hexdigest(),
                               (record / 'sha256sums').read_text())
 

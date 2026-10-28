@@ -20,13 +20,33 @@ CONFIG_LUCI_LANG_zh_Hans=y
 # 概览温度采集及既有三无线传感器修正
 CONFIG_PACKAGE_autocore=y
 
-# 指定应用；sing-box、ttyd、etherwake 等依赖由包配方提供
+# 本地编译应用；ttyd、etherwake 等依赖由包配方提供
 CONFIG_PACKAGE_luci-app-advanced-reboot=y
-CONFIG_PACKAGE_luci-app-aurora-config=y
-CONFIG_PACKAGE_luci-app-homeproxy=y
 CONFIG_PACKAGE_luci-app-ttyd=y
 CONFIG_PACKAGE_luci-app-wol=y
-CONFIG_PACKAGE_luci-theme-aurora=y
+
+# Honk 与 Aurora 使用官方签名 APK 预装，不选择外部源码包
+# 外部 APK 所需的本地运行库、内核模块与规则数据
+CONFIG_PACKAGE_libstdcpp=y
+CONFIG_PACKAGE_kmod-veth=y
+CONFIG_PACKAGE_kmod-sched-core=y
+CONFIG_PACKAGE_kmod-sched-bpf=y
+CONFIG_PACKAGE_kmod-nft-core=y
+CONFIG_PACKAGE_kmod-nft-queue=y
+CONFIG_PACKAGE_kmod-nfnetlink-queue=y
+CONFIG_PACKAGE_kmod-nf-conntrack=y
+CONFIG_PACKAGE_v2ray-geoip=y
+CONFIG_PACKAGE_v2ray-geosite=y
+
+# Honk eBPF CO-RE、cgroup 与网络命名空间支持
+# BPF / BPF_JIT / BPF_SYSCALL 沿用官方 generic 内核配置
+CONFIG_KERNEL_DEBUG_INFO=y
+CONFIG_KERNEL_DEBUG_INFO_BTF=y
+# CONFIG_KERNEL_DEBUG_INFO_REDUCED is not set
+CONFIG_KERNEL_CGROUPS=y
+CONFIG_KERNEL_CGROUP_BPF=y
+CONFIG_KERNEL_NAMESPACES=y
+CONFIG_KERNEL_NET_NS=y
 
 # 明确排除，不继承旧项目其他软件包取舍
 CONFIG_PACKAGE_luci-app-attendedsysupgrade=n
