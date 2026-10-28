@@ -3,9 +3,9 @@ name: MX4200 ImmortalWrt Builds
 on:
   workflow_dispatch:
 
-  # GitHub Actions uses UTC; weekly Sunday 00:00 Hong Kong time = Saturday 16:00 UTC.
+  # Daily check at 12:00 Hong Kong time (04:00 UTC); build every three days.
   schedule:
-    - cron: '0 16 * * 6'
+    - cron: '0 4 * * *'
 concurrency:
   group: mx4200-build
   cancel-in-progress: false
@@ -13,7 +13,33 @@ permissions:
   actions: write
   contents: write
 jobs:
+  schedule:
+    name: Check build schedule
+    runs-on: ubuntu-24.04-arm
+    permissions: {}
+    outputs:
+      build: ${{ steps.due.outputs.build }}
+    steps:
+    - name: Check three-day interval
+      id: due
+      run: |
+        python3 - <<'PY'
+        from datetime import date, datetime
+        from pathlib import Path
+        from zoneinfo import ZoneInfo
+        import os
+
+        today = datetime.now(ZoneInfo('Asia/Hong_Kong')).date()
+        anchor = date(2026, 10, 29)
+        due = (today - anchor).days
+        build = os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch' or (due >= 0 and due % 3 == 0)
+        with Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
+            output.write(f'build={str(build).lower()}\n')
+        PY
+
   build:
+    needs: schedule
+    if: needs.schedule.outputs.build == 'true'
     name: MX4200 Build firmware
     runs-on: ubuntu-24.04-arm
     env:
