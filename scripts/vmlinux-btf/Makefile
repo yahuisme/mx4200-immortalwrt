@@ -91,7 +91,8 @@ define Build/Compile
 		$(TARGET_CROSS)objcopy --dump-section .BTF=$(PKG_BUILD_DIR)/vmlinux-btf $(PKG_BUILD_DIR)/shadow_btf.o; \
 	fi
 	test -s $(PKG_BUILD_DIR)/vmlinux-btf
-	$(BTF_PAHOLE) -C sk_buff $(PKG_BUILD_DIR)/shadow_btf.o >/dev/null
+	$(BTF_PAHOLE) -F btf -C sk_buff $(PKG_BUILD_DIR)/vmlinux-btf >$(PKG_BUILD_DIR)/sk_buff.layout
+	grep -q '^struct sk_buff {' $(PKG_BUILD_DIR)/sk_buff.layout
 endef
 
 define Package/vmlinux-btf/install

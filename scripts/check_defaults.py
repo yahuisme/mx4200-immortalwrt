@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reject unavailable per-device default packages after make defconfig."""
+"""Reject unavailable device defaults and lost explicit requests after defconfig."""
 from pathlib import Path
 import re
 import sys
@@ -30,10 +30,16 @@ def check(config, packageinfo, requested=""):
     missing = [package for package in defaults if package not in available]
     if missing:
         raise ValueError('unavailable device default packages: ' + ', '.join(missing))
-    for package, wanted in re.findall(r'^CONFIG_PACKAGE_([^=]+)=([yn])$', requested, re.M):
-        actual = values.get('PACKAGE_' + package, 'n')
-        if (wanted == 'y' and actual != 'y') or (wanted == 'n' and actual != 'n'):
-            raise ValueError(f'explicit package selection mismatch: {package} wanted {wanted}, got {actual}')
+    selections = dict(re.findall(r'^CONFIG_([^=\s]+)=(.*)$', requested, re.M))
+    selections.update((symbol, 'n') for symbol in re.findall(
+        r'^# CONFIG_(\S+) is not set$', requested, re.M))
+    for symbol, wanted in selections.items():
+        # Kconfig represents false both as an unset comment and as absence.
+        actual = values.get(symbol, 'n' if wanted == 'n' else '<unset>')
+        if actual != wanted:
+            kind = 'package' if symbol.startswith('PACKAGE_') else 'config'
+            name = symbol.removeprefix('PACKAGE_')
+            raise ValueError(f'explicit {kind} selection mismatch: {name} wanted {wanted}, got {actual}')
     return defaults
 
 

@@ -39,6 +39,38 @@ class DefaultPackageTests(unittest.TestCase):
         absent = re.sub(r'^CONFIG_PACKAGE_([^=]+)=n$', '', config, flags=re.M)
         check(absent, '', requested)
 
+    def test_explicit_non_package_recipe_symbols_survive_defconfig(self):
+        requested = (Path(__file__).resolve().parents[1] / 'user/default/config.diff').read_text()
+        config = 'CONFIG_MODULE_DEFAULT_driver=y\nCONFIG_PACKAGE_driver=m\n' + requested
+        check(config, '', requested)
+        rows = re.findall(r'^CONFIG_(?!PACKAGE_)([^=]+)=(.*)$', requested, re.M)
+        rows += [(symbol, 'n') for symbol in re.findall(
+            r'^# CONFIG_(?!PACKAGE_)(\S+) is not set$', requested, re.M)]
+        for symbol, wanted in rows:
+            original = (f'# CONFIG_{symbol} is not set' if
+                        f'# CONFIG_{symbol} is not set' in requested else f'CONFIG_{symbol}={wanted}')
+            for actual in (('m', 'n', '') if wanted == 'y' else
+                           ('y', 'm') if wanted == 'n' else ('"wrong"', '')):
+                with self.subTest(symbol=symbol, wanted=wanted, actual=actual):
+                    broken = config.replace(original, f'CONFIG_{symbol}={actual}' if actual else '')
+                    with self.assertRaisesRegex(ValueError, re.escape(symbol)):
+                        check(broken, '', requested)
+            if wanted == 'n':
+                check(config.replace(original, f'# CONFIG_{symbol} is not set'), '', requested)
+                check(config.replace(original, ''), '', requested)
+
+    def test_requested_module_and_commented_package_exclusion(self):
+        config = ('CONFIG_MODULE_DEFAULT_driver=y\nCONFIG_PACKAGE_driver=m\n'
+                  'CONFIG_PACKAGE_optional=m\n')
+        requested = 'CONFIG_PACKAGE_optional=m\n# CONFIG_PACKAGE_excluded is not set\n'
+        check(config, '', requested)
+        for actual in ('y', 'n', ''):
+            with self.subTest(actual=actual), self.assertRaisesRegex(ValueError, 'optional'):
+                check(config.replace('CONFIG_PACKAGE_optional=m',
+                                     f'CONFIG_PACKAGE_optional={actual}' if actual else ''), '', requested)
+        with self.assertRaisesRegex(ValueError, 'excluded'):
+            check(config + 'CONFIG_PACKAGE_excluded=m\n', '', requested)
+
     def test_usteer_is_rejected_without_recipe_exclusions(self):
         # Package policy is checked on the resolved config, not on optional
         # historical '=n' lines in config.diff. Both built-in and module fail.
@@ -77,12 +109,24 @@ class DefaultPackageTests(unittest.TestCase):
             (build / 'tmp').mkdir()
             (build / 'tmp/.packageinfo').write_text('')
             config = 'CONFIG_MODULE_DEFAULT_driver=y\nCONFIG_PACKAGE_driver=m\n' + requested
-            for fault in ('', 'missing-app', 'excluded-module'):
+            for fault in ('', 'missing-app', 'excluded-module', 'missing-v2',
+                          'missing-rootfs', 'missing-cgroup', 'embedded-btf'):
                 broken = config
                 if fault == 'missing-app':
                     broken = broken.replace('CONFIG_PACKAGE_luci-app-ttyd=y', '')
                 if fault == 'excluded-module':
                     broken += '\nCONFIG_PACKAGE_usteer=m\n'
+                    self.assertNotEqual(broken, config)
+                for name, symbol in (
+                        ('missing-v2', 'TARGET_DEVICE_qualcommax_ipq807x_DEVICE_linksys_mx4200v2'),
+                        ('missing-rootfs', 'TARGET_PER_DEVICE_ROOTFS'),
+                        ('missing-cgroup', 'KERNEL_CGROUP_BPF')):
+                    if fault == name:
+                        broken = broken.replace(f'CONFIG_{symbol}=y', '')
+                        self.assertNotEqual(broken, config)
+                if fault == 'embedded-btf':
+                    broken = broken.replace('# CONFIG_KERNEL_DEBUG_INFO_BTF is not set',
+                                            'CONFIG_KERNEL_DEBUG_INFO_BTF=y')
                     self.assertNotEqual(broken, config)
                 (build / '.config').write_text(broken)
                 result = subprocess.run(['bash', '-ec', command], cwd=build,

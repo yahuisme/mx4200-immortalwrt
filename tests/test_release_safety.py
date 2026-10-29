@@ -81,7 +81,8 @@ class ReleaseTests(unittest.TestCase):
                     self.assertFalse((base/'firmware').exists(),result.stdout+result.stderr)
 
     def test_own_main_freshness_before_create_and_prune(self):
-        cases=('fresh','stale','error','empty','malformed','advance','recheck-error','create-error','verify-error')
+        cases=('fresh','annotated','stale','error','empty','malformed','advance','recheck-error',
+               'create-error','verify-error','title-error','tag-error','tag-ref-error')
         for case in cases:
             with self.subTest(case=case), tempfile.TemporaryDirectory() as tmp:
                 base=Path(tmp); self.fixture(base)
@@ -102,7 +103,14 @@ elif a[:2]==['release','create']:
 elif a[0]=='api' and '/releases/tags/' in a[1]:
     if mode=='verify-error': sys.exit(23)
     assets=[dict(name=p.name,size=p.stat().st_size,state='uploaded',digest='sha256:'+hashlib.sha256(p.read_bytes()).hexdigest()) for p in (root/'firmware').glob('*.bin')]
-    print(json.dumps(dict(tag_name=(root/'firmware/version.txt').read_text().strip(),draft=False,prerelease=False,assets=assets)))
+    tag=(root/'firmware/version.txt').read_text().strip()
+    print(json.dumps(dict(tag_name=tag,name='wrong' if mode=='title-error' else tag,target_commitish=os.environ['GITHUB_SHA'],draft=False,prerelease=False,assets=assets)))
+elif a[0]=='api' and '/git/ref/tags/' in a[1]:
+    if mode=='tag-ref-error': sys.exit(29)
+    print(json.dumps(dict(object=dict(type='tag' if mode=='annotated' else 'commit',
+                                     sha='c'*40 if mode=='annotated' else 'b'*40 if mode=='tag-error' else os.environ['GITHUB_SHA']))))
+elif a[:2]==['api','repos/yahuisme/mx4200-immortalwrt/git/tags/'+'c'*40]:
+    print(json.dumps(dict(object=dict(type='commit',sha=os.environ['GITHUB_SHA']))))
 elif a==['api','--paginate','--slurp','repos/yahuisme/mx4200-immortalwrt/releases?per_page=100']:
     current=(root/'firmware/version.txt').read_text().strip()
     print(json.dumps([[dict(tag_name=t,id=i,published_at=str(i),draft=False,prerelease=False) for i,t in enumerate(['MX4200-ImmortalWrt-old','MX4200-ImmortalWrt-previous',current],1)]]))
@@ -115,12 +123,18 @@ elif a[:2]!=['release','delete']: sys.exit(99)
                 gates=[a for a in calls if a[:2]==['api','repos/yahuisme/mx4200-immortalwrt/git/ref/heads/main']]
                 creates=[a for a in calls if a[:2]==['release','create']]
                 deletes=[a for a in calls if a[:2]==['release','delete']]
-                self.assertEqual(result.returncode==0,case in ('fresh','stale','advance'),result.stderr)
-                self.assertEqual(bool(creates),case in ('fresh','advance','recheck-error','create-error','verify-error'))
-                self.assertEqual(len(gates),2 if case in ('fresh','advance','recheck-error') else 1)
+                self.assertEqual(result.returncode==0,case in ('fresh','annotated','stale','advance'),result.stderr)
+                self.assertEqual(bool(creates),case in ('fresh','annotated','advance','recheck-error',
+                                                       'create-error','verify-error','title-error',
+                                                       'tag-error','tag-ref-error'))
+                self.assertEqual(len(gates),2 if case in ('fresh','annotated','advance','recheck-error') else 1)
+                tag=(base/'firmware/version.txt').read_text().strip()
+                tag_refs=[a for a in calls if a[:2]==['api','repos/yahuisme/mx4200-immortalwrt/git/ref/tags/'+tag]]
+                self.assertEqual(len(tag_refs),1 if case in ('fresh','annotated','advance','recheck-error',
+                                                            'tag-error','tag-ref-error') else 0)
                 self.assertEqual([a[2] for a in deletes],
                                  ['MX4200-ImmortalWrt-old', 'MX4200-ImmortalWrt-previous']
-                                 if case == 'fresh' else [])
+                                 if case in ('fresh','annotated') else [])
                 if creates:
                     self.assertEqual(creates[0][creates[0].index('--target')+1],'a'*40)
                 self.assertTrue(all('immortalwrt/immortalwrt' not in ' '.join(a) for a in calls))

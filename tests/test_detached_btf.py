@@ -16,6 +16,51 @@ def helper():
 
 
 class DetachedBtfTests(unittest.TestCase):
+    def test_recipe_validates_detached_blob_with_real_pahole(self):
+        import os
+        import shlex
+        import shutil
+        import subprocess
+        pahole = os.environ.get('MX_PAHOLE') or shutil.which('pahole')
+        self.assertTrue(pahole, 'set MX_PAHOLE to a verified prebuilt pahole')
+        assert pahole
+        source = Path(os.environ.get('MX_RAW_BTF', '/sys/kernel/btf/vmlinux'))
+        self.assertTrue(source.is_file(), 'provide existing raw BTF, not a compiled test stub')
+        recipe = (ROOT / 'scripts/vmlinux-btf/Makefile').read_text()
+        command = recipe.split('\ttest -s $(PKG_BUILD_DIR)/vmlinux-btf\n', 1)[1].split('\nendef', 1)[0]
+        command = 'set -e\n' + command
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            blob = root / 'vmlinux-btf'
+            shutil.copyfile(source, blob)
+            # An unrelated prebuilt ELF deliberately has no embedded .BTF.
+            shutil.copyfile('/usr/bin/true', root / 'shadow_btf.o')
+            command = command.replace('$(BTF_PAHOLE)', shlex.quote(pahole)).replace(
+                '$(PKG_BUILD_DIR)', shlex.quote(str(root)))
+            result = subprocess.run(['sh', '-c', command], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            # Exercise the real install body without target compilation.
+            install = recipe.split('define Package/vmlinux-btf/install\n', 1)[1].split('\nendef', 1)[0]
+            install = install.replace('$(INSTALL_DIR)', 'install -d -m0755').replace(
+                '$(INSTALL_DATA)', 'install -m0644').replace('$(LN)', 'ln -sf').replace(
+                '$(1)', str(root / 'image')).replace('$(PKG_BUILD_DIR)', str(root)).replace(
+                '$(KERNEL_RELEASE)', '6.12.103')
+            result = subprocess.run(['sh', '-ec', install], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            target = root / 'image/usr/lib/debug/boot/vmlinux'
+            self.assertEqual(blob.read_bytes(), target.read_bytes())
+            self.assertEqual((target.parent / 'vmlinux-6.12.103').readlink(), Path('vmlinux'))
+            # A nonempty corrupt file must not pass simply because test -s does.
+            blob.write_bytes(b'not raw BTF')
+            result = subprocess.run(['sh', '-c', command], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            # Parsing a valid blob without the required type must also fail.
+            data = source.read_bytes()
+            self.assertIn(b'sk_buff\0', data)
+            blob.write_bytes(data.replace(b'sk_buff\0', b'sk_buxx\0'))
+            result = subprocess.run(['sh', '-c', command], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+
     def test_builder_supplies_working_pahole(self):
         import re
         dockerfile = (ROOT / 'docker/Dockerfile').read_text()

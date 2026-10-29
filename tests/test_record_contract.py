@@ -139,14 +139,15 @@ class RecordContract(unittest.TestCase):
     def test_readback_contract(self):
         helper = module('verify_release')
         for fault in ('ok', 'missing', 'extra', 'duplicate', 'name', 'size', 'state', 'digest',
-                      'tag', 'draft', 'prerelease', 'download', 'download-wrong', 'download-failure'):
+                      'tag', 'title', 'missing-title', 'draft', 'prerelease',
+                      'download', 'download-wrong', 'download-failure'):
             with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
                 base = Path(tmp)
                 profile, paths = self.fixture(base)
                 digest = 'sha256:' + hashlib.sha256(b'fixture image').hexdigest()
                 assets = [dict(id=i, name=p.name, size=p.stat().st_size, state='uploaded', digest=digest)
                           for i, p in enumerate(paths, 1)]
-                release = dict(tag_name='tag/a', draft=False, prerelease=False, assets=assets)
+                release = dict(tag_name='tag/a', name='tag/a', draft=False, prerelease=False, assets=assets)
                 if fault == 'missing': assets.pop()
                 if fault == 'extra': assets.append(dict(assets[0], name='extra'))
                 if fault == 'duplicate': assets.append(dict(assets[0]))
@@ -155,6 +156,8 @@ class RecordContract(unittest.TestCase):
                 if fault == 'state': assets[0]['state'] = 'new'
                 if fault == 'digest': assets[0]['digest'] = 'sha256:' + '0' * 64
                 if fault == 'tag': release['tag_name'] = 'wrong'
+                if fault == 'title': release['name'] = 'wrong'
+                if fault == 'missing-title': release.pop('name')
                 if fault in ('draft', 'prerelease'): release[fault] = True
                 if fault.startswith('download'):
                     for asset in assets: asset.pop('digest')
@@ -165,16 +168,115 @@ class RecordContract(unittest.TestCase):
                         return self
                     def __exit__(self, *args): self.stdout.close()
                     def wait(self): return 17 if fault == 'download-failure' else 0
-                with patch.dict(os.environ, GITHUB_REPOSITORY='fixture/repo'), \
-                     patch.object(helper.subprocess, 'check_output', return_value=json.dumps(release).encode()) as api, \
+                def response(args):
+                    endpoint = args[-1]
+                    if endpoint == 'repos/fixture/repo/releases/tags/tag%2Fa':
+                        return json.dumps(release).encode()
+                    if endpoint == 'repos/fixture/repo/git/ref/tags/tag%2Fa':
+                        return json.dumps(dict(object=dict(type='commit', sha='a' * 40))).encode()
+                    raise AssertionError('Unexpected API call: ' + repr(args))
+                with patch.dict(os.environ, GITHUB_REPOSITORY='fixture/repo', GITHUB_SHA='a' * 40), \
+                     patch.object(helper.subprocess, 'check_output', side_effect=response) as api, \
                      patch.object(helper.subprocess, 'Popen', side_effect=lambda *a, **k: Download()) as download, \
                      contextlib.redirect_stdout(io.StringIO()):
                     if fault in ('ok', 'download'):
                         helper.verify('tag/a', paths)
-                        self.assertIn('/tags/tag%2Fa', api.call_args[0][0][-1])
+                        self.assertIn('repos/fixture/repo/releases/tags/tag%2Fa',
+                                      [call.args[0][-1] for call in api.call_args_list])
                         self.assertEqual(download.call_count, len(paths) if fault == 'download' else 0)
                     else:
                         with self.assertRaises(ValueError): helper.verify('tag/a', paths)
+
+    def test_actual_tag_commit_must_match_workflow_sha(self):
+        helper = module('verify_release')
+        with tempfile.TemporaryDirectory() as tmp:
+            _, paths = self.fixture(Path(tmp))
+            release = dict(tag_name='tag/a', name='tag/a', target_commitish='a' * 40,
+                           draft=False, prerelease=False, assets=[
+                               dict(name=p.name, size=p.stat().st_size, state='uploaded',
+                                    digest='sha256:' + hashlib.sha256(p.read_bytes()).hexdigest())
+                               for p in paths])
+            for actual in ('a' * 40, 'b' * 40, None, ''):
+                with self.subTest(actual=actual):
+                    responses = {
+                        'repos/fixture/repo/releases/tags/tag%2Fa': release,
+                        'repos/fixture/repo/git/ref/tags/tag%2Fa':
+                            dict(object=dict(type='commit', sha=actual)),
+                    }
+                    with patch.dict(os.environ, GITHUB_REPOSITORY='fixture/repo', GITHUB_SHA='a' * 40), \
+                         patch.object(helper.subprocess, 'check_output', side_effect=
+                                      lambda args: json.dumps(responses[args[-1]]).encode()) as api, \
+                         contextlib.redirect_stdout(io.StringIO()):
+                        if actual == 'a' * 40:
+                            helper.verify('tag/a', paths)
+                            self.assertIn('repos/fixture/repo/git/ref/tags/tag%2Fa',
+                                          [call.args[0][-1] for call in api.call_args_list])
+                        else:
+                            with self.assertRaises(ValueError): helper.verify('tag/a', paths)
+
+    def test_annotated_tags_resolve_to_workflow_commit(self):
+        helper = module('verify_release')
+        with tempfile.TemporaryDirectory() as tmp:
+            _, paths = self.fixture(Path(tmp))
+            release = dict(tag_name='tag/a', name='tag/a', target_commitish='main',
+                           draft=False, prerelease=False, assets=[
+                               dict(name=p.name, size=p.stat().st_size, state='uploaded',
+                                    digest='sha256:' + hashlib.sha256(p.read_bytes()).hexdigest())
+                               for p in paths])
+            for fault in ('ok', 'mismatch', 'cycle', 'too-deep', 'missing', 'tree',
+                          'malformed-sha', 'numeric-sha'):
+                with self.subTest(fault=fault):
+                    first, second = 'b' * 40, 'c' * 40
+                    targets: dict = {
+                        first: dict(object=dict(type='tag', sha=second)),
+                        second: dict(object=dict(type='commit', sha='a' * 40)),
+                    }
+                    if fault == 'mismatch': targets[second]['object']['sha'] = 'd' * 40
+                    if fault == 'cycle': targets[second]['object'] = dict(type='tag', sha=first)
+                    if fault == 'missing': targets[second] = {}
+                    if fault == 'tree': targets[second]['object']['type'] = 'tree'
+                    if fault == 'malformed-sha': targets[first]['object']['sha'] = '../not-a-sha'
+                    if fault == 'numeric-sha': targets[first] = dict(object=dict(type='tag', sha=int('1' * 40)))
+                    def response(args):
+                        endpoint = args[-1]
+                        if endpoint == 'repos/fixture/repo/releases/tags/tag%2Fa':
+                            return json.dumps(release).encode()
+                        if endpoint == 'repos/fixture/repo/git/ref/tags/tag%2Fa':
+                            return json.dumps(dict(object=dict(type='tag', sha=first))).encode()
+                        prefix = 'repos/fixture/repo/git/tags/'
+                        if endpoint.startswith(prefix):
+                            sha = endpoint[len(prefix):]
+                            if fault == 'too-deep':
+                                # Distinct valid objects never reaching a commit must stop.
+                                self.assertLess(api.call_count, 20)
+                                value = dict(object=dict(type='tag', sha=f'{int(sha, 16) + 1:040x}'))
+                            else:
+                                value = targets[sha]
+                            return json.dumps(value).encode()
+                        raise AssertionError('Unexpected API call: ' + repr(args))
+                    with patch.dict(os.environ, GITHUB_REPOSITORY='fixture/repo', GITHUB_SHA='a' * 40), \
+                         patch.object(helper.subprocess, 'check_output', side_effect=response) as api, \
+                         contextlib.redirect_stdout(io.StringIO()):
+                        if fault == 'ok':
+                            helper.verify('tag/a', paths)
+                            self.assertEqual(api.call_count, 4)
+                        else:
+                            with self.assertRaises(ValueError): helper.verify('tag/a', paths)
+
+    def test_workflow_sha_is_explicit_full_hex_before_api(self):
+        helper = module('verify_release')
+        with tempfile.TemporaryDirectory() as tmp:
+            _, paths = self.fixture(Path(tmp))
+            for sha in (None, '', 'main', 'a' * 39, 'a' * 41, 'g' * 40, 'a' * 40 + '\n'):
+                with self.subTest(sha=sha), patch.dict(os.environ, GITHUB_REPOSITORY='fixture/repo'), \
+                     patch.object(helper.subprocess, 'check_output',
+                                  side_effect=AssertionError('API called before SHA validation')) as api:
+                    if sha is None:
+                        os.environ.pop('GITHUB_SHA', None)
+                    else:
+                        os.environ['GITHUB_SHA'] = sha
+                    with self.assertRaises(ValueError): helper.verify('tag/a', paths)
+                    api.assert_not_called()
 
     def test_local_release_set_rejected_before_api(self):
         helper = module('verify_release')

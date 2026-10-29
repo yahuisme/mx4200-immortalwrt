@@ -22,6 +22,11 @@ if a[:2] == ['release', 'create']:
 elif a[0] == 'api':
     if a[1] == 'repos/fixture/repo/git/ref/heads/main':
         print(os.environ['GITHUB_SHA']); sys.exit(0)
+    if '/git/ref/tags/' in a[1]:
+        if os.environ['FAULT'] == 'tag-ref': sys.exit(8)
+        print(json.dumps(dict(object=dict(type='commit', sha='b' * 40
+                         if os.environ['FAULT'] == 'tag-sha' else os.environ['GITHUB_SHA']))))
+        sys.exit(0)
     if '/releases/assets/' in a[1]:
         assert a[2:] == ['-H', 'Accept: application/octet-stream']
         fault = os.environ['FAULT']
@@ -45,6 +50,7 @@ elif a[0] == 'api':
         if fault in ('no-digest', 'download-corrupt', 'download-failed'):
             for asset in assets: asset.pop('digest')
         print(json.dumps(dict(tag_name='wrong' if fault == 'tag' else os.environ['WRT_RELEASE_NAME'],
+                              name='wrong' if fault == 'title' else os.environ['WRT_RELEASE_NAME'],
                               draft=fault == 'draft', prerelease=fault == 'prerelease', assets=assets)))
         sys.exit(0)
     assert '--paginate' in a and '--slurp' in a
@@ -75,13 +81,13 @@ class ReleaseRetention(unittest.TestCase):
                     (p / f'immortalwrt-qualcommax-ipq807x-linksys_{device}-squashfs-{kind}.bin').write_bytes(b'fixture image')
             env = dict(os.environ, PATH=d + ':' + os.environ['PATH'], IMAGES=d,
                        CALLS=str(p / 'calls'), ROWS=str(p / 'rows'), FAULT=fault,
-                       WRT_RELEASE_NAME='MX4200-ImmortalWrt-current', WRT_RELEASE_TITLE='fixture',
+                       WRT_RELEASE_NAME='MX4200-ImmortalWrt-current', WRT_RELEASE_TITLE='MX4200-ImmortalWrt-current',
                        GITHUB_SHA='a' * 40, GITHUB_REPOSITORY='fixture/repo', RELEASE_NOTES='fixture')
             (p / 'firmware').mkdir()
             for image in p.glob('*.bin'): image.rename(p / 'firmware' / image.name)
             env['IMAGES'] = str(p / 'firmware')
             (p / 'firmware/version.txt').write_text('MX4200-ImmortalWrt-current')
-            (p / 'firmware/title.txt').write_text('fixture')
+            (p / 'firmware/title.txt').write_text('MX4200-ImmortalWrt-current')
             (p / 'firmware/release-notes.md').write_text('fixture')
             (p / 'scripts').symlink_to(ROOT / 'scripts')
             code = CODE
@@ -93,7 +99,7 @@ class ReleaseRetention(unittest.TestCase):
     def test_readback_failures_protect_old_releases(self):
         pages = [[row('MX4200-ImmortalWrt-current', 10), row('MX4200-ImmortalWrt-previous', 9), row('MX4200-ImmortalWrt-old', 1)]]
         for fault in ('readback', 'malformed', 'missing', 'extra', 'name', 'duplicate',
-                      'size', 'state', 'digest', 'tag', 'draft', 'prerelease',
+                      'size', 'state', 'digest', 'tag', 'title', 'tag-sha', 'tag-ref', 'draft', 'prerelease',
                       'download-corrupt', 'download-failed'):
             with self.subTest(fault=fault):
                 result, deleted = self.replay(pages, fault)
