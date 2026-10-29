@@ -20,13 +20,13 @@
 
 | 插件 | 功能说明 |
 | --- | --- |
-| [Nikki](https://github.com/nikkinikki-org/OpenWrt-nikki) | 基于 Mihomo 的代理客户端，含中文 LuCI 管理界面 |
+| [Nikki](https://github.com/nikkinikki-org/OpenWrt-nikki) | 基于 Mihomo 的代理客户端 |
 | Aurora 配置 | 主题设置 |
 | 高级重启 | 双分区重启切换 |
 | 网络唤醒 | 唤醒局域网设备 |
 | 网页终端 | 浏览器终端访问 |
 
-Nikki、Mihomo 稳定版（`mihomo-meta`）、Aurora 主题及配置插件使用各自官方 APK 软件源，每次构建获取源内最新版本，并预置签名公钥与更新源。后续可在 **系统 → 软件包** 刷新列表并更新。Nikki 默认停用，需自行导入配置或订阅后启用；不预装 Honk 或 HomeProxy。
+Nikki、Mihomo 稳定版（`mihomo-meta`）、Aurora 主题及配置插件使用各自官方 APK 软件源，每次构建获取源内最新版本，并预置签名公钥与更新源。后续可在 **系统 → 软件包** 刷新列表并更新。Nikki 默认停用，需自行导入配置或订阅后启用。
 
 ## 默认设置
 
