@@ -12,7 +12,7 @@
 ## 功能
 
 - 中文 LuCI 与 Aurora 主题。
-- Nikki 代理管理界面与 Mihomo 核心（默认停用，需自行配置后启用）。
+- Nikki 代理管理界面与 Mihomo 核心。
 - 设备驱动及基础 USB 支持沿用官方默认。
 - 三频 Wi-Fi，默认开启 2.4 GHz 与 5.8 GHz。
 
