@@ -90,9 +90,9 @@ class ExternalPackageTests(unittest.TestCase):
                 if name == 'index':
                     path.write_bytes(original)
             repositories['eamonxg']['key'] = (fixture / 'keys/eamonxg.pem').as_uri()
-            honk = next((root / 'source-daeuniverse').glob('honk-*.apk'))
-            saved = honk.read_bytes()
-            honk.write_bytes(saved[:-5] + b'xxxxx')
+            package = next((root / 'source-nikki').glob('nikki-*.apk'))
+            saved = package.read_bytes()
+            package.write_bytes(saved[:-5] + b'xxxxx')
             with self.assertRaises((ValueError, subprocess.CalledProcessError)):
                 module.snapshot(root, apk, repositories)
             self.assertFalse((root / '.external-packages/provenance.json').exists())
@@ -113,8 +113,8 @@ class ExternalPackageTests(unittest.TestCase):
                             for tag, repo in module.REPOSITORIES.items()}
             module.snapshot(root, fixture / 'apk-wrapper', repositories)
             image = root / 'rootfs'
-            pristine = os.environ.get('MX_BTF_ROOT_FIXTURE')
-            self.assertTrue(pristine, 'set MX_BTF_ROOT_FIXTURE to the isolated APK root fixture')
+            pristine = os.environ.get('MX_NIKKI_ROOT_FIXTURE')
+            self.assertTrue(pristine, 'set MX_NIKKI_ROOT_FIXTURE to the isolated APK root fixture')
             assert pristine
             shutil.copytree(pristine, image, symlinks=True,
                             ignore=shutil.ignore_patterns('dev', 'proc', 'sys'))
@@ -135,9 +135,9 @@ class ExternalPackageTests(unittest.TestCase):
                 target = root / ('device-' + device)
                 shutil.copytree(image, target, symlinks=True)
                 device_command = [str(target) if arg == str(image) else arg for arg in command]
-                subprocess.run(device_command + ['del', 'luci-i18n-daeuniverse-zh-cn'],
+                subprocess.run(device_command + ['del', 'luci-i18n-nikki-zh-cn'],
                                check=True, capture_output=True, text=True)
-                subprocess.run(device_command + ['add', 'luci-i18n-daeuniverse-zh-cn@daeuniverse'],
+                subprocess.run(device_command + ['add', 'luci-i18n-nikki-zh-cn@nikki'],
                                check=True, capture_output=True, text=True)
                 module.verify_root(target, root / '.external-packages/provenance.json')
             # These are the exact queries/upgrade shape used by LuCI's backend.
@@ -146,38 +146,47 @@ class ExternalPackageTests(unittest.TestCase):
                          ['query', '--fields', 'all', '--format', 'json', '--available', '*']):
                 result = subprocess.run(query + args, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn('honk', result.stdout)
+                self.assertIn('nikki', result.stdout)
+                self.assertIn('mihomo-meta', result.stdout)
                 self.assertIn('luci-theme-aurora', result.stdout)
-            subprocess.run(command + ['upgrade', '--simulate', 'honk', 'luci-theme-aurora'],
+            subprocess.run(command + ['upgrade', '--simulate', 'nikki', 'mihomo-meta', 'luci-theme-aurora'],
                            check=True, capture_output=True, text=True)
-            with (image / 'etc/apk/world').open('a') as stream:
-                stream.write('sing-box\n')
-            with self.assertRaisesRegex(ValueError, 'sing-box'):
-                module.verify_root(image, root / '.external-packages/provenance.json')
+            config = (image / 'etc/config/nikki').read_text()
+            self.assertRegex(config, r"config config 'config'\n(?:[^\n]*\n)*?\s+option 'enabled' '0'")
+            self.assertTrue((image / 'usr/share/luci/menu.d/luci-app-nikki.json').is_file())
+            self.assertTrue((image / 'usr/lib/lua/luci/i18n/nikki.zh-cn.lmo').is_file())
+            for name in ('sing-box', 'luci-app-homeproxy', 'honk', 'luci-app-honk',
+                         'luci-lib-daeuniverse', 'vmlinux-btf', 'mihomo-alpha'):
+                with (image / 'etc/apk/world').open('a') as stream:
+                    stream.write(name + '\n')
+                with self.assertRaisesRegex(ValueError, name):
+                    module.verify_root(image, root / '.external-packages/provenance.json')
+                world = image / 'etc/apk/world'
+                world.write_text('\n'.join(world.read_text().splitlines()[:-1]) + '\n')
 
-    def test_missing_kernel_capabilities_fail_before_publication(self):
+    def test_nikki_feed_and_dependency_contract(self):
         module = helper()
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            config = root / 'build_dir/target-aarch64/linux-qualcommax_ipq807x/linux-6.12.103/.config'
-            config.parent.mkdir(parents=True)
-            required = ('BPF', 'BPF_SYSCALL', 'BPF_JIT', 'CGROUPS', 'CGROUP_BPF',
-                        'NET_NS', 'NET_SCHED', 'NET_CLS_ACT', 'NET_XGRESS')
-            good = (''.join('CONFIG_' + symbol + '=y\n' for symbol in required) +
-                    ''.join('CONFIG_' + symbol + '=m\n' for symbol in
-                            ('NF_TABLES', 'NF_TABLES_INET', 'NFT_CT', 'NFT_QUEUE', 'NETFILTER_NETLINK_QUEUE')))
-            for symbol in required:
-                config.write_text(good.replace('CONFIG_' + symbol + '=y', '# CONFIG_' + symbol + ' is not set'))
-                with self.assertRaisesRegex(ValueError, symbol):
-                    module.verify_kernel(root)
-            config.write_text(good)
-            # Header parser fixture only; no kernel was compiled by this test.
-            import struct
-            blob = config.parent.parent / 'vmlinux-btf-6.12.103/vmlinux-btf'
-            blob.parent.mkdir(parents=True)
-            blob.write_bytes(struct.pack('<HBB5I', 0xeb9f, 1, 0, 24, 0, 12, 12, 1) + b'\0' * 13)
-            module.verify_kernel(root)
-
+        self.assertNotIn('daeuniverse', module.REPOSITORIES)
+        self.assertEqual(module.REPOSITORIES['nikki']['packages'],
+                         ['mihomo-meta', 'nikki', 'luci-app-nikki', 'luci-i18n-nikki-zh-cn'])
+        self.assertIn('/openwrt-25.12/aarch64_cortex-a53/nikki', module.REPOSITORIES['nikki']['url'])
+        self.assertFalse((ROOT / 'scripts/vmlinux-btf').exists())
+        self.assertFalse((ROOT / 'user/default/files/etc/honk/config.dae').exists())
+        recipe = (ROOT / 'user/default/config.diff').read_text()
+        self.assertNotIn('CONFIG_KERNEL_CGROUP_BPF=y', recipe)
+        self.assertNotIn('CONFIG_PACKAGE_vmlinux-btf=y', recipe)
+        fixture = os.environ.get('MX_APK_RUNTIME_FIXTURE')
+        self.assertTrue(fixture, 'set MX_APK_RUNTIME_FIXTURE')
+        assert fixture
+        fixture = Path(fixture)
+        index = json.loads(subprocess.check_output(
+            [str(fixture / 'apk-wrapper'), 'adbdump', '--format', 'json',
+             str(fixture / 'nikki-mirror/packages.adb')], text=True))
+        for package in index['packages']:
+            if package['name'] in ('nikki', 'mihomo-meta'):
+                for dependency in package['depends']:
+                    if dependency not in ('libc', 'mihomo'):
+                        self.assertIn('CONFIG_PACKAGE_' + dependency + '=y', recipe)
 
 if __name__ == '__main__':
     unittest.main()

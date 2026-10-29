@@ -12,12 +12,12 @@ import tempfile
 
 
 REPOSITORIES = {
-    'daeuniverse': {
-        'url': 'https://openwrt.daeuniverse.org/25.12/packages/aarch64_cortex-a53',
-        'key': 'https://openwrt.daeuniverse.org/public-key.pem',
-        'key_sha256': '5aae30568b7e08f86ea3e72a19fa281d835ba4eff8ab38849abcd2b0884c6cd5',
-        'packages': ['honk', 'luci-app-honk', 'luci-lib-daeuniverse',
-                     'luci-i18n-daeuniverse-zh-cn'],
+    'nikki': {
+        'url': 'https://nikkinikki.pages.dev/openwrt-25.12/aarch64_cortex-a53/nikki',
+        'key': 'https://nikkinikki.pages.dev/public-key.pem',
+        'key_sha256': '677ef1af372065e2e856175363e2da9471a6c5c6443563b912c8d325bfa1fbad',
+        # Select the stable provider explicitly, not mihomo-alpha.
+        'packages': ['mihomo-meta', 'nikki', 'luci-app-nikki', 'luci-i18n-nikki-zh-cn'],
     },
     'eamonxg': {
         'url': 'https://openwrt.eamonxg.fun/snapshots/apk',
@@ -46,10 +46,6 @@ def put(root, name, text):
 
 def prepare(root):
     root = Path(root).resolve()
-    # This small upstream recipe compiles against this build's kernel headers
-    # and .config; no foreign SDK BTF or enlarged kernel partition is used.
-    recipe = Path(__file__).resolve().parent / 'vmlinux-btf'
-    shutil.copytree(recipe, root / 'package/vmlinux-btf', dirs_exist_ok=True)
     packages = ' '.join(f'{p}@{tag}' for tag, repo in REPOSITORIES.items() for p in repo['packages'])
     repositories = ' '.join('--repository-config "@' + tag + ' file://$(TOPDIR)/.external-packages/' +
                             tag + '/packages.adb"' for tag in REPOSITORIES)
@@ -64,7 +60,6 @@ def prepare(root):
                  '\t--no-network $(MX_EXTERNAL_REPOSITORIES) \\\n')
     replace_once(root / 'package/Makefile',
                  '\t$(call apk,$(TARGET_DIR)) add --no-cache --initdb --no-scripts --arch $(ARCH_PACKAGES) \\\n',
-                 '\tpython3 /cache-scripts/external_packages.py verify-kernel $(TOPDIR)\n'
                  '\tpython3 /cache-scripts/external_packages.py snapshot $(TOPDIR) $(STAGING_DIR_HOST)/bin/apk\n'
                  '\t$(call apk,$(TARGET_DIR)) add --no-cache --initdb --no-scripts --arch $(ARCH_PACKAGES) \\\n')
     replace_once(root / 'package/Makefile',
@@ -77,10 +72,6 @@ def prepare(root):
     # Runtime entries are editable by LuCI and contain no builder paths.
     put(root, 'files/etc/apk/repositories.d/customfeeds.list', ''.join(
         f'@{tag} {repo["url"]}/packages.adb\n' for tag, repo in REPOSITORIES.items()))
-    config = root / 'files/etc/honk/config.dae'
-    if config.is_file():
-        config.parent.chmod(0o700)
-        config.chmod(0o600)
 
 
 def download(url, path):
@@ -179,13 +170,13 @@ def verify_root(root, provenance):
         if 'P' in fields:
             installed[fields['P']] = fields.get('V')
     world = (root / 'etc/apk/world').read_text().splitlines()
-    retired = ('luci-app-homeproxy', 'luci-i18n-homeproxy-zh-cn', 'sing-box')
+    retired = ('luci-app-homeproxy', 'luci-i18n-homeproxy-zh-cn', 'sing-box',
+               'honk', 'honk-go', 'luci-app-honk', 'luci-lib-daeuniverse',
+               'luci-i18n-daeuniverse-zh-cn', 'vmlinux-btf', 'mihomo-alpha')
     for name in retired:
         if name in installed or any(re.split(r'[@=~<>]', line)[0] == name for line in world):
             raise ValueError('Retired proxy package in rootfs: ' + name)
-    if 'vmlinux-btf-builtin' in installed or 'vmlinux-btf' not in installed:
-        raise ValueError('Expected same-build detached BTF package, not built-in BTF provider')
-    verify_btf(root / 'usr/lib/debug/boot/vmlinux')
+
     for row in record['packages']:
         if installed.get(row['name']) != row['version']:
             raise ValueError('Missing or wrong official APK version: ' + row['name'])
@@ -201,39 +192,6 @@ def verify_root(root, provenance):
             raise ValueError('Missing or wrong runtime signing key: ' + feed['name'])
     return installed
 
-def verify_btf(path):
-    import struct
-    path = Path(path)
-    if not path.is_file() or path.is_symlink():
-        raise ValueError('Missing same-build detached BTF: ' + str(path))
-    data = path.read_bytes()
-    if len(data) < 24:
-        raise ValueError('Truncated detached BTF')
-    magic, version, flags, header, types, types_len, strings, strings_len = struct.unpack_from('<HBB5I', data)
-    if (magic != 0xeb9f or version != 1 or flags or header < 24 or not types_len or not strings_len
-            or header + types + types_len > len(data) or header + strings + strings_len > len(data)):
-        raise ValueError('Invalid detached BTF header')
-
-
-def verify_kernel(root):
-    configs = list(Path(root).glob('build_dir/target-*/linux-qualcommax_ipq807x/linux-*/.config'))
-    if len(configs) != 1:
-        raise ValueError('Expected one compiled MX4200 kernel configuration')
-    values = configs[0].read_text().splitlines()
-    for symbol in ('BPF', 'BPF_SYSCALL', 'BPF_JIT', 'CGROUPS', 'CGROUP_BPF',
-                   'NET_NS', 'NET_SCHED', 'NET_CLS_ACT', 'NET_XGRESS'):
-        if 'CONFIG_' + symbol + '=y' not in values:
-            raise ValueError('Required Honk kernel capability missing: ' + symbol)
-    for symbol in ('NF_TABLES', 'NF_TABLES_INET', 'NFT_CT', 'NFT_QUEUE', 'NETFILTER_NETLINK_QUEUE'):
-        if not any('CONFIG_' + symbol + '=' + value in values for value in ('y', 'm')):
-            raise ValueError('Required Honk kernel capability missing: ' + symbol)
-    if 'CONFIG_DEBUG_INFO_BTF=y' in values:
-        raise ValueError('Embedded BTF must stay disabled for the MX4200 kernel partition')
-    blobs = list(configs[0].parent.parent.glob('vmlinux-btf-*/vmlinux-btf'))
-    if len(blobs) != 1:
-        raise ValueError('Missing or ambiguous same-build detached BTF output')
-    verify_btf(blobs[0])
-
 
 if __name__ == '__main__':
     if sys.argv[1] == 'prepare':
@@ -242,7 +200,5 @@ if __name__ == '__main__':
         snapshot(*sys.argv[2:])
     elif sys.argv[1] == 'verify-root':
         verify_root(*sys.argv[2:])
-    elif sys.argv[1] == 'verify-kernel':
-        verify_kernel(*sys.argv[2:])
     else:
         sys.exit('Unknown external package operation')

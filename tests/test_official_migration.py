@@ -4,11 +4,21 @@ from pathlib import Path
 import unittest
 import yaml
 from scripts.check_defaults import check
+from scripts.external_packages import REPOSITORIES
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class OfficialMigrationTests(unittest.TestCase):
+    def test_signed_apk_package_selection_uses_stable_mihomo(self):
+        self.assertEqual(set(REPOSITORIES), {'nikki', 'eamonxg'})
+        self.assertEqual(REPOSITORIES['nikki']['packages'], [
+            'mihomo-meta', 'nikki', 'luci-app-nikki', 'luci-i18n-nikki-zh-cn',
+        ])
+        self.assertEqual(REPOSITORIES['eamonxg']['packages'], [
+            'luci-theme-aurora', 'luci-app-aurora-config', 'luci-i18n-aurora-config-zh-cn',
+        ])
+
     def test_official_source_and_release_description(self):
         workflow = yaml.safe_load((ROOT / '.github/workflows/MX4200.yml').read_text())
         settings = (ROOT / 'user/default/settings.ini').read_text()
@@ -36,20 +46,24 @@ class OfficialMigrationTests(unittest.TestCase):
                     and line.endswith('=y')}
         self.assertEqual(positive, {
             'luci', 'autocore', 'luci-app-advanced-reboot',
-            'luci-app-ttyd', 'luci-app-wol', 'libstdcpp',
-            'kmod-veth', 'kmod-sched-core', 'kmod-sched-bpf',
-            'kmod-nft-core', 'kmod-nft-queue', 'kmod-nfnetlink-queue',
-            'kmod-nf-conntrack', 'v2ray-geoip', 'v2ray-geosite', 'vmlinux-btf',
+            'luci-app-ttyd', 'luci-app-wol', 'ca-bundle', 'curl', 'yq',
+            'firewall4', 'ip-full', 'kmod-inet-diag', 'kmod-nft-socket',
+            'kmod-nft-tproxy', 'kmod-tun', 'kmod-dummy',
         })
         self.assertIn('CONFIG_PACKAGE_luci-app-attendedsysupgrade=n', config)
         for package in ('luci-app-homeproxy', 'luci-i18n-homeproxy-zh-cn', 'sing-box',
-                        'honk', 'honk-go', 'luci-theme-aurora', 'luci-app-aurora-config',
+                        'honk', 'honk-go', 'luci-app-honk', 'luci-lib-daeuniverse',
+                        'luci-i18n-daeuniverse-zh-cn',
+                        'mihomo', 'mihomo-meta', 'mihomo-alpha', 'nikki',
+                        'luci-app-nikki', 'luci-i18n-nikki-zh-cn',
+                        'luci-theme-aurora', 'luci-app-aurora-config',
                         'luci-i18n-aurora-config-zh-cn'):
             self.assertFalse(any(line.startswith('CONFIG_PACKAGE_' + package + '=')
                                  for line in config), package)
         for symbol in ('KERNEL_CGROUPS',
                        'KERNEL_CGROUP_BPF', 'KERNEL_NAMESPACES', 'KERNEL_NET_NS'):
-            self.assertIn('CONFIG_' + symbol + '=y', config)
+            self.assertFalse(any(line.startswith('CONFIG_' + symbol + '=')
+                                 for line in config), symbol)
         self.assertIn('# CONFIG_KERNEL_DEBUG_INFO_BTF is not set', config)
         for package in ('usteer', 'luci-app-usteer', 'luci-i18n-usteer-zh-cn'):
             for value in ('y', 'm'):
@@ -67,13 +81,14 @@ class OfficialMigrationTests(unittest.TestCase):
                 self.assertNotIn('CONFIG_PACKAGE_' + package + '=' + value, config)
         for package in ('luci-app-firewall', 'luci-app-package-manager', 'autocore',
                         'luci-i18n-firewall-zh-cn', 'luci-i18n-package-manager-zh-cn',
-                        'kmod-usb3', 'kmod-usb-storage', 'curl', 'etherwake', 'ttyd'):
+                        'kmod-usb3', 'kmod-usb-storage', 'curl', 'etherwake', 'ttyd',
+                        'ip-full', 'kmod-dummy'):
             self.assertIn('CONFIG_PACKAGE_' + package + '=y', config)
         for package in ('kmod-bonding', 'proto-bonding', 'kmod-fs-btrfs', 'kmod-fuse',
                         'kmod-wireguard', 'kmod-inet-mptcp-diag', 'kmod-mtd-rw',
-                        'kmod-dummy', 'kmod-tcp-bbr',
+                        'kmod-tcp-bbr',
                         'exfat-fsck', 'exfat-mkfs', 'fdisk', 'gdisk', 'smartmontools',
-                        'smartmontools-drivedb', 'iperf3', 'htop', 'ip-full',
+                        'smartmontools-drivedb', 'iperf3', 'htop',
                         'openssh-keygen', 'openssh-sftp-server', 'openssl-util',
                         'blkid', 'dmesg', 'lsblk', 'nand-utils', 'xz-utils'):
             for value in ('y', 'm'):

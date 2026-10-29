@@ -84,7 +84,9 @@ class DefaultPackageTests(unittest.TestCase):
         check('CONFIG_MODULE_DEFAULT_driver=y\nCONFIG_PACKAGE_driver=m\n', '', '')
 
     def test_retired_proxy_packages_are_rejected(self):
-        for package in ('luci-app-homeproxy', 'luci-i18n-homeproxy-zh-cn', 'sing-box'):
+        for package in ('luci-app-homeproxy', 'luci-i18n-homeproxy-zh-cn', 'sing-box',
+                        'honk', 'honk-go', 'luci-app-honk', 'luci-lib-daeuniverse',
+                        'luci-i18n-daeuniverse-zh-cn'):
             for value in ('y', 'm'):
                 with self.subTest(package=package, value=value):
                     config = ('CONFIG_MODULE_DEFAULT_driver=y\nCONFIG_PACKAGE_driver=m\n'
@@ -109,18 +111,24 @@ class DefaultPackageTests(unittest.TestCase):
             (build / 'tmp').mkdir()
             (build / 'tmp/.packageinfo').write_text('')
             config = 'CONFIG_MODULE_DEFAULT_driver=y\nCONFIG_PACKAGE_driver=m\n' + requested
-            for fault in ('', 'missing-app', 'excluded-module', 'missing-v2',
-                          'missing-rootfs', 'missing-cgroup', 'embedded-btf'):
+            for fault in ('', 'missing-app', 'excluded-module', 'retired-proxy', 'missing-v2',
+                          'missing-rootfs', 'missing-ip-full', 'missing-dummy',
+                          'missing-tproxy', 'embedded-btf'):
                 broken = config
                 if fault == 'missing-app':
                     broken = broken.replace('CONFIG_PACKAGE_luci-app-ttyd=y', '')
                 if fault == 'excluded-module':
                     broken += '\nCONFIG_PACKAGE_usteer=m\n'
                     self.assertNotEqual(broken, config)
+                if fault == 'retired-proxy':
+                    broken += '\nCONFIG_PACKAGE_honk=m\n'
+                    self.assertNotEqual(broken, config)
                 for name, symbol in (
                         ('missing-v2', 'TARGET_DEVICE_qualcommax_ipq807x_DEVICE_linksys_mx4200v2'),
                         ('missing-rootfs', 'TARGET_PER_DEVICE_ROOTFS'),
-                        ('missing-cgroup', 'KERNEL_CGROUP_BPF')):
+                        ('missing-ip-full', 'PACKAGE_ip-full'),
+                        ('missing-dummy', 'PACKAGE_kmod-dummy'),
+                        ('missing-tproxy', 'PACKAGE_kmod-nft-tproxy')):
                     if fault == name:
                         broken = broken.replace(f'CONFIG_{symbol}=y', '')
                         self.assertNotEqual(broken, config)
@@ -132,7 +140,7 @@ class DefaultPackageTests(unittest.TestCase):
                 result = subprocess.run(['bash', '-ec', command], cwd=build,
                                         env=dict(os.environ, DK_PROFILE=str(root / 'user/default')),
                                         capture_output=True, text=True)
-                self.assertEqual(result.returncode == 0, not fault, result.stderr)
+                self.assertEqual(result.returncode == 0, not fault, f'{fault}: {result.stderr}')
 
     def test_empty_config_fails(self):
         with self.assertRaisesRegex(ValueError, 'no enabled MODULE_DEFAULT'):

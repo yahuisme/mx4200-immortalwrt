@@ -85,11 +85,14 @@ class BuildRecordTests(unittest.TestCase):
             'missing-repository': lambda data: dict(data, repositories=data['repositories'][:-1]),
             'duplicate-repository': lambda data: dict(data, repositories=[data['repositories'][0]] * 2),
             'extra-repository': lambda data: dict(data, repositories=data['repositories'] + [dict(data['repositories'][0], name='other')]),
+            'retired-repository': lambda data: dict(data, repositories=[dict(data['repositories'][0], name='daeuniverse'), data['repositories'][1]]),
             'null-repository': lambda data: dict(data, repositories=[None, data['repositories'][1]]),
             'packages-not-list': lambda data: dict(data, packages={}),
             'missing-package': lambda data: dict(data, packages=data['packages'][:-1]),
             'duplicate-package': lambda data: dict(data, packages=[data['packages'][0]] + data['packages'][:-1]),
             'extra-package': lambda data: dict(data, packages=data['packages'] + [dict(data['packages'][0], name='other')]),
+            'retired-package': lambda data: dict(data, packages=[dict(data['packages'][0], name='honk', filename='honk-1.0-fixture-r1.apk')] + data['packages'][1:]),
+            'alpha-provider': lambda data: dict(data, packages=[dict(data['packages'][0], name='mihomo-alpha', filename='mihomo-alpha-1.0-fixture-r1.apk')] + data['packages'][1:]),
             'null-package': lambda data: dict(data, packages=[None] + data['packages'][1:]),
         }
         for field, value in (
@@ -103,7 +106,7 @@ class BuildRecordTests(unittest.TestCase):
                 ('version', ''), ('version', '  '), ('version', 1),
                 ('arch', 'x86_64'), ('repository', 'other'), ('repository', 'eamonxg'),
                 ('sha256', 'short'), ('sha256', 'g' * 64), ('sha256', None),
-                ('filename', ''), ('filename', '../honk.apk'), ('filename', 'different.apk')):
+                ('filename', ''), ('filename', '../mihomo-meta.apk'), ('filename', 'different.apk')):
             faults[f'package-{field}-{value}'] = lambda data, field=field, value=value: dict(
                 data, packages=[dict(data['packages'][0], **{field: value})] + data['packages'][1:])
         for fault in ('empty', 'invalid-json', *faults):

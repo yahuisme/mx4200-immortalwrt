@@ -4,10 +4,9 @@ FROM debian:trixie-slim@sha256:da496358bd6934d2bd6a563a33176a2e50eff5490c54b4ac6
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         bison build-essential bzip2 ca-certificates cpio curl file flex gawk \
-        gettext git libelf-dev libncurses-dev libssl-dev pahole patch perl pigz pkgconf \
+        gettext git libelf-dev libncurses-dev libssl-dev patch perl pigz pkgconf \
         python3 python3-dev python3-setuptools rsync swig time unzip util-linux \
         wget xz-utils zlib1g-dev zstd \
-    && pahole --version \
     && rm -rf /var/lib/apt/lists/*
 
 # Debian trixie's go1.24.4 is below the current Go 1.27 bootstrap floor (1.24.6).

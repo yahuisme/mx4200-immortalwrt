@@ -24,8 +24,7 @@ def module(name):
 def external_provenance_fixture():
     """Synthetic metadata only: these hashes/versions do not attest real APKs."""
     packages = {
-        'daeuniverse': ['honk', 'luci-app-honk', 'luci-lib-daeuniverse',
-                        'luci-i18n-daeuniverse-zh-cn'],
+        'nikki': ['mihomo-meta', 'nikki', 'luci-app-nikki', 'luci-i18n-nikki-zh-cn'],
         'eamonxg': ['luci-theme-aurora', 'luci-app-aurora-config',
                     'luci-i18n-aurora-config-zh-cn'],
     }
@@ -36,7 +35,7 @@ def external_provenance_fixture():
                               index_sha256='a' * 64, key_sha256='b' * 64)
                          for name in packages],
         'packages': [dict(name=name, version='1.0-fixture-r1',
-                          arch='aarch64_cortex-a53' if name == 'honk' else 'noarch',
+                          arch='aarch64_cortex-a53' if name in ('mihomo-meta', 'nikki') else 'noarch',
                           repository=repository, filename=f'{name}-1.0-fixture-r1.apk',
                           sha256='c' * 64)
                      for repository, names in packages.items() for name in names],

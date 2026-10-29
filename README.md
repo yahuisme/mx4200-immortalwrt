@@ -12,7 +12,7 @@
 ## 功能
 
 - 中文 LuCI 与 Aurora 主题。
-- Honk 代理核心与 Doona 管理界面（默认禁用，需自行配置后启用）。
+- Nikki 代理管理界面与 Mihomo 核心（默认停用，需自行配置后启用）。
 - 设备驱动及基础 USB 支持沿用官方默认。
 - 三频 Wi-Fi，默认开启 2.4 GHz 与 5.8 GHz。
 
@@ -20,13 +20,13 @@
 
 | 插件 | 功能说明 |
 | --- | --- |
-| [Honk](https://github.com/daeuniverse/honk) | 代理客户端，使用 `.dae` 配置；启用后访问 Doona：<http://192.168.10.1:9527/ui/> |
+| [Nikki](https://github.com/nikkinikki-org/OpenWrt-nikki) | 基于 Mihomo 的代理客户端，含中文 LuCI 管理界面 |
 | Aurora 配置 | 主题设置 |
 | 高级重启 | 双分区重启切换 |
 | 网络唤醒 | 唤醒局域网设备 |
 | 网页终端 | 浏览器终端访问 |
 
-Honk、Aurora 主题及配置插件使用官方 APK 软件源，每次构建获取源内最新版本，并预置签名公钥与更新源。后续可在 **系统 → 软件包** 刷新列表并更新。Honk 使用 `.dae` 配置，不兼容原 HomeProxy / sing-box 配置；默认停用，启用后首次访问 Doona 创建管理员账号。
+Nikki、Mihomo 稳定版（`mihomo-meta`）、Aurora 主题及配置插件使用各自官方 APK 软件源，每次构建获取源内最新版本，并预置签名公钥与更新源。后续可在 **系统 → 软件包** 刷新列表并更新。Nikki 默认停用，需自行导入配置或订阅后启用；不预装 Honk 或 HomeProxy。
 
 ## 默认设置
 
