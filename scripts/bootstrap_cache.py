@@ -51,6 +51,13 @@ def serialized(value):
 
 def inventory(root):
     paths = set(root / name for name in FIXED_INPUTS)
+    # Aurora's rootfs helper includes this generated makefile at parse time.
+    # Hash it when present; legacy/MX trees without it keep their existing lock.
+    external = root / '.external-packages.mk'
+    if external.exists() or external.is_symlink():
+        if external.is_symlink() or not external.is_file():
+            raise ValueError('nonregular external make input')
+        paths.add(external)
     for name in ('tools', 'scripts'):
         base = root / name
         if base.is_symlink() or not base.is_dir():
