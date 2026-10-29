@@ -75,6 +75,8 @@ class ReleaseTests(unittest.TestCase):
                     self.assertIn('`factory.bin`',notes)
                     self.assertIn('`sysupgrade.bin`',notes)
                     self.assertIn('构建时间：',notes)
+                    self.assertIn('Nikki',notes)
+                    self.assertNotIn('Honk',notes)
                     self.assertNotIn('UBI2',notes)
                     self.assertNotIn('not found',result.stderr)
                 else:

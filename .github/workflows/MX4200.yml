@@ -253,7 +253,7 @@ jobs:
         - 构建时间：$(TZ=Asia/Hong_Kong date '+%Y-%m-%d %H:%M:%S %Z')
         - 机型：Linksys MX4200v1 / MX4200v2，请选择对应硬件版本的镜像。
         - 镜像：\`factory.bin\` 用于从原厂固件刷入，\`sysupgrade.bin\` 用于从已有 ImmortalWrt 升级。
-        - 定制：中文 LuCI、Aurora、Honk 及既定网络与无线设置。
+        - 定制：中文 LuCI、Aurora、Nikki 及既定网络与无线设置。
 
         [默认设置与使用说明](https://github.com/yahuisme/mx4200-immortalwrt#默认设置)
         EOF
@@ -345,7 +345,7 @@ jobs:
         if-no-files-found: error
 
     - name: Publish firmware and prune releases
-      if: ${{ !cancelled() && github.ref == 'refs/heads/main' && steps.stage.outcome == 'success' }}
+      if: ${{ !cancelled() && github.ref == 'refs/heads/main' && steps.stage.outcome == 'success' && steps.record.outcome == 'success' && steps.record_upload.outcome == 'success' }}
       env:
         GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
       run: |

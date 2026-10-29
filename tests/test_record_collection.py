@@ -208,4 +208,4 @@ class BuildRecordTests(unittest.TestCase):
         self.assertEqual(upload['with']['path'], 'build-record/')
         self.assertEqual(upload['with']['if-no-files-found'], 'error')
         self.assertEqual(step('Publish firmware and prune releases')['if'],
-                         "${{ !cancelled() && github.ref == 'refs/heads/main' && steps.stage.outcome == 'success' }}")
+                         "${{ !cancelled() && github.ref == 'refs/heads/main' && steps.stage.outcome == 'success' && steps.record.outcome == 'success' && steps.record_upload.outcome == 'success' }}")

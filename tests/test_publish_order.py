@@ -13,14 +13,15 @@ from test_cache_helper import GH, entry
 from test_record_collection import prepare
 READBACK = """
     assets=[dict(name=p.name,size=p.stat().st_size,state='uploaded',digest='sha256:'+__import__('hashlib').sha256(p.read_bytes()).hexdigest()) for p in Path('firmware').glob('*.bin')]
-    print(json.dumps(dict(tag_name=Path('firmware/version.txt').read_text().strip(),draft=False,prerelease=False,assets=assets)))
+    tag=Path('firmware/version.txt').read_text().strip()
+    print(json.dumps(dict(tag_name=tag,name=tag,draft=False,prerelease=False,assets=assets)))
 """
 
 class CachePublicationIntegrationTests(unittest.TestCase):
     def test_stage_status_gate_after_complete_cache_tail(self):
         publish = step('Publish firmware and prune releases')
         self.assertEqual(step('Validate and stage firmware').get('id'), 'stage')
-        self.assertEqual(publish.get('if'), "${{ !cancelled() && github.ref == 'refs/heads/main' && steps.stage.outcome == 'success' }}")
+        self.assertEqual(publish.get('if'), "${{ !cancelled() && github.ref == 'refs/heads/main' && steps.stage.outcome == 'success' && steps.record.outcome == 'success' && steps.record_upload.outcome == 'success' }}")
         self.assertEqual(publish['env'], {'GH_TOKEN': '${{ secrets.RELEASE_TOKEN }}'})
         self.assertEqual(STEPS[-1], publish)
         self.assertLess(STEPS.index(step('Prune old download caches')), STEPS.index(publish))
@@ -54,6 +55,8 @@ elif a[0] == 'api' and '/releases/tags/' in a[1]:
     p.write_text(json.dumps(s))
 """ + READBACK + """
     sys.exit(0)
+elif a[0] == 'api' and '/git/ref/tags/' in a[1]:
+    p.write_text(json.dumps(s)); print(json.dumps(dict(object=dict(type='commit',sha=os.environ['GITHUB_SHA'])))); sys.exit(0)
 elif a[:2] == ['release', 'create']:
     p.write_text(json.dumps(s)); sys.exit(19 if os.environ['FAULT']=='publish' else 0)
 elif a == ['api', '--paginate', '--slurp', 'repos/fixture/repo/releases?per_page=100']:
@@ -189,7 +192,7 @@ export -f make docker_exec sudo python3 git
         for fault in ('none', 'download', 'compile', 'validation', 'cancel', 'package', 'save', 'readback', 'publish', 'metadata', 'upload', 'bootstrap_pack', 'bootstrap_save', 'bootstrap_readback'):
             with self.subTest(fault=fault):
                 outcomes, executed, inventory, log = self.replay(fault)
-                published = fault not in ('download', 'compile', 'validation', 'cancel')
+                published = fault not in ('download', 'compile', 'validation', 'cancel', 'metadata', 'upload')
                 if fault == 'download':
                     self.assertEqual(outcomes['Download sources'], 'failure', log)
                     self.assertEqual(outcomes['Compile firmware'], 'skipped', log)
@@ -202,8 +205,9 @@ export -f make docker_exec sudo python3 git
                     self.assertEqual({item['key'] for item in inventory['entries']},
                                      {'cc-v1-mx4200-arm64.new', 'tc-v1-mx4200-arm64-new',
                                       'tb-v1-mx4200-arm64-new', 'dl-v1-mx4200-arm64.new'}, log)
-                    self.assertLess(executed.index('Prune old download caches'),
-                                    executed.index('Publish firmware and prune releases'))
+                    if published:
+                        self.assertLess(executed.index('Prune old download caches'),
+                                        executed.index('Publish firmware and prune releases'))
                 elif fault == 'bootstrap_pack':
                     self.assertEqual({item['key'] for item in inventory['entries']},
                                      {'cc-v1-mx4200-arm64.new', 'tc-v1-mx4200-arm64-new',
