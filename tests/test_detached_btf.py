@@ -16,10 +16,37 @@ def helper():
 
 
 class DetachedBtfTests(unittest.TestCase):
+    def test_builder_supplies_working_pahole(self):
+        import re
+        dockerfile = (ROOT / 'docker/Dockerfile').read_text()
+        match = re.search(r'apt-get install .*?(?=&&)', dockerfile, re.S)
+        self.assertIsNotNone(match)
+        assert match
+        self.assertIn('pahole', match.group().split())
+        self.assertIn('pahole --version', dockerfile)
+
+    def test_real_kernel_package_output_path(self):
+        import struct
+        module = helper()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            kernel = root / 'build_dir/target-aarch64_cortex-a53_musl/linux-qualcommax_ipq807x'
+            config = kernel / 'linux-6.12.103/.config'
+            config.parent.mkdir(parents=True)
+            required = ('BPF', 'BPF_SYSCALL', 'BPF_JIT', 'CGROUPS', 'CGROUP_BPF',
+                        'NET_NS', 'NET_SCHED', 'NET_CLS_ACT', 'NET_XGRESS', 'NF_TABLES',
+                        'NF_TABLES_INET', 'NFT_CT', 'NFT_QUEUE', 'NETFILTER_NETLINK_QUEUE')
+            config.write_text(''.join('CONFIG_' + symbol + '=y\n' for symbol in required))
+            blob = kernel / 'vmlinux-btf-6.12.103/vmlinux-btf'
+            blob.parent.mkdir(parents=True)
+            # Header-only boundary fixture, not target compilation evidence.
+            blob.write_bytes(struct.pack('<HBB5I', 0xeb9f, 1, 0, 24, 0, 12, 12, 1) + b'\0' * 13)
+            module.verify_kernel(root)
+
     def test_no_embedded_btf_or_foreign_btf_provider(self):
         config = (ROOT / 'user/default/config.diff').read_text()
         self.assertIn('# CONFIG_KERNEL_DEBUG_INFO_BTF is not set', config)
-        self.assertIn('CONFIG_DWARVES=y', config)
+        self.assertNotIn('CONFIG_DWARVES=y', config)
         self.assertIn('CONFIG_PACKAGE_vmlinux-btf=y', config)
         self.assertNotIn('CONFIG_KERNEL_DEBUG_INFO_BTF=y', config)
         module = helper()

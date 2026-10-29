@@ -47,7 +47,7 @@ class OfficialMigrationTests(unittest.TestCase):
                         'luci-i18n-aurora-config-zh-cn'):
             self.assertFalse(any(line.startswith('CONFIG_PACKAGE_' + package + '=')
                                  for line in config), package)
-        for symbol in ('DWARVES', 'KERNEL_CGROUPS',
+        for symbol in ('KERNEL_CGROUPS',
                        'KERNEL_CGROUP_BPF', 'KERNEL_NAMESPACES', 'KERNEL_NET_NS'):
             self.assertIn('CONFIG_' + symbol + '=y', config)
         self.assertIn('# CONFIG_KERNEL_DEBUG_INFO_BTF is not set', config)

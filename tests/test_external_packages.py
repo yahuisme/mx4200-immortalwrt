@@ -173,7 +173,7 @@ class ExternalPackageTests(unittest.TestCase):
             config.write_text(good)
             # Header parser fixture only; no kernel was compiled by this test.
             import struct
-            blob = root / 'build_dir/target-aarch64/vmlinux-btf-6.12.103/vmlinux-btf'
+            blob = config.parent.parent / 'vmlinux-btf-6.12.103/vmlinux-btf'
             blob.parent.mkdir(parents=True)
             blob.write_bytes(struct.pack('<HBB5I', 0xeb9f, 1, 0, 24, 0, 12, 12, 1) + b'\0' * 13)
             module.verify_kernel(root)

@@ -229,7 +229,7 @@ def verify_kernel(root):
             raise ValueError('Required Honk kernel capability missing: ' + symbol)
     if 'CONFIG_DEBUG_INFO_BTF=y' in values:
         raise ValueError('Embedded BTF must stay disabled for the MX4200 kernel partition')
-    blobs = list(Path(root).glob('build_dir/target-*/vmlinux-btf-*/vmlinux-btf'))
+    blobs = list(configs[0].parent.parent.glob('vmlinux-btf-*/vmlinux-btf'))
     if len(blobs) != 1:
         raise ValueError('Missing or ambiguous same-build detached BTF output')
     verify_btf(blobs[0])
