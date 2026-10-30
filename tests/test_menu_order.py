@@ -1,11 +1,9 @@
-"""Lock complete Nikki metadata and sort the installed Services menu inventory.
+"""Source-grounded Services menu contract; no installed-image/trust claims.
 
-The fixture comes from signed-index-verified APK / native installed files, not
-from the overlay. Set MX_MENU_ROOT to a verified installed root to compare a
-new package snapshot too. Default checks are metadata contracts, not APK trust
-verification; refresh the fixture only after native signed-index verification.
+The digest-locked fixture contains complete package-source menu files at exact
+Git revisions, not firmware overlays. MX_MENU_ROOT optionally checks an actual
+installed root, including all its additional Services siblings.
 """
-import base64
 import copy
 import hashlib
 import json
@@ -15,10 +13,12 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 MENUS = ROOT / 'user/default/files/usr/share/luci/menu.d'
-FIXTURE = ROOT / 'tests/fixtures/nikki-menu-contract.json'
-FIXTURE_SHA256 = '0ccf3a90a114d9e21c13eeb769b25d0a553acf984f8cf9ae5758420e9bf9fab3'
-PARENT = 'admin/services/nikki'
+FIXTURE = ROOT / 'tests/fixtures/services-menu-contract.json'
+FIXTURE_SHA256 = '2358583800510653673c3a9bb27a772f51db1e56ed3a946d963d4060f802ea91'
+PARENT = 'admin/services/homeproxy'
 TERMINAL = 'admin/services/ttyd'
+PROXY_MENU = 'luci-app-homeproxy.json'
+TERMINAL_MENU = 'luci-app-ttyd.json'
 
 
 def menu_files(directory):
@@ -28,74 +28,99 @@ def menu_files(directory):
 class MenuOrderTests(unittest.TestCase):
     def setUp(self):
         self.assertEqual(hashlib.sha256(FIXTURE.read_bytes()).hexdigest(), FIXTURE_SHA256,
-                         'Refresh from authenticated package/installed metadata, not the overlay')
+                         'Refresh from exact package-source revisions, never the overlay')
         self.fixture = json.loads(FIXTURE.read_text())
-        self.installed = {}
-        for name, row in self.fixture['installed_menus'].items():
-            data = row['text'].encode()
-            self.assertEqual(hashlib.sha256(data).hexdigest(), row['sha256'])
-            algorithm = row['checksum_algorithm']
-            if algorithm:
-                checksum = (hashlib.sha1(data).digest() if algorithm == 'sha1'
-                            else hashlib.sha256(data).digest()[:20])
-                self.assertEqual('Q1' + base64.b64encode(checksum).decode(), row['checksum'])
-            self.installed[name] = json.loads(row['text'])
+        self.source = {}
+        for name, row in self.fixture['menus'].items():
+            self.assertRegex(row['revision'], r'^[0-9a-f]{40}$')
+            self.assertEqual(hashlib.sha256(row['text'].encode()).hexdigest(), row['sha256'])
+            self.assertTrue(row['path'].endswith('/usr/share/luci/menu.d/' + name))
+            self.source[name] = json.loads(row['text'])
         self.overlay = menu_files(MENUS)
 
     def assert_contract(self, overlay, installed):
-        upstream = installed['luci-app-nikki.json']
-        nikki = copy.deepcopy(overlay['luci-app-nikki.json'])
-        self.assertEqual(nikki[PARENT]['order'], 10)
-        self.assertEqual(overlay['luci-app-ttyd.json'][TERMINAL]['order'], 11)
-        # Only the parent order may differ, including fields added upstream later.
-        if 'order' in upstream[PARENT]:
-            nikki[PARENT]['order'] = upstream[PARENT]['order']
+        # HomeProxy already supplies order 10. A same-name overlay would replace
+        # the whole source menu, hiding future submenus, fields and dependencies.
+        self.assertNotIn(PROXY_MENU, overlay, 'Use the native HomeProxy menu without an overlay')
+        self.assertEqual(installed[PROXY_MENU], self.source[PROXY_MENU])
+        self.assertEqual(installed[PROXY_MENU][PARENT]['order'], 10)
+        terminal = copy.deepcopy(overlay[TERMINAL_MENU])
+        self.assertEqual(terminal[TERMINAL]['order'], 11)
+        # The official package places Terminal under System. Preserve the full
+        # file while relocating its route prefix to Services, then set order 11.
+        upstream = {path.replace('admin/system/ttyd', TERMINAL, 1): row
+                    for path, row in self.source[TERMINAL_MENU].items()}
+        if 'order' in upstream[TERMINAL]:
+            terminal[TERMINAL]['order'] = upstream[TERMINAL]['order']
         else:
-            nikki[PARENT].pop('order')
-        self.assertEqual(nikki, upstream)
+            terminal[TERMINAL].pop('order')
+        self.assertEqual(terminal, upstream, 'Terminal may change only its route prefix and parent order')
         merged = {}
-        # Whole-file overlay replacement, exactly as rootfs installation behaves.
         for entries in (installed | overlay).values():
-            merged.update(entries)
+            for path, row in entries.items():
+                self.assertNotIn(path, merged, 'Duplicate menu route can clobber package metadata')
+                merged[path] = row
+        self.assertEqual({p: row for p, row in merged.items()
+                          if p == PARENT or p.startswith(PARENT + '/')}, self.source[PROXY_MENU])
         siblings = [(path, row) for path, row in merged.items()
                     if path.startswith('admin/services/') and path.count('/') == 2]
         siblings.sort(key=lambda item: (item[1].get('order', 10000),
                                         item[1].get('title') or item[0]))
         paths = [path for path, _ in siblings]
         i = paths.index(PARENT)
-        self.assertEqual(paths[i + 1], TERMINAL, siblings)
+        self.assertEqual(paths[i + 1:i + 2], [TERMINAL], siblings)
 
-    def test_full_upstream_json_and_actual_sibling_adjacency(self):
-        self.assertEqual(self.fixture['nikki_package']['version'], '1.26.2-r1')
-        self.assertEqual(len(self.installed), 12)
-        self.assert_contract(self.overlay, self.installed)
+    def test_complete_source_menus_and_actual_sibling_adjacency(self):
+        expected = {'luci-app-homeproxy.json', 'luci-app-ttyd.json', 'luci-app-wol.json',
+                    'luci-app-advanced-reboot.json', 'luci-app-firewall.json',
+                    'luci-app-package-manager.json', 'luci-base.json',
+                    'luci-mod-network.json', 'luci-mod-status.json', 'luci-mod-system.json'}
+        self.assertEqual(set(self.source), expected)
+        recipe = (ROOT / 'user/default/config.diff').read_text()
+        for package in ('homeproxy', 'ttyd', 'wol', 'advanced-reboot'):
+            self.assertIn('CONFIG_PACKAGE_luci-app-' + package + '=y', recipe)
+        self.assertEqual(set(self.source[PROXY_MENU]),
+                         {PARENT, *(PARENT + '/' + n for n in ('client', 'node', 'server', 'status'))})
+        self.assert_contract(self.overlay, self.source)
 
-    def test_submenu_mutations_and_new_upstream_fields_are_rejected(self):
+    def test_same_filename_overlay_and_cross_file_submenu_clobber_are_rejected(self):
+        changed = copy.deepcopy(self.overlay)
+        changed[PROXY_MENU] = copy.deepcopy(self.source[PROXY_MENU])
+        with self.assertRaises(AssertionError):
+            self.assert_contract(changed, self.source)
+        changed = copy.deepcopy(self.overlay)
+        changed['custom.json'] = {PARENT + '/client': {'action': {'type': 'view', 'path': 'wrong'}}}
+        with self.assertRaises(AssertionError):
+            self.assert_contract(changed, self.source)
+
+    def test_submenu_mutations_and_missing_upstream_fields_are_rejected(self):
         for field, value in [('title', 'Different title'), ('order', -100),
                              ('action', {'type': 'view', 'path': 'wrong'}),
-                             ('depends', {'acl': ['wrong']})]:
+                             ('depends', {'acl': ['wrong']}), ('new-upstream-field', True)]:
             with self.subTest(field=field):
-                changed = copy.deepcopy(self.overlay)
-                row = changed['luci-app-nikki.json'][PARENT + '/log']
-                self.assertNotEqual(row.get(field), value)
-                row[field] = value
+                changed = copy.deepcopy(self.source)
+                changed[PROXY_MENU][PARENT + '/client'][field] = value
                 with self.assertRaises(AssertionError):
-                    self.assert_contract(changed, self.installed)
-        changed = copy.deepcopy(self.installed)
-        changed['luci-app-nikki.json'][PARENT + '/log']['new-upstream-field'] = True
+                    self.assert_contract(self.overlay, changed)
+        changed = copy.deepcopy(self.source)
+        del changed[PROXY_MENU][PARENT + '/status']
         with self.assertRaises(AssertionError):
             self.assert_contract(self.overlay, changed)
+        changed = copy.deepcopy(self.overlay)
+        changed[TERMINAL_MENU][TERMINAL + '/config']['action']['path'] = 'wrong'
+        with self.assertRaises(AssertionError):
+            self.assert_contract(changed, self.source)
 
     def test_interposed_actual_sibling_is_rejected(self):
         for order in (10, 10.5, 11):
             with self.subTest(order=order):
-                changed = copy.deepcopy(self.installed)
+                changed = copy.deepcopy(self.source)
                 changed['luci-base.json']['admin/services/interposed'] = {
-                    'title': 'Nzzz', 'order': order}
+                    'title': 'Hzzz', 'order': order}
                 with self.assertRaises(AssertionError):
                     self.assert_contract(self.overlay, changed)
 
-    @unittest.skipUnless(os.environ.get('MX_MENU_ROOT'), 'set MX_MENU_ROOT to a verified installed root')
+    @unittest.skipUnless(os.environ.get('MX_MENU_ROOT'), 'set MX_MENU_ROOT to an installed root')
     def test_actual_installed_root_contract(self):
         directory = Path(os.environ['MX_MENU_ROOT']) / 'usr/share/luci/menu.d'
         self.assertTrue(directory.is_dir())

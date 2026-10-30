@@ -12,13 +12,6 @@ import tempfile
 
 
 REPOSITORIES = {
-    'nikki': {
-        'url': 'https://nikkinikki.pages.dev/openwrt-25.12/aarch64_cortex-a53/nikki',
-        'key': 'https://nikkinikki.pages.dev/public-key.pem',
-        'key_sha256': '677ef1af372065e2e856175363e2da9471a6c5c6443563b912c8d325bfa1fbad',
-        # Select the stable provider explicitly, not mihomo-alpha.
-        'packages': ['mihomo-meta', 'nikki', 'luci-app-nikki', 'luci-i18n-nikki-zh-cn'],
-    },
     'eamonxg': {
         'url': 'https://openwrt.eamonxg.fun/snapshots/apk',
         'key': 'https://openwrt.eamonxg.fun/eamonxg.pem',
@@ -170,13 +163,15 @@ def verify_root(root, provenance):
         if 'P' in fields:
             installed[fields['P']] = fields.get('V')
     world = (root / 'etc/apk/world').read_text().splitlines()
-    retired = ('luci-app-homeproxy', 'luci-i18n-homeproxy-zh-cn', 'sing-box',
-               'honk', 'honk-go', 'luci-app-honk', 'luci-lib-daeuniverse',
-               'luci-i18n-daeuniverse-zh-cn', 'vmlinux-btf', 'mihomo-alpha')
-    for name in retired:
-        if name in installed or any(re.split(r'[@=~<>]', line)[0] == name for line in world):
-            raise ValueError('Retired proxy package in rootfs: ' + name)
-
+    for name in ('luci-app-homeproxy', 'luci-i18n-homeproxy-zh-cn', 'sing-box'):
+        if not installed.get(name):
+            raise ValueError('Missing source-built proxy package: ' + name)
+    for name in ('etc/config/homeproxy', 'usr/share/luci/menu.d/luci-app-homeproxy.json',
+                 'usr/lib/lua/luci/i18n/homeproxy.zh-cn.lmo'):
+        if not (root / name).is_file() or not (root / name).stat().st_size:
+            raise ValueError('Missing HomeProxy runtime file: ' + name)
+    if not os.access(root / 'usr/bin/sing-box', os.X_OK):
+        raise ValueError('Missing executable sing-box core')
     for row in record['packages']:
         if installed.get(row['name']) != row['version']:
             raise ValueError('Missing or wrong official APK version: ' + row['name'])

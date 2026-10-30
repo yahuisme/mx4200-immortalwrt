@@ -253,7 +253,7 @@ jobs:
         - 构建时间：$(TZ=Asia/Hong_Kong date '+%Y-%m-%d %H:%M:%S %Z')
         - 机型：Linksys MX4200v1 / MX4200v2，请选择对应硬件版本的镜像。
         - 镜像：\`factory.bin\` 用于从原厂固件刷入，\`sysupgrade.bin\` 用于从已有 ImmortalWrt 升级。
-        - 定制：中文 LuCI、Aurora、Nikki 及既定网络与无线设置。
+        - 定制：中文 LuCI、Aurora、HomeProxy 及既定网络与无线设置。
 
         [默认设置与使用说明](https://github.com/yahuisme/mx4200-immortalwrt#默认设置)
         EOF

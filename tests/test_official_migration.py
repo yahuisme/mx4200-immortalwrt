@@ -10,11 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class OfficialMigrationTests(unittest.TestCase):
-    def test_signed_apk_package_selection_uses_stable_mihomo(self):
-        self.assertEqual(set(REPOSITORIES), {'nikki', 'eamonxg'})
-        self.assertEqual(REPOSITORIES['nikki']['packages'], [
-            'mihomo-meta', 'nikki', 'luci-app-nikki', 'luci-i18n-nikki-zh-cn',
-        ])
+    def test_signed_apk_package_selection_is_theme_only(self):
+        self.assertEqual(set(REPOSITORIES), {'eamonxg'})
         self.assertEqual(REPOSITORIES['eamonxg']['packages'], [
             'luci-theme-aurora', 'luci-app-aurora-config', 'luci-i18n-aurora-config-zh-cn',
         ])
@@ -46,17 +43,11 @@ class OfficialMigrationTests(unittest.TestCase):
                     and line.endswith('=y')}
         self.assertEqual(positive, {
             'luci', 'autocore', 'luci-app-advanced-reboot',
-            'luci-app-ttyd', 'luci-app-wol', 'ca-bundle', 'curl', 'yq',
-            'firewall4', 'ip-full', 'kmod-inet-diag', 'kmod-nft-socket',
-            'kmod-nft-tproxy', 'kmod-tun', 'kmod-dummy',
+            'luci-app-ttyd', 'luci-app-wol', 'curl',
+            'luci-app-homeproxy', 'luci-i18n-homeproxy-zh-cn', 'sing-box',
         })
         self.assertIn('CONFIG_PACKAGE_luci-app-attendedsysupgrade=n', config)
-        for package in ('luci-app-homeproxy', 'luci-i18n-homeproxy-zh-cn', 'sing-box',
-                        'honk', 'honk-go', 'luci-app-honk', 'luci-lib-daeuniverse',
-                        'luci-i18n-daeuniverse-zh-cn',
-                        'mihomo', 'mihomo-meta', 'mihomo-alpha', 'nikki',
-                        'luci-app-nikki', 'luci-i18n-nikki-zh-cn',
-                        'luci-theme-aurora', 'luci-app-aurora-config',
+        for package in ('luci-theme-aurora', 'luci-app-aurora-config',
                         'luci-i18n-aurora-config-zh-cn'):
             self.assertFalse(any(line.startswith('CONFIG_PACKAGE_' + package + '=')
                                  for line in config), package)
@@ -64,7 +55,6 @@ class OfficialMigrationTests(unittest.TestCase):
                        'KERNEL_CGROUP_BPF', 'KERNEL_NAMESPACES', 'KERNEL_NET_NS'):
             self.assertFalse(any(line.startswith('CONFIG_' + symbol + '=')
                                  for line in config), symbol)
-        self.assertIn('# CONFIG_KERNEL_DEBUG_INFO_BTF is not set', config)
         for package in ('usteer', 'luci-app-usteer', 'luci-i18n-usteer-zh-cn'):
             for value in ('y', 'm'):
                 self.assertNotIn('CONFIG_PACKAGE_' + package + '=' + value, config)
@@ -82,7 +72,9 @@ class OfficialMigrationTests(unittest.TestCase):
         for package in ('luci-app-firewall', 'luci-app-package-manager', 'autocore',
                         'luci-i18n-firewall-zh-cn', 'luci-i18n-package-manager-zh-cn',
                         'kmod-usb3', 'kmod-usb-storage', 'curl', 'etherwake', 'ttyd',
-                        'ip-full', 'kmod-dummy'):
+                        'luci-app-homeproxy', 'luci-i18n-homeproxy-zh-cn', 'sing-box',
+                        'firewall4', 'kmod-nft-queue', 'kmod-tun', 'kmod-inet-diag',
+                        'kmod-netlink-diag', 'flock', 'unzip', 'ucode-mod-digest', 'ucode-mod-math'):
             self.assertIn('CONFIG_PACKAGE_' + package + '=y', config)
         for package in ('kmod-bonding', 'proto-bonding', 'kmod-fs-btrfs', 'kmod-fuse',
                         'kmod-wireguard', 'kmod-inet-mptcp-diag', 'kmod-mtd-rw',

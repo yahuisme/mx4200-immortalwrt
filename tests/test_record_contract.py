@@ -24,7 +24,6 @@ def module(name):
 def external_provenance_fixture():
     """Synthetic metadata only: these hashes/versions do not attest real APKs."""
     packages = {
-        'nikki': ['mihomo-meta', 'nikki', 'luci-app-nikki', 'luci-i18n-nikki-zh-cn'],
         'eamonxg': ['luci-theme-aurora', 'luci-app-aurora-config',
                     'luci-i18n-aurora-config-zh-cn'],
     }
@@ -35,7 +34,7 @@ def external_provenance_fixture():
                               index_sha256='a' * 64, key_sha256='b' * 64)
                          for name in packages],
         'packages': [dict(name=name, version='1.0-fixture-r1',
-                          arch='aarch64_cortex-a53' if name in ('mihomo-meta', 'nikki') else 'noarch',
+                          arch='noarch',
                           repository=repository, filename=f'{name}-1.0-fixture-r1.apk',
                           sha256='c' * 64)
                      for repository, names in packages.items() for name in names],
@@ -46,6 +45,8 @@ def write_external_fixture(base):
     path = base / '.external-packages/provenance.json'
     path.parent.mkdir(exist_ok=True)
     path.write_text(json.dumps(external_provenance_fixture()) + '\n')
+    (base / '.custom-revisions.tsv').write_text(
+        'yahuisme/packages\thttps://github.com/yahuisme/packages.git\t' + 'd' * 40 + '\n')
     return path
 
 
@@ -90,13 +91,14 @@ class RecordContract(unittest.TestCase):
             self.assertEqual(record['recipe']['workflow_sha'], 'b' * 40)
             self.assertEqual(record['builder']['image_id'], environment['image_id'])
             self.assertEqual(record['source'], revisions[0])
-            self.assertEqual(record['feeds'], revisions[1:])
-            self.assertEqual(record['custom_sources'], [])
+            self.assertEqual(record['feeds'], [r for r in revisions if r['name'].startswith('feed/')])
+            self.assertEqual(record['custom_sources'], [revisions[-1]])
             self.assertEqual(record['external_packages'], external_provenance_fixture())
             self.assertEqual((base / 'record/external-packages.json').read_bytes(),
                              (base / '.external-packages/provenance.json').read_bytes())
-            self.assertEqual({row['name'] for row in revisions}, {'source', 'feed/packages'})
-            self.assertFalse((base / 'record/custom-revisions.tsv').exists())
+            self.assertEqual({row['name'] for row in revisions}, {'source', 'feed/packages', 'custom/yahuisme/packages'})
+            self.assertEqual((base / 'record/custom-revisions.tsv').read_bytes(),
+                             (base / '.custom-revisions.tsv').read_bytes())
             self.assertEqual(record['target'], profile['target'])
             self.assertEqual(record['config']['digest'], 'sha256:' + hashlib.sha256((base / '.config').read_bytes()).hexdigest())
             self.assertEqual({e['name'] for e in record['images']}, {p.name for p in paths})

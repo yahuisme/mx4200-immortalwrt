@@ -5,10 +5,7 @@ import re
 import sys
 
 
-FORBIDDEN_PACKAGES = ('usteer', 'luci-app-usteer', 'luci-i18n-usteer-zh-cn',
-                      'luci-app-homeproxy', 'luci-i18n-homeproxy-zh-cn', 'sing-box',
-                      'honk', 'honk-go', 'luci-app-honk', 'luci-lib-daeuniverse',
-                      'luci-i18n-daeuniverse-zh-cn', 'vmlinux-btf', 'mihomo-alpha')
+FORBIDDEN_PACKAGES = ('usteer', 'luci-app-usteer', 'luci-i18n-usteer-zh-cn')
 
 
 def check(config, packageinfo, requested=""):

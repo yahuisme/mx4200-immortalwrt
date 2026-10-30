@@ -147,6 +147,19 @@ def collect(source, destination):
         external = validate_external(json.loads(provenance.read_text()))
     except (OSError, ValueError) as exc:
         errors.append('External package provenance invalid: ' + str(exc))
+    custom = []
+    custom_log = source / '.custom-revisions.tsv'
+    copy(custom_log, 'custom-revisions.tsv')
+    try:
+        rows = [line.split('\t') for line in custom_log.read_text().splitlines()]
+        if (len(rows) != 1 or len(rows[0]) != 3 or rows[0][0] != 'yahuisme/packages'
+                or rows[0][1] != 'https://github.com/yahuisme/packages.git'
+                or not re.fullmatch(r'[0-9a-f]{40}', rows[0][2])):
+            raise ValueError('Expected exact packages source identity')
+        custom = [dict(name='custom/' + name, url=url, sha=sha) for name, url, sha in rows]
+    except (OSError, ValueError) as exc:
+        errors.append('Custom package provenance invalid: ' + str(exc))
+    revisions.extend(custom)
     write('revisions.json', json.dumps(revisions, indent=2) + '\n')
 
     targets = source / 'bin/targets'
@@ -187,7 +200,7 @@ def collect(source, destination):
         pass  # The missing/copy diagnostic was recorded above.
     record = dict(version=1, recipe=recipe, source=next((r for r in revisions if r['name'] == 'source'), None),
                   feeds=[r for r in revisions if r['name'].startswith('feed/')],
-                  custom_sources=[], external_packages=external,
+                  custom_sources=custom, external_packages=external,
                   builder=builder, config=config, images=entries)
     if profile:
         record.update(system=profile['system'], device=profile['device'], target=profile['target'])

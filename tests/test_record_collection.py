@@ -61,11 +61,12 @@ class BuildRecordTests(unittest.TestCase):
                         self.assertEqual(path.stat().st_mode & 0o444, 0o444)
                 if not missing:
                     revisions = json.loads((record / 'revisions.json').read_text())
-                    self.assertEqual({r['name'] for r in revisions}, {'source', 'feed/packages'})
+                    self.assertEqual({r['name'] for r in revisions}, {'source', 'feed/packages', 'custom/yahuisme/packages'})
                     self.assertEqual(json.loads((record / 'external-packages.json').read_text()),
                                      external_provenance_fixture())
-                    self.assertEqual(json.loads((record / 'build.json').read_text())['custom_sources'], [])
-                    self.assertFalse((record / 'custom-revisions.tsv').exists())
+                    self.assertEqual(json.loads((record / 'build.json').read_text())['custom_sources'][0]['name'], 'custom/yahuisme/packages')
+                    self.assertEqual((record / 'custom-revisions.tsv').read_bytes(),
+                                     (base / '.custom-revisions.tsv').read_bytes())
                     sha = subprocess.check_output(['git', '-C', tmp, 'rev-parse', 'HEAD'], text=True).strip()
                     self.assertEqual(revisions[0]['sha'], sha)
                 else:
@@ -85,14 +86,13 @@ class BuildRecordTests(unittest.TestCase):
             'missing-repository': lambda data: dict(data, repositories=data['repositories'][:-1]),
             'duplicate-repository': lambda data: dict(data, repositories=[data['repositories'][0]] * 2),
             'extra-repository': lambda data: dict(data, repositories=data['repositories'] + [dict(data['repositories'][0], name='other')]),
-            'retired-repository': lambda data: dict(data, repositories=[dict(data['repositories'][0], name='daeuniverse'), data['repositories'][1]]),
-            'null-repository': lambda data: dict(data, repositories=[None, data['repositories'][1]]),
+            'retired-repository': lambda data: dict(data, repositories=[dict(data['repositories'][0], name='other')]),
+            'null-repository': lambda data: dict(data, repositories=[None]),
             'packages-not-list': lambda data: dict(data, packages={}),
             'missing-package': lambda data: dict(data, packages=data['packages'][:-1]),
             'duplicate-package': lambda data: dict(data, packages=[data['packages'][0]] + data['packages'][:-1]),
             'extra-package': lambda data: dict(data, packages=data['packages'] + [dict(data['packages'][0], name='other')]),
-            'retired-package': lambda data: dict(data, packages=[dict(data['packages'][0], name='honk', filename='honk-1.0-fixture-r1.apk')] + data['packages'][1:]),
-            'alpha-provider': lambda data: dict(data, packages=[dict(data['packages'][0], name='mihomo-alpha', filename='mihomo-alpha-1.0-fixture-r1.apk')] + data['packages'][1:]),
+            'retired-package': lambda data: dict(data, packages=[dict(data['packages'][0], name='unselected-package', filename='unselected-package-1.0-fixture-r1.apk')] + data['packages'][1:]),
             'null-package': lambda data: dict(data, packages=[None] + data['packages'][1:]),
         }
         for field, value in (
@@ -101,12 +101,12 @@ class BuildRecordTests(unittest.TestCase):
                 ('index_sha256', 'a' * 63), ('index_sha256', 'g' * 64),
                 ('key_sha256', None), ('key_sha256', 'b' * 65)):
             faults[f'repository-{field}-{value}'] = lambda data, field=field, value=value: dict(
-                data, repositories=[dict(data['repositories'][0], **{field: value}), data['repositories'][1]])
+                data, repositories=[dict(data['repositories'][0], **{field: value}), *data['repositories'][1:]])
         for field, value in (
                 ('version', ''), ('version', '  '), ('version', 1),
-                ('arch', 'x86_64'), ('repository', 'other'), ('repository', 'eamonxg'),
+                ('arch', 'x86_64'), ('repository', 'other'), ('repository', 'unselected'),
                 ('sha256', 'short'), ('sha256', 'g' * 64), ('sha256', None),
-                ('filename', ''), ('filename', '../mihomo-meta.apk'), ('filename', 'different.apk')):
+                ('filename', ''), ('filename', '../theme.apk'), ('filename', 'different.apk')):
             faults[f'package-{field}-{value}'] = lambda data, field=field, value=value: dict(
                 data, packages=[dict(data['packages'][0], **{field: value})] + data['packages'][1:])
         for fault in ('empty', 'invalid-json', *faults):
@@ -128,9 +128,9 @@ class BuildRecordTests(unittest.TestCase):
                 self.assertEqual((base / 'record/final.config').read_bytes(), (base / '.config').read_bytes())
                 record = json.loads((base / 'record/build.json').read_text())
                 self.assertIsNone(record['external_packages'])
-                self.assertEqual(record['custom_sources'], [])
+                self.assertEqual(record['custom_sources'][0]['name'], 'custom/yahuisme/packages')
                 self.assertEqual({r['name'] for r in json.loads((base / 'record/revisions.json').read_text())},
-                                 {'source', 'feed/packages'})
+                                 {'source', 'feed/packages', 'custom/yahuisme/packages'})
                 if fault != 'empty':
                     self.assertEqual((base / 'record/external-packages.json').read_bytes(), provenance.read_bytes())
 

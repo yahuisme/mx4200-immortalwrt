@@ -83,17 +83,6 @@ class DefaultPackageTests(unittest.TestCase):
                         check(config, '', '')
         check('CONFIG_MODULE_DEFAULT_driver=y\nCONFIG_PACKAGE_driver=m\n', '', '')
 
-    def test_retired_proxy_packages_are_rejected(self):
-        for package in ('luci-app-homeproxy', 'luci-i18n-homeproxy-zh-cn', 'sing-box',
-                        'honk', 'honk-go', 'luci-app-honk', 'luci-lib-daeuniverse',
-                        'luci-i18n-daeuniverse-zh-cn'):
-            for value in ('y', 'm'):
-                with self.subTest(package=package, value=value):
-                    config = ('CONFIG_MODULE_DEFAULT_driver=y\nCONFIG_PACKAGE_driver=m\n'
-                              f'CONFIG_PACKAGE_{package}={value}\n')
-                    with self.assertRaisesRegex(ValueError, re.escape(package)):
-                        check(config, '', '')
-
     def test_formal_workflow_runs_gate_with_recipe(self):
         import subprocess
         import tempfile
@@ -111,31 +100,23 @@ class DefaultPackageTests(unittest.TestCase):
             (build / 'tmp').mkdir()
             (build / 'tmp/.packageinfo').write_text('')
             config = 'CONFIG_MODULE_DEFAULT_driver=y\nCONFIG_PACKAGE_driver=m\n' + requested
-            for fault in ('', 'missing-app', 'excluded-module', 'retired-proxy', 'missing-v2',
-                          'missing-rootfs', 'missing-ip-full', 'missing-dummy',
-                          'missing-tproxy', 'embedded-btf'):
+            for fault in ('', 'missing-app', 'excluded-module', 'missing-v2',
+                          'missing-rootfs', 'missing-homeproxy', 'missing-core', 'missing-translation'):
                 broken = config
                 if fault == 'missing-app':
                     broken = broken.replace('CONFIG_PACKAGE_luci-app-ttyd=y', '')
                 if fault == 'excluded-module':
                     broken += '\nCONFIG_PACKAGE_usteer=m\n'
                     self.assertNotEqual(broken, config)
-                if fault == 'retired-proxy':
-                    broken += '\nCONFIG_PACKAGE_honk=m\n'
-                    self.assertNotEqual(broken, config)
                 for name, symbol in (
                         ('missing-v2', 'TARGET_DEVICE_qualcommax_ipq807x_DEVICE_linksys_mx4200v2'),
                         ('missing-rootfs', 'TARGET_PER_DEVICE_ROOTFS'),
-                        ('missing-ip-full', 'PACKAGE_ip-full'),
-                        ('missing-dummy', 'PACKAGE_kmod-dummy'),
-                        ('missing-tproxy', 'PACKAGE_kmod-nft-tproxy')):
+                        ('missing-homeproxy', 'PACKAGE_luci-app-homeproxy'),
+                        ('missing-core', 'PACKAGE_sing-box'),
+                        ('missing-translation', 'PACKAGE_luci-i18n-homeproxy-zh-cn')):
                     if fault == name:
                         broken = broken.replace(f'CONFIG_{symbol}=y', '')
                         self.assertNotEqual(broken, config)
-                if fault == 'embedded-btf':
-                    broken = broken.replace('# CONFIG_KERNEL_DEBUG_INFO_BTF is not set',
-                                            'CONFIG_KERNEL_DEBUG_INFO_BTF=y')
-                    self.assertNotEqual(broken, config)
                 (build / '.config').write_text(broken)
                 result = subprocess.run(['bash', '-ec', command], cwd=build,
                                         env=dict(os.environ, DK_PROFILE=str(root / 'user/default')),

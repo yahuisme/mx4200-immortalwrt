@@ -78,5 +78,5 @@ class FeedProvenanceTests(unittest.TestCase):
             result = fixture.run_record(base)
             self.assertEqual(result.returncode, 0, result.stderr)
             revisions = json.loads((base / 'record/revisions.json').read_text())
-            self.assertEqual([row['name'] for row in revisions], ['source', 'feed/packages'])
+            self.assertEqual([row['name'] for row in revisions], ['source', 'feed/packages', 'custom/yahuisme/packages'])
             self.assertEqual(json.loads((base / 'record/diagnostics.json').read_text())['errors'], [])
