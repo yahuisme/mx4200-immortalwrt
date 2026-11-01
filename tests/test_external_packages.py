@@ -55,11 +55,102 @@ def local_repositories(module, directory):
 
 
 class ExternalPackageTests(unittest.TestCase):
+    def test_prepare_rejects_unreviewed_version_without_any_writes(self):
+        source = fixture(self, 'MX_APK_SOURCE_FIXTURE')
+        module = helper()
+        versions = (
+            'VERSION_NUMBER:=26.01.0\n',
+            'VERSION_NUMBER:=$(if $(VERSION_NUMBER),$(VERSION_NUMBER),26.01.0)\n',
+            'VERSION_NUMBER:=25.12.2garbage\n',
+            'VERSION_NUMBER:=$(unreviewed,25.12.2)\n',
+            'VERSION_NUMBER:=prefix25.12.2)\n',
+            'VERSION_NUMBER:=25.12.2\nVERSION_NUMBER:=26.01.0\n',
+            'VERSION_NUMBER:=25.12.2\nVERSION_NUMBER+=suffix\n',
+            '# missing version assignment\n',
+        )
+        for version in versions:
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                for name in ('package/Makefile', 'include/rootfs.mk', 'include/image.mk', 'include/version.mk'):
+                    path = root / name
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(source / name, path)
+                (root / 'include/version.mk').write_text(version)
+                # Existing generated files must survive a rejected preparation too.
+                (root / '.external-packages.mk').write_text('existing snapshot inputs\n')
+                before = {str(p.relative_to(root)): p.read_bytes() if p.is_file() else None
+                          for p in root.rglob('*')}
+                with self.assertRaisesRegex(ValueError, 'require reviewed ImmortalWrt 25.12'):
+                    module.prepare(root)
+                self.assertEqual(before, {str(p.relative_to(root)): p.read_bytes() if p.is_file() else None
+                                          for p in root.rglob('*')})
+
+    def test_version_override_is_checked_before_prepare_writes(self):
+        source = fixture(self, 'MX_APK_SOURCE_FIXTURE')
+        for override in ('26.01.0', '25.12.2garbage', 'SNAPSHOT'):
+            with self.subTest(override=override), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                for name in ('package/Makefile', 'include/rootfs.mk', 'include/image.mk', 'include/version.mk'):
+                    path = root / name
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(source / name, path)
+                (root / '.config').write_text('CONFIG_VERSION_NUMBER="' + override + '"\n')
+                before = {str(p.relative_to(root)): p.read_bytes() if p.is_file() else None
+                          for p in root.rglob('*')}
+                with self.assertRaisesRegex(ValueError, 'require reviewed ImmortalWrt 25.12'):
+                    helper().prepare(root)
+                self.assertEqual(before, {str(p.relative_to(root)): p.read_bytes() if p.is_file() else None
+                                          for p in root.rglob('*')})
+
+    def test_supported_versions_prepare_idempotently_without_defconfig(self):
+        source = fixture(self, 'MX_APK_SOURCE_FIXTURE')
+        for version in ('VERSION_NUMBER:=25.12.0\n', 'VERSION_NUMBER:=25.12.2\n',
+                        'VERSION_NUMBER:=25.12.999\n', (source / 'include/version.mk').read_text()):
+            for override in ('', 'CONFIG_VERSION_NUMBER=""\n', 'CONFIG_VERSION_NUMBER="25.12.2"\n'):
+                with self.subTest(version=version, override=override), tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    for name in ('package/Makefile', 'include/rootfs.mk', 'include/image.mk', 'include/version.mk'):
+                        path = root / name
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copyfile(source / name, path)
+                    (root / 'include/version.mk').write_text(version)
+                    (root / '.config').write_text(override)
+                    helper().prepare(root)
+                    before = {str(p.relative_to(root)): p.read_bytes() if p.is_file() else None
+                              for p in root.rglob('*')}
+                    helper().prepare(root)
+                    self.assertEqual(before, {str(p.relative_to(root)): p.read_bytes() if p.is_file() else None
+                                              for p in root.rglob('*')})
+
+    def test_snapshot_rechecks_changed_version_without_any_writes(self):
+        source = fixture(self, 'MX_APK_SOURCE_FIXTURE')
+        for version, config in (
+                ('VERSION_NUMBER:=26.01.0\n', ''),
+                ('VERSION_NUMBER:=prefix25.12.2)\n', ''),
+                ('VERSION_NUMBER:=25.12.2\n', 'CONFIG_VERSION_NUMBER="26.01.0"\n')):
+            with self.subTest(version=version, config=config), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                for name in ('package/Makefile', 'include/rootfs.mk', 'include/image.mk', 'include/version.mk'):
+                    path = root / name
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(source / name, path)
+                helper().prepare(root)
+                (root / 'include/version.mk').write_text(version)
+                (root / '.config').write_text('CONFIG_USE_APK=y\nCONFIG_TARGET_ARCH_PACKAGES="aarch64_cortex-a53"\n' + config)
+                (root / '.external-packages').mkdir()
+                (root / '.external-packages/provenance.json').write_text('existing evidence\n')
+                before = {str(p.relative_to(root)): p.read_bytes() if p.is_file() else None
+                          for p in root.rglob('*')}
+                with self.assertRaisesRegex(ValueError, 'require reviewed ImmortalWrt 25.12'):
+                    helper().snapshot(root, root / 'must-not-execute-apk')
+                self.assertEqual(before, {str(p.relative_to(root)): p.read_bytes() if p.is_file() else None
+                                          for p in root.rglob('*')})
+
     def test_real_assembly_hooks_cover_common_and_device_rootfs(self):
         source = fixture(self, 'MX_APK_SOURCE_FIXTURE')
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for name in ('package/Makefile', 'include/rootfs.mk', 'include/image.mk'):
+            for name in ('package/Makefile', 'include/rootfs.mk', 'include/image.mk', 'include/version.mk'):
                 path = root / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(source / name, path)

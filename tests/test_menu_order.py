@@ -14,7 +14,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 MENUS = ROOT / 'user/default/files/usr/share/luci/menu.d'
 FIXTURE = ROOT / 'tests/fixtures/services-menu-contract.json'
-FIXTURE_SHA256 = '2358583800510653673c3a9bb27a772f51db1e56ed3a946d963d4060f802ea91'
+FIXTURE_SHA256 = 'eec8eac2d5a209cdc3a35311d48b619f24a8b449c56a6d69e85ac08b3fd7569b'
 PARENT = 'admin/services/homeproxy'
 TERMINAL = 'admin/services/ttyd'
 PROXY_MENU = 'luci-app-homeproxy.json'
@@ -42,6 +42,12 @@ class MenuOrderTests(unittest.TestCase):
         # HomeProxy already supplies order 10. A same-name overlay would replace
         # the whole source menu, hiding future submenus, fields and dependencies.
         self.assertNotIn(PROXY_MENU, overlay, 'Use the native HomeProxy menu without an overlay')
+        self.assertNotIn('luci-app-advanced-reboot.json', overlay,
+                         'Use the complete native advanced-reboot menu at order 90')
+        for name, source in self.source.items():
+            if name != TERMINAL_MENU:
+                self.assertEqual(installed[name], source, name)
+        self.assertEqual(installed['luci-app-advanced-reboot.json']['admin/system/advanced-reboot']['order'], 90)
         self.assertEqual(installed[PROXY_MENU], self.source[PROXY_MENU])
         self.assertEqual(installed[PROXY_MENU][PARENT]['order'], 10)
         terminal = copy.deepcopy(overlay[TERMINAL_MENU])
@@ -55,6 +61,8 @@ class MenuOrderTests(unittest.TestCase):
         else:
             terminal[TERMINAL].pop('order')
         self.assertEqual(terminal, upstream, 'Terminal may change only its route prefix and parent order')
+        self.assertIn(installed[TERMINAL_MENU],
+                      (self.source[TERMINAL_MENU], overlay[TERMINAL_MENU]))
         merged = {}
         for entries in (installed | overlay).values():
             for path, row in entries.items():
@@ -111,12 +119,27 @@ class MenuOrderTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self.assert_contract(changed, self.source)
 
+    def test_native_advanced_reboot_metadata_changes_are_rejected(self):
+        name = 'luci-app-advanced-reboot.json'
+        route = 'admin/system/advanced-reboot'
+        for field, value in (('order', 91), ('action', {'type': 'view', 'path': 'wrong'}),
+                             ('depends', {'acl': ['wrong']}), ('new-upstream-field', True)):
+            with self.subTest(field=field):
+                installed = copy.deepcopy(self.source)
+                installed[name][route][field] = value
+                with self.assertRaises(AssertionError):
+                    self.assert_contract(self.overlay, installed)
+        overlay = copy.deepcopy(self.overlay)
+        overlay[name] = self.source[name]
+        with self.assertRaises(AssertionError):
+            self.assert_contract(overlay, self.source)
+
     def test_interposed_actual_sibling_is_rejected(self):
         for order in (10, 10.5, 11):
             with self.subTest(order=order):
                 changed = copy.deepcopy(self.source)
-                changed['luci-base.json']['admin/services/interposed'] = {
-                    'title': 'Hzzz', 'order': order}
+                changed['additional-service.json'] = {'admin/services/interposed': {
+                    'title': 'Hzzz', 'order': order}}
                 with self.assertRaises(AssertionError):
                     self.assert_contract(self.overlay, changed)
 
@@ -125,6 +148,7 @@ class MenuOrderTests(unittest.TestCase):
         directory = Path(os.environ['MX_MENU_ROOT']) / 'usr/share/luci/menu.d'
         self.assertTrue(directory.is_dir())
         self.assert_contract(self.overlay, menu_files(directory))
+        self.assertEqual(menu_files(directory)[TERMINAL_MENU], self.overlay[TERMINAL_MENU])
 
 
 if __name__ == '__main__':

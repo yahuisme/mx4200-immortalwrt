@@ -1,6 +1,7 @@
 """Execute current customization without requiring an unselected TLS recipe."""
 import os
 from pathlib import Path
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -9,16 +10,88 @@ ROOT = Path(__file__).resolve().parents[1]
 CUSTOM = ROOT / 'user/default/custom.sh'
 
 
+def tree_contents(root):
+    """Include empty directories, symlinks, modes and bytes, not just files."""
+    result = {}
+    for path in root.rglob('*'):
+        mode = path.lstat().st_mode
+        data = (os.readlink(path) if stat.S_ISLNK(mode) else
+                path.read_bytes() if stat.S_ISREG(mode) else None)
+        result[str(path.relative_to(root))] = (mode, data)
+    return result
+
+
 class CustomScopeTests(unittest.TestCase):
+    def test_actual_custom_rejects_unreviewed_version_before_any_tree_writes(self):
+        # Execute the complete production custom/packages scripts, with only the
+        # container mount path relocated. Local real Git objects avoid network.
+        cases = (
+            ('unsupported', 'VERSION_NUMBER:=26.01.0\n', ''),
+            ('malformed', 'VERSION_NUMBER:=25.12.2garbage\n', ''),
+            ('override', 'VERSION_NUMBER:=25.12.2\n', 'CONFIG_VERSION_NUMBER="26.01.0"\n'),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            donor = base / 'donor'
+            subprocess.run(['git', 'init', '-q', '-b', 'main', str(donor)], check=True)
+            for name in ('luci-app-homeproxy', 'sing-box'):
+                path = donor / name / 'Makefile'
+                path.parent.mkdir()
+                path.write_text('# local caller-regression recipe: ' + name + '\n')
+            subprocess.run(['git', '-C', str(donor), 'add', '.'], check=True)
+            subprocess.run(['git', '-C', str(donor), '-c', 'user.name=Fixture', '-c',
+                            'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture'], check=True)
+            config = base / 'gitconfig'
+            subprocess.run(['git', 'config', '--file', str(config),
+                            f'url.{donor.as_uri()}.insteadOf',
+                            'https://github.com/yahuisme/packages.git'], check=True)
+            hooks = base / 'hooks'
+            hooks.mkdir()
+            for name in ('packages.sh', 'external_packages.py', 'temperature.py', 'settings.sh'):
+                (hooks / name).write_text((ROOT / 'scripts' / name).read_text().replace(
+                    '/cache-scripts/', str(hooks) + '/'))
+            custom = base / 'custom.sh'
+            custom.write_text(CUSTOM.read_text().replace('/cache-scripts/', str(hooks) + '/'))
+            for label, version, override in cases:
+                with self.subTest(case=label):
+                    root = base / label
+                    for name in ('include', 'scripts', 'package', 'feeds/luci', 'feeds/packages',
+                                 'tmp/info/empty', '.external-packages/empty'):
+                        (root / name).mkdir(parents=True, exist_ok=True)
+                    (root / 'include/version.mk').write_text(version)
+                    (root / '.config').write_text(override)
+                    (root / 'scripts/projectsmirrors.json').write_text(
+                        'https://mirror.cn/source\nhttps://keep.example/source\n')
+                    (root / '.custom-revisions.tsv').write_text('existing Git provenance\n')
+                    (root / '.external-packages/provenance.json').write_text('existing APK provenance\n')
+                    (root / 'tmp/.packageinfo').write_text('existing index\n')
+                    for name in ('luci-app-homeproxy', 'sing-box'):
+                        path = root / 'package' / name / 'Makefile'
+                        path.parent.mkdir()
+                        path.write_text('existing ' + name + '\n')
+                        (root / 'feeds/luci' / name).symlink_to(root / 'package' / name)
+                    before = tree_contents(base)
+                    result = subprocess.run(['bash', str(custom)], cwd=root, capture_output=True,
+                                            text=True, env=dict(os.environ, DK_OPENWRT=str(root),
+                                            GIT_CONFIG_GLOBAL=str(config), GIT_CONFIG_NOSYSTEM='1',
+                                            TMPDIR=tmp))
+                    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn('require reviewed ImmortalWrt 25.12', result.stderr)
+                    self.assertEqual(before, tree_contents(base),
+                                     'custom must reject before changing any fixture file/directory')
+
     def test_customization_does_not_read_unselected_gnutls(self):
         for temperature_status in ('0', '17'):
             with self.subTest(temperature_status=temperature_status), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 (root / 'package').mkdir()
+                (root / 'include').mkdir()
+                (root / 'include/version.mk').write_text('VERSION_NUMBER:=25.12.2\n')
                 (root / 'tmp/info').mkdir(parents=True)
                 (root / 'tmp/.packageinfo').write_text('old metadata')
                 env = dict(os.environ, DK_OPENWRT=tmp, LOG=str(root / 'calls'),
-                           TEMP_STATUS=temperature_status)
+                           TEMP_STATUS=temperature_status,
+                           REAL_EXTERNAL=str(ROOT / 'scripts/external_packages.py'))
                 boundary = '''
 bash() {
     case "$1" in
@@ -28,6 +101,13 @@ bash() {
     esac
 }
 python3() {
+    if [ "$1" = /cache-scripts/external_packages.py ]; then
+        [ "$2" = preflight ] && [ "$3" = "$DK_OPENWRT" ] || return 99
+        printf 'preflight\\n' >> "$LOG"
+        shift
+        command python3 "$REAL_EXTERNAL" "$@"
+        return "$?"
+    fi
     [ "$1" = /cache-scripts/temperature.py ] || return 99
     printf 'temperature\\n' >> "$LOG"
     return "$TEMP_STATUS"
@@ -37,8 +117,8 @@ python3() {
                                         cwd=root, env=env, text=True, capture_output=True)
                 self.assertEqual(result.returncode, int(temperature_status), result.stderr)
                 self.assertEqual((root / 'calls').read_text().splitlines(),
-                                 ['packages', 'temperature', 'settings'] if temperature_status == '0'
-                                 else ['packages', 'temperature'])
+                                 ['preflight', 'packages', 'temperature', 'settings'] if temperature_status == '0'
+                                 else ['preflight', 'packages', 'temperature'])
                 self.assertEqual((root / 'tmp/.packageinfo').exists(), temperature_status != '0')
                 self.assertEqual((root / 'tmp/info').exists(), temperature_status != '0')
                 self.assertFalse((root / 'feeds/packages/libs/gnutls/Makefile').exists())

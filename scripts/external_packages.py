@@ -37,8 +37,28 @@ def put(root, name, text):
     path.write_text(text)
 
 
+def reviewed_version(root):
+    """Accept only the reviewed stable literal or official Kconfig fallback."""
+    text = (root / 'include/version.mk').read_text()
+    assignments = re.findall(r'^VERSION_NUMBER\s*[:+?]?=.*$', text, re.M)
+    direct = r'VERSION_NUMBER:=25\.12\.[0-9]+'
+    fallback = r'VERSION_NUMBER:=\$\(if \$\(VERSION_NUMBER\),\$\(VERSION_NUMBER\),25\.12\.[0-9]+\)'
+    config_path = root / '.config'
+    config = config_path.read_text() if config_path.exists() else ''
+    overrides = re.findall(r'^CONFIG_VERSION_NUMBER=(.*)$', config, re.M)
+    if len(overrides) > 1 or (overrides and overrides[0] != '""' and
+                             not re.fullmatch(r'"25\.12\.[0-9]+"', overrides[0])):
+        raise ValueError('External APK feeds require reviewed ImmortalWrt 25.12')
+    if not ((len(assignments) == 1 and re.fullmatch(direct, assignments[0])) or
+            (len(assignments) == 2 and
+             assignments[0] == 'VERSION_NUMBER:=$(call qstrip,$(CONFIG_VERSION_NUMBER))' and
+             re.fullmatch(fallback, assignments[1]))):
+        raise ValueError('External APK feeds require reviewed ImmortalWrt 25.12')
+
+
 def prepare(root):
     root = Path(root).resolve()
+    reviewed_version(root)  # Reject incompatible sources before writing any files.
     packages = ' '.join(f'{p}@{tag}' for tag, repo in REPOSITORIES.items() for p in repo['packages'])
     repositories = ' '.join('--repository-config "@' + tag + ' file://$(TOPDIR)/.external-packages/' +
                             tag + '/packages.adb"' for tag in REPOSITORIES)
@@ -81,10 +101,7 @@ def snapshot(root, apk, repositories=None):
     root, apk = Path(root).resolve(), str(Path(apk).resolve())
     repositories = repositories or REPOSITORIES
     config = (root / '.config').read_text()
-    version = (root / 'include/version.mk').read_text()
-    if not re.search(r'^VERSION_NUMBER:=.*25\.12\.[0-9]+\)', version, re.M) and not re.search(
-            r'^VERSION_NUMBER:=25\.12\.[0-9]+$', version, re.M):
-        raise ValueError('External APK feeds require reviewed ImmortalWrt 25.12')
+    reviewed_version(root)  # Recheck at assembly even after successful preparation.
     if 'CONFIG_USE_APK=y' not in config or f'CONFIG_TARGET_ARCH_PACKAGES="{ARCH}"' not in config:
         raise ValueError('External APK feeds require APK and aarch64_cortex-a53')
     destination = root / '.external-packages'
@@ -189,7 +206,9 @@ def verify_root(root, provenance):
 
 
 if __name__ == '__main__':
-    if sys.argv[1] == 'prepare':
+    if sys.argv[1] == 'preflight':
+        reviewed_version(Path(sys.argv[2]).resolve())
+    elif sys.argv[1] == 'prepare':
         prepare(sys.argv[2])
     elif sys.argv[1] == 'snapshot':
         snapshot(*sys.argv[2:])

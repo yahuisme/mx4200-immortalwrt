@@ -1,5 +1,6 @@
 """Official stable-source defaults and intentional customization requirements."""
 import os
+import re
 from pathlib import Path
 import unittest
 import yaml
@@ -10,6 +11,34 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class OfficialMigrationTests(unittest.TestCase):
+    def assert_native_dataplane(self, config, target):
+        flattened = target.replace('\\\n', ' ')
+        defaults = set()
+        for row in re.findall(r'^DEFAULT_PACKAGES\s*\+=\s*(.*)$', flattened, re.M):
+            defaults.update(row.split())
+        native = {package for package in defaults if package.startswith('kmod-qca-nss-')}
+        # Reviewed stable target owns this driver; do not whitelist arbitrary new
+        # target symbols or conflate it with external acceleration integrations.
+        self.assertEqual(native, {'kmod-qca-nss-dp'})
+        selected = {line.split('=', 1)[0].removeprefix('CONFIG_PACKAGE_')
+                    for line in config if line.startswith('CONFIG_PACKAGE_kmod-qca-nss-')
+                    and line.rsplit('=', 1)[-1] in ('y', 'm')}
+        self.assertEqual(selected, native)
+        self.assertIn('CONFIG_PACKAGE_kmod-qca-nss-dp=y', config)
+
+    def test_official_dataplane_is_preserved_and_unexpected_symbols_rejected(self):
+        target = 'DEFAULT_PACKAGES += \\\n\tkmod-qca-nss-dp kmod-ath11k-ahb wpad-openssl\n'
+        config = ['CONFIG_PACKAGE_kmod-qca-nss-dp=y']
+        self.assert_native_dataplane(config, target)
+        for extra in ('kmod-qca-nss-ecm', 'kmod-qca-nss-drv', 'kmod-qca-nss-unknown'):
+            for value in ('y', 'm'):
+                with self.subTest(extra=extra, value=value), self.assertRaises(AssertionError):
+                    self.assert_native_dataplane(config + [f'CONFIG_PACKAGE_{extra}={value}'], target)
+        with self.assertRaises(AssertionError):
+            self.assert_native_dataplane([], target)
+        with self.assertRaises(AssertionError):
+            self.assert_native_dataplane(config, target.replace('kmod-qca-nss-dp', ''))
+
     def test_signed_apk_package_selection_is_theme_only(self):
         self.assertEqual(set(REPOSITORIES), {'eamonxg'})
         self.assertEqual(REPOSITORIES['eamonxg']['packages'], [
@@ -95,4 +124,4 @@ class OfficialMigrationTests(unittest.TestCase):
                         'luci-i18n-ttyd-zh-cn', 'ath11k-firmware-ipq8074',
                         'wpad-openssl', 'kmod-ath11k-ahb'):
             self.assertIn('CONFIG_PACKAGE_' + package + '=y', config)
-        self.assertFalse(any(line.startswith('CONFIG_PACKAGE_kmod-qca-nss-') and line.endswith('=y') for line in config))
+        self.assert_native_dataplane(config, (source / 'target/linux/qualcommax/Makefile').read_text())

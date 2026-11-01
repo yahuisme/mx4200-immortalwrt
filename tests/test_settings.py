@@ -5,6 +5,7 @@ MX4200_PREPARED_SOURCE supplies a tagged stable Git tree with version/version.da
 and .config; the render harness runs no build targets or compilation.
 """
 import os
+import re
 import subprocess
 import tempfile
 import unittest
@@ -25,7 +26,11 @@ class SettingsScriptTests(unittest.TestCase):
             DTS: WIFI,
             DTS.replace('v2.dts', 'v1.dts'): '#include "ipq8074-512m.dtsi"\n',
             "feeds/luci/collections/luci/Makefile":
-                "DEPENDS:= +luci-base +luci-theme-bootstrap +luci-mod-admin-full\n# attendedsysupgrade\n",
+                "LUCI_DEPENDS:=+luci-light +luci-app-package-manager\n# attendedsysupgrade\n",
+            "feeds/luci/collections/luci-light/Makefile":
+                "LUCI_DEPENDS:=+luci-mod-admin-full +luci-theme-bootstrap\n",
+            "feeds/luci/modules/luci-mod-admin-full/Makefile":
+                "LUCI_DEPENDS:=+luci-base +luci-mod-status +luci-mod-system +luci-mod-network\n",
             "feeds/luci/modules/luci-mod-system/htdocs/flash.js":
                 "const ip = '192.168.1.1';\n",
             "package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc":
@@ -74,11 +79,27 @@ class SettingsScriptTests(unittest.TestCase):
             result = subprocess.run(["bash", str(ROOT / "scripts/settings.sh")],
                                     cwd=d, env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            collection = Path(d, "feeds/luci/collections/luci/Makefile").read_text()
-            self.assertNotIn("luci-theme-bootstrap", collection)
-            self.assertNotIn("luci-theme-aurora", collection)
-            self.assertIn("+luci-base", collection)
-            self.assertIn("+luci-mod-admin-full", collection)
+            graph = {}
+            for makefile in Path(d, 'feeds/luci').glob('*/*/Makefile'):
+                text = makefile.read_text().replace('\\\n', ' ')
+                deps = re.findall(r'^LUCI_DEPENDS\s*[:+]?=\s*(.*)$', text, re.M)
+                graph[makefile.parent.name] = {
+                    token.removeprefix('+').split(':')[-1]
+                    for line in deps for token in line.split()}
+            # Follow the official collection graph rather than requiring flattened
+            # direct dependencies in collections/luci/Makefile.
+            self.assertIn('luci-light', graph['luci'])
+            self.assertIn('luci-mod-admin-full', graph['luci-light'])
+            closure, pending = set(), ['luci']
+            while pending:
+                package = pending.pop()
+                if package not in closure:
+                    closure.add(package)
+                    pending.extend(graph.get(package, ()))
+            self.assertTrue({'luci-base', 'luci-mod-admin-full', 'luci-mod-status',
+                             'luci-mod-system', 'luci-mod-network'} <= closure)
+            self.assertTrue({'luci-theme-bootstrap', 'luci-theme-aurora',
+                             'luci-app-attendedsysupgrade'}.isdisjoint(closure))
             self.assertEqual(platform_expected, {p.relative_to(d): p.read_bytes()
                              for top in ('target', 'package/kernel')
                              for p in Path(d, top).rglob('*') if p.is_file()})
