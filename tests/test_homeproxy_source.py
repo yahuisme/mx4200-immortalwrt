@@ -19,7 +19,8 @@ class HomeProxySourceTests(unittest.TestCase):
             self.assertNotIn(name, FORBIDDEN_PACKAGES)
         self.assertEqual(set(REPOSITORIES), {'eamonxg'})
         self.assertEqual({p.name for p in (ROOT / 'user/default/files/usr/share/luci/menu.d').glob('*.json')},
-                         {'luci-app-ttyd.json'})
+                         {'luci-app-ttyd.json', 'luci-app-advanced-reboot.json',
+                          'luci-app-cpufreq.json'})
 
     def test_local_clone_replaces_feed_recipes_and_records_exact_source(self):
         original = (ROOT / 'scripts/packages.sh').read_text()

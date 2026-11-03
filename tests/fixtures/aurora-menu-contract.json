@@ -1,0 +1,7 @@
+{
+  "repository": "https://github.com/eamonxg/luci-app-aurora-config",
+  "revision": "a5299ce0144859f47683ec3bc40805bf616f534f",
+  "path": "root/usr/share/luci/menu.d/luci-app-aurora.json",
+  "sha256": "475c1ae9c9b5dd2b2d829a3e880dcb2510401fb3f96759e57e83aedf51298056",
+  "text": "{\n  \"admin/system/aurora\": {\n    \"title\": \"Aurora Theme Design\",\n    \"order\": 100,\n    \"action\": {\n      \"type\": \"firstchild\"\n    },\n    \"depends\": {\n      \"acl\": [\"luci-app-aurora\"]\n    }\n  },\n  \"admin/system/aurora/studio\": {\n    \"title\": \"Design Studio\",\n    \"order\": 10,\n    \"action\": {\n      \"type\": \"view\",\n      \"path\": \"aurora/studio\"\n    }\n  },\n  \"admin/system/aurora/marketplace\": {\n    \"title\": \"Theme Marketplace\",\n    \"order\": 15,\n    \"action\": {\n      \"type\": \"view\",\n      \"path\": \"aurora/marketplace\"\n    }\n  }\n}\n"
+}
