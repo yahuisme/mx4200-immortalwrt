@@ -47,6 +47,6 @@ Aurora 主题及配置插件使用官方 APK 软件源，每次构建获取源�
 
 ## 构建
 
-每隔 3 天自动构建，计划时间为香港时间 12:00。
+每月 1、4、7……日自动构建，计划时间为香港时间 12:00。
 
 也可手动运行 Actions。使用 Ubuntu 24.04 ARM64 runner 与 Debian ARM64 Docker 环境，仅发布两个硬件版本各自的 `factory.bin` 与 `sysupgrade.bin`，保留最近一版。
