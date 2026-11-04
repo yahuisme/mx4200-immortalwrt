@@ -16,12 +16,13 @@ def pages(entries, total=None):
 
 
 class ReadbackTests(unittest.TestCase):
-    def replay(self, replies, expected, delays):
+    def replay(self, replies, expected, delays, before=None):
         new, old = entry(1, TC + 'new'), entry(2, TC + 'old')
         peer = entry(3, 'unrelated')
         with patch.dict(os.environ, GITHUB_REF=REF), \
                 patch.object(h.subprocess, 'check_output',
-                             side_effect=[pages([new, old, peer]), *replies]) as api, \
+                             side_effect=[pages([new, old, peer] if before is None else before),
+                                          *replies]) as api, \
                 patch.object(h.subprocess, 'run') as delete, \
                 patch.object(h.time, 'sleep') as sleep, \
                 contextlib.redirect_stdout(io.StringIO()) as log:
@@ -66,6 +67,32 @@ class ReadbackTests(unittest.TestCase):
                       [entry(1, TC + 'new'), entry(2, TC + 'old')]):
             with self.subTest(after=after):
                 self.replay([pages([], total=1), pages(after)], False, [2])
+
+    def test_retry_preserves_protected_ids_and_other_branch(self):
+        new = entry(1, TC + 'new')
+        protected = entry(4, TC + 'new')
+        other = entry(5, TC + 'other', ref='refs/heads/other')
+        before = [new, entry(2, TC + 'old'), protected, other]
+        for missing in (None, 4, 5):
+            after = [e for e in (new, protected, other) if e['id'] != missing]
+            with self.subTest(missing=missing):
+                log = self.replay([pages([], total=1), pages(after)], missing is None,
+                                  [2], before=before)
+                if missing is not None:
+                    self.assertIn('retention readback failed', log)
+
+    def test_hard_failure_after_inconsistent_read_stops_immediately(self):
+        new = entry(1, TC + 'new')
+        faults = {
+            'malformed_entry': pages([dict(new, size_in_bytes='100')]),
+            'missing_field': pages([{'id': 1}]),
+            'duplicate_id': pages([new, new]),
+            'invalid_json': '{',
+            'cli_error': h.subprocess.CalledProcessError(13, ['gh', 'api']),
+        }
+        for label, fault in faults.items():
+            with self.subTest(fault=label):
+                self.replay([pages([], total=1), fault], False, [2])
 
     def test_incomplete_preflight_never_retries_or_deletes(self):
         with patch.dict(os.environ, GITHUB_REF=REF), \
