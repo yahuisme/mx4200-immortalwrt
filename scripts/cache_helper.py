@@ -29,6 +29,20 @@ BUDGET = 10_000_000_000
 HEADROOM = 64 * 1024 * 1024
 
 
+class InventoryChanged(ValueError):
+    """A paginated cache snapshot is not yet internally consistent."""
+
+
+def readback():
+    # Retry reads only: never replay deletion when the API list lags it.
+    for delay in (2, 4):
+        try:
+            return inv()
+        except InventoryChanged:
+            time.sleep(delay)
+    return inv()
+
+
 def inv():
     raw = subprocess.check_output(['gh', 'api', '--paginate', '--slurp',
                                   'repos/{owner}/{repo}/actions/caches?per_page=100'], text=True)
@@ -43,7 +57,7 @@ def inv():
                 or page['total_count'] < 0 or not isinstance(page.get('actions_caches'), list)):
             raise ValueError('invalid cache inventory page')
         if total is not None and page['total_count'] != total:
-            raise ValueError('cache inventory changed during pagination')
+            raise InventoryChanged('cache inventory changed during pagination')
         total = page['total_count']
         for e in page['actions_caches']:
             if (type(e['id']) is not int or type(e['size_in_bytes']) is not int
@@ -53,7 +67,7 @@ def inv():
             seen.add(e['id'])
             entries.append(e)
     if len(entries) != total:
-        raise ValueError('incomplete cache inventory')
+        raise InventoryChanged('incomplete cache inventory')
     return entries
 
 
@@ -131,7 +145,7 @@ def cleanup(prefix, keep):
         for e in old:
             subprocess.run(['gh', 'cache', 'delete', str(e['id'])], check=True)
             deleted.append(e['id'])
-        after = inv()
+        after = readback()
         remaining = {e['id'] for e in after}
         if not saved(after, prefix, keep, ref) or not protected <= remaining:
             raise ValueError('new/protected cache retention readback failed')
