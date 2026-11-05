@@ -11,8 +11,15 @@
 
 前往本项目 [Releases](https://github.com/yahuisme/mx4200-immortalwrt/releases)：
 
-- **MX4200 发布组**：选择本机 v1 / v2 的 `squashfs-factory.bin` 和 `squashfs-sysupgrade.bin`。
-- **MX4300-HomeWRK 发布组**：MX4300 下载本机型的 `squashfs-factory.bin` 和 `squashfs-sysupgrade.bin`；HomeWRK 下载 `squashfs-sysupgrade.bin`。
+**MX4200 发布组：**
+
+选择本机 v1 / v2 的 `squashfs-factory.bin` 和 `squashfs-sysupgrade.bin`。
+
+**MX4300-HomeWRK 发布组：**
+
+MX4300 下载本机型的 `squashfs-factory.bin` 和 `squashfs-sysupgrade.bin`；
+
+HomeWRK 下载 `squashfs-sysupgrade.bin`。
 
 也可使用 [OpenWrt 官方固件](https://firmware-selector.openwrt.org/)或 [ImmortalWrt 官方固件](https://firmware-selector.immortalwrt.org/)，在选择器搜索自己的机型，并按下载页核对 SHA-256。
 
@@ -44,15 +51,18 @@
 
 - Windows 电脑、网线、可清空的 U 盘。
 - **3.3V USB-TTL** 模块及其 Windows 驱动。
-- [PuTTY](https://www.chiark.greenend.org.uk/~sgtatham/putty/latest.html)：连接串口。
-- [HDD Raw Copy Tool](https://hddguru.com/software/HDD-Raw-Copy-Tool/)：制作启动 U 盘。
+- [PuTTY 中文版](https://github.com/larryli/putty)：连接串口，从项目 Releases 下载。
+- [Rufus](https://rufus.ie/zh/)：制作启动 U 盘。
 - HomeWRK 的 `initramfs-uImage.itb` 和 `squashfs-sysupgrade.bin`。
 
 ### 2. 制作启动 U 盘
 
-1. 将 HomeWRK 临时镜像重命名为 `initramfs.img`，仅改文件名，不解压。
-2. 以管理员身份打开 HDD Raw Copy Tool，来源选 **FILE**，打开 `initramfs.img`。
-3. 目标选择 U 盘，核对型号和容量，然后开始写入。
+1. 在资源管理器中开启“文件扩展名”，将 HomeWRK 临时镜像重命名为 `initramfs.img`，不解压、不转换格式。
+2. 以管理员身份打开 Rufus，“设备”选择 U 盘，核对型号和容量。
+3. 在 Rufus 窗口按一次 **Alt＋M**，确认提示已启用“忽略启动标记检查”，再点击“选择”，打开 `initramfs.img`。
+4. 点击“开始”，按原始镜像方式写入；若出现模式选择，选择 **DD 镜像模式**，不要选 ISO 模式。等待完成。
+
+HomeWRK 临时镜像不是电脑用的标准启动盘镜像，因此需要先启用 Alt＋M；不需要设置 FAT32、MBR 或 GPT。
 
 **这会清空整个 U 盘，不能选电脑硬盘。不是把镜像复制进 U 盘；写完后 Windows 若提示格式化，点取消。**
 
@@ -71,13 +81,13 @@
 插入 USB-TTL，在 Windows **设备管理器 → 端口**查看 COM 号，PuTTY 设置：
 
 ```text
-Connection type: Serial
-Serial line: 实际 COM 号，例如 COM3
-Speed: 115200
-Data bits: 8
-Stop bits: 1
-Parity: None
-Flow control: None
+连接类型：串口（Serial）
+串口：实际 COM 号，例如 COM3
+速度：115200
+数据位：8
+停止位：1
+校验：无（None）
+流控：无（None）
 ```
 
 打开串口，将 U 盘插入路由器，再给路由器通电。看到 `Hit any key to stop autoboot` 提示时按键，中断启动，停在 U-Boot 命令行。
