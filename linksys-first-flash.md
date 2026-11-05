@@ -52,17 +52,16 @@ HomeWRK 下载 `squashfs-sysupgrade.bin`。
 - Windows 电脑、网线、可清空的 U 盘。
 - **3.3V USB-TTL** 模块及其 Windows 驱动。
 - [PuTTY 中文版](https://github.com/larryli/putty)：连接串口，从项目 Releases 下载。
-- [Rufus](https://rufus.ie/zh/)：制作启动 U 盘。
+- [HDD Raw Copy Tool](https://hddguru.com/software/HDD-Raw-Copy-Tool/)：制作启动 U 盘，下载官方便携版即可。
 - HomeWRK 的 `initramfs-uImage.itb` 和 `squashfs-sysupgrade.bin`。
 
 ### 2. 制作启动 U 盘
 
 1. 在资源管理器中开启“文件扩展名”，将 HomeWRK 临时镜像重命名为 `initramfs.img`，不解压、不转换格式。
-2. 以管理员身份打开 Rufus，“设备”选择 U 盘，核对型号和容量。
-3. 在 Rufus 窗口按一次 **Alt＋M**，确认提示已启用“忽略启动标记检查”，再点击“选择”，打开 `initramfs.img`。
-4. 点击“开始”，按原始镜像方式写入；若出现模式选择，选择 **DD 镜像模式**，不要选 ISO 模式。等待完成。
+2. 以管理员身份打开 HDD Raw Copy Tool，选择镜像文件作为来源，打开 `initramfs.img`。
+3. 目标选择 **U 盘**，核对型号和容量，开始写入并等待完成。
 
-HomeWRK 临时镜像不是电脑用的标准启动盘镜像，因此需要先启用 Alt＋M；不需要设置 FAT32、MBR 或 GPT。
+无需提前格式化 U 盘，也不用设置文件系统或分区表。
 
 **这会清空整个 U 盘，不能选电脑硬盘。不是把镜像复制进 U 盘；写完后 Windows 若提示格式化，点取消。**
 
