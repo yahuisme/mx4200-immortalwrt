@@ -19,7 +19,7 @@
 | `factory.ubi` | HomeWRK 初次安装的 UBI 镜像 |
 | `sysupgrade.bin` | 从已有 OpenWrt / ImmortalWrt 升级 |
 
-HomeWRK 初次安装需按[官方设备支持说明](https://github.com/openwrt/openwrt/commit/07f8319d2d9166a41c2fd94ec1422bcd80ada991)使用串口 / U-Boot 与 USB 启动临时系统，不能使用 MX4300 的原厂网页刷入方式。升级建议不保留配置。
+首次刷机请参照 [Linksys 首次刷机教程](linksys-first-flash.md)：MX4200 / MX4300 使用原厂后台刷入，HomeWRK 使用 Windows＋TTL 启动临时系统后刷入。升级建议不保留配置。
 
 ## 功能与应用
 
