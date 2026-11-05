@@ -1,55 +1,75 @@
 #!/usr/bin/env python3
-"""Validate and stage the exact MX4200 four-image release set."""
+"""Validate native Linksys image metadata, then stage disjoint Release groups."""
 import json
 import re
 from pathlib import Path
 import shutil
+import sys
+
+try:
+    from .build_profile import load
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from build_profile import load
 
 
-EXPECTED = {f'immortalwrt-qualcommax-ipq807x-linksys_{device}-squashfs-{kind}.bin'
-            for device in ('mx4200v1', 'mx4200v2') for kind in ('factory', 'sysupgrade')}
+PROFILE = Path(__file__).resolve().parents[1] / 'user/default'
 
 
-def validate_images(directory):
-    paths = [p for p in directory.glob('*.bin') if 'factory' in p.name or 'sysupgrade' in p.name]
-    if len(paths) != 4 or any(p.is_symlink() or not p.is_file() or not p.stat().st_size for p in paths):
-        raise ValueError('expected four nonempty images')
-    if {p.name for p in paths} != EXPECTED:
-        raise ValueError('unexpected MX4200 image filenames')
+def image_paths(directory, recursive=False):
+    paths = directory.rglob('*') if recursive else directory.iterdir()
+    return [p for p in paths if p.suffix in ('.bin', '.ubi')
+            and ('factory' in p.name or 'sysupgrade' in p.name)]
 
 
-def stage(targets, output):
-    directory = targets / 'qualcommax/ipq807x'
-    selected = sorted(targets.rglob('*.bin'))
-    # Other auxiliary binaries may exist, but never another factory/sysupgrade.
-    selected = [p for p in selected if 'factory' in p.name or 'sysupgrade' in p.name]
-    if len(selected) != 4 or {p.name for p in selected} != EXPECTED or any(
+def validate_images(directory, names):
+    paths = image_paths(directory)
+    if len(paths) != len(names) or {p.name for p in paths} != set(names) or any(
+            p.is_symlink() or not p.is_file() or not p.stat().st_size for p in paths):
+        raise ValueError('unexpected, missing, empty or symlink release images')
+
+
+def stage(targets, output, group=None):
+    contract = load(PROFILE)
+    groups = contract['release_groups']
+    if group is not None:
+        groups = {group: groups[group]}
+    names = {name for item in groups.values() for name in item['images']}
+    boards = {board for item in groups.values() for board in item['profiles']}
+    directory = targets / contract['target']
+    selected = image_paths(targets, recursive=True)
+    # Auxiliary binaries are allowed, but never another target's flash image.
+    if len(selected) != len(names) or {p.name for p in selected} != names or any(
             p.parent != directory or p.is_symlink() or not p.is_file() or not p.stat().st_size for p in selected):
-        raise ValueError('expected exactly four nonempty MX4200 v1/v2 factory/sysupgrade images')
+        raise ValueError('expected exact nonempty native factory/sysupgrade images')
     data = json.loads((directory / 'profiles.json').read_text())
-    if data['target'] != 'qualcommax/ipq807x' or set(data['profiles']) != {'linksys_mx4200v1', 'linksys_mx4200v2'}:
+    if data['target'] != contract['target'] or set(data['profiles']) != boards:
         raise ValueError('unexpected target/profiles')
     if not re.fullmatch(r'r[0-9]+-[0-9a-f]+', data['version_code']):
         raise ValueError('unexpected version_code')
-    for device, profile in data['profiles'].items():
+    for board, profile in data['profiles'].items():
         images = profile.get('images', [])
-        expected = {f'immortalwrt-qualcommax-ipq807x-{device}-squashfs-{kind}.bin': kind
-                    for kind in ('factory', 'sysupgrade')}
-        if len(images) != 2 or {entry.get('name') for entry in images} != set(expected):
-            raise ValueError('unexpected image metadata: ' + device)
+        expected = {name: 'factory' if '-factory.' in name else 'sysupgrade'
+                    for name in names if '-' + board + '-' in name}
+        if len(images) != len(expected) or {entry.get('name') for entry in images} != set(expected):
+            raise ValueError('unexpected image metadata: ' + board)
         for entry in images:
             if (entry.get('type') != expected[entry['name']]
                     or entry.get('filesystem') != 'squashfs'
                     or entry.get('size') != (directory / entry['name']).stat().st_size):
                 raise ValueError('image metadata differs from output: ' + entry['name'])
+    # Reject all metadata/input failures before creating either group's output.
     output.mkdir()
-    for path in selected:
-        shutil.copyfile(path, output / path.name)
-    validate_images(output)
+    for key, item in groups.items():
+        destination = output if group is not None else output / key
+        if destination != output:
+            destination.mkdir()
+        for name in item['images']:
+            shutil.copyfile(directory / name, destination / name)
+        validate_images(destination, item['images'])
 
 
 if __name__ == '__main__':
-    import sys
-    if len(sys.argv) != 4 or sys.argv[1] != 'stage':
-        raise SystemExit('usage: release_images.py stage TARGETS OUTPUT')
-    stage(Path(sys.argv[2]), Path(sys.argv[3]))
+    if len(sys.argv) not in (4, 5) or sys.argv[1] != 'stage':
+        raise SystemExit('usage: release_images.py stage TARGETS OUTPUT [GROUP]')
+    stage(Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4] if len(sys.argv) == 5 else None)

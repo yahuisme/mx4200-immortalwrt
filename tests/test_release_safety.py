@@ -1,5 +1,4 @@
-"""Exercise the real four-image stage and two own-main publication gates."""
-import hashlib
+"""Exercise the real eight-image stage and own-main publication gates."""
 import json
 import os
 from pathlib import Path
@@ -21,15 +20,15 @@ class ReleaseTests(unittest.TestCase):
         (base/'tmp/.packageinfo').write_text('')
         (base/'build-record').mkdir()
         (base/'build-record/source-tag.txt').write_text('v25.12.2\n')
-        for device in ('mx4200v1','mx4200v2'):
+        data={'target':'qualcommax/ipq807x','version_code':'r123-abcdef', 'profiles': {}}
+        for device in ('mx4200v1','mx4200v2','mx4300','homewrk'):
+            images = []
             for kind in ('factory','sysupgrade'):
-                (output/f'immortalwrt-qualcommax-ipq807x-linksys_{device}-squashfs-{kind}.bin').write_bytes(b'fixture-not-firmware')
-        data={'target':'qualcommax/ipq807x','version_code':'r123-abcdef',
-              'profiles':{f'linksys_{device}': {'images': [
-                  dict(name=p.name, type=kind, filesystem='squashfs', size=p.stat().st_size)
-                  for kind in ('factory','sysupgrade')
-                  for p in [output/f'immortalwrt-qualcommax-ipq807x-linksys_{device}-squashfs-{kind}.bin']]}
-                  for device in ('mx4200v1','mx4200v2')}}
+                suffix = 'ubi' if device == 'homewrk' and kind == 'factory' else 'bin'
+                image = output/f'immortalwrt-qualcommax-ipq807x-linksys_{device}-squashfs-{kind}.{suffix}'
+                image.write_bytes(b'fixture-not-firmware')
+                images.append(dict(name=image.name, type=kind, filesystem='squashfs', size=image.stat().st_size))
+            data['profiles']['linksys_'+device] = {'images': images}
         (output/'profiles.json').write_text(json.dumps(data))
         return output,data
 
@@ -66,76 +65,72 @@ class ReleaseTests(unittest.TestCase):
                 result=self.stage(base)
                 self.assertEqual(result.returncode==0,case=='valid',result.stderr)
                 if case=='valid':
-                    self.assertEqual(len(list((base/'firmware').glob('*.bin'))),4)
-                    tag=(base/'firmware/version.txt').read_text().strip()
-                    title=(base/'firmware/title.txt').read_text().strip()
-                    self.assertRegex(tag,r'^MX4200-ImmortalWrt-25\.12\.2-r123-\d\d\.\d\d\.\d\d_\d\d\.\d\d\.\d\d$')
-                    self.assertRegex(title,r'^MX4200-ImmortalWrt-25\.12\.2-r123-\d\d\.\d\d\.\d\d_\d\d\.\d\d\.\d\d$')
-                    notes=(base/'firmware/release-notes.md').read_text()
-                    self.assertIn('`factory.bin`',notes)
-                    self.assertIn('`sysupgrade.bin`',notes)
-                    self.assertIn('构建时间：',notes)
-                    self.assertIn('HomeProxy',notes)
-                    self.assertNotIn('UBI2',notes)
+                    from test_dual_publish import GROUPS
+                    profile=json.loads((ROOT/'user/default/build.json').read_text())
+                    suffixes=[]
+                    for group,device in GROUPS.items():
+                        directory=base/'firmware'/group
+                        self.assertEqual({p.name for p in directory.iterdir() if p.suffix in ('.bin','.ubi')},
+                                         set(profile['release_groups'][group]['images']))
+                        tag=(directory/'version.txt').read_text().strip()
+                        title=(directory/'title.txt').read_text().strip()
+                        self.assertRegex(tag,rf'^{device}-ImmortalWrt-25\.12\.2-r123-\d\d\.\d\d\.\d\d_\d\d\.\d\d\.\d\d$')
+                        self.assertEqual(title,tag)
+                        suffixes.append(tag.removeprefix(device+'-ImmortalWrt-'))
+                        notes=(directory/'release-notes.md').read_text()
+                        for text in ('`factory.bin`','`sysupgrade.bin`','构建时间：','HomeProxy','不可混刷'):
+                            self.assertIn(text,notes)
+                        self.assertNotIn('UBI2',notes)
+                    self.assertEqual(suffixes[0],suffixes[1])
+                    notes=(base/'firmware/mx4300-homewrk/release-notes.md').read_text()
+                    self.assertIn('`factory.ubi`',notes)
+                    self.assertIn('串口/U-Boot',notes)
+                    self.assertIn('不能当作原厂 Web 镜像',notes)
+                    self.assertNotIn('`factory.ubi`',(base/'firmware/mx4200/release-notes.md').read_text())
                     self.assertNotIn('not found',result.stderr)
                 else:
                     self.assertFalse((base/'firmware').exists(),result.stdout+result.stderr)
 
+    def test_new_model_failure_rejects_entire_single_build_before_staging(self):
+        for case in ('missing-homewrk-ubi','missing-mx4300-profile','extra-ubi','legacy-only'):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as tmp:
+                base=Path(tmp); output,data=self.fixture(base)
+                if case=='missing-homewrk-ubi':
+                    (output/'immortalwrt-qualcommax-ipq807x-linksys_homewrk-squashfs-factory.ubi').unlink()
+                if case=='missing-mx4300-profile': data['profiles'].pop('linksys_mx4300')
+                if case=='extra-ubi':
+                    elsewhere=base/'openwrt_bin/targets/other'; elsewhere.mkdir()
+                    (elsewhere/'unexpected-factory.ubi').write_bytes(b'x')
+                if case=='legacy-only':
+                    for device in ('mx4300','homewrk'):
+                        data['profiles'].pop('linksys_'+device)
+                        for path in output.glob('*linksys_'+device+'-*'): path.unlink()
+                (output/'profiles.json').write_text(json.dumps(data))
+                result=self.stage(base)
+                self.assertNotEqual(result.returncode,0,result.stderr)
+                self.assertFalse((base/'firmware').exists())
+
     def test_own_main_freshness_before_create_and_prune(self):
+        from test_dual_publish import replay, staged_fixture
         cases=('fresh','annotated','stale','error','empty','malformed','advance','recheck-error',
                'create-error','verify-error','title-error','tag-error','tag-ref-error')
         for case in cases:
             with self.subTest(case=case), tempfile.TemporaryDirectory() as tmp:
-                base=Path(tmp); self.fixture(base)
-                stage=self.stage(base); self.assertEqual(stage.returncode,0,stage.stderr)
-                (base/'gh').write_text('''#!/usr/bin/env python3
-import os,json,sys,hashlib
-from pathlib import Path
-a=sys.argv[1:]; root=Path(os.environ['STUB_ROOT']); mode=os.environ['CASE']
-with (root/'calls').open('a') as f: f.write(json.dumps(a)+'\\n')
-if a[:2]==['api','repos/yahuisme/mx4200-immortalwrt/git/ref/heads/main']:
-    second=(root/'checked').exists(); (root/'checked').touch()
-    if mode=='error' or (second and mode=='recheck-error'): sys.exit(17)
-    if mode=='empty': sys.exit(0)
-    if mode=='malformed': print('null'); sys.exit(0)
-    print('b'*40 if mode=='stale' or (second and mode=='advance') else os.environ['GITHUB_SHA'])
-elif a[:2]==['release','create']:
-    if mode=='create-error': sys.exit(19)
-elif a[0]=='api' and '/releases/tags/' in a[1]:
-    if mode=='verify-error': sys.exit(23)
-    assets=[dict(name=p.name,size=p.stat().st_size,state='uploaded',digest='sha256:'+hashlib.sha256(p.read_bytes()).hexdigest()) for p in (root/'firmware').glob('*.bin')]
-    tag=(root/'firmware/version.txt').read_text().strip()
-    print(json.dumps(dict(tag_name=tag,name='wrong' if mode=='title-error' else tag,target_commitish=os.environ['GITHUB_SHA'],draft=False,prerelease=False,assets=assets)))
-elif a[0]=='api' and '/git/ref/tags/' in a[1]:
-    if mode=='tag-ref-error': sys.exit(29)
-    print(json.dumps(dict(object=dict(type='tag' if mode=='annotated' else 'commit',
-                                     sha='c'*40 if mode=='annotated' else 'b'*40 if mode=='tag-error' else os.environ['GITHUB_SHA']))))
-elif a[:2]==['api','repos/yahuisme/mx4200-immortalwrt/git/tags/'+'c'*40]:
-    print(json.dumps(dict(object=dict(type='commit',sha=os.environ['GITHUB_SHA']))))
-elif a==['api','--paginate','--slurp','repos/yahuisme/mx4200-immortalwrt/releases?per_page=100']:
-    current=(root/'firmware/version.txt').read_text().strip()
-    print(json.dumps([[dict(tag_name=t,id=i,published_at=str(i),draft=False,prerelease=False) for i,t in enumerate(['MX4200-ImmortalWrt-old','MX4200-ImmortalWrt-previous',current],1)]]))
-elif a[:2]!=['release','delete']: sys.exit(99)
-''')
-                (base/'gh').chmod(0o755)
-                result=subprocess.run(['bash','-eo','pipefail','-c',step('Publish firmware and prune releases')['run']],cwd=base,
-                    env=dict(os.environ,PATH=tmp+':'+os.environ['PATH'],STUB_ROOT=tmp,CASE=case,GITHUB_SHA='a'*40,GITHUB_REPOSITORY='yahuisme/mx4200-immortalwrt'),text=True,capture_output=True)
-                calls=[json.loads(x) for x in (base/'calls').read_text().splitlines()]
-                gates=[a for a in calls if a[:2]==['api','repos/yahuisme/mx4200-immortalwrt/git/ref/heads/main']]
+                base=Path(tmp); pages=staged_fixture(base)
+                result,calls=replay(base,pages,case)
+                gates=[a for a in calls if a[0]=='api' and a[1].endswith('/git/ref/heads/main')]
                 creates=[a for a in calls if a[:2]==['release','create']]
                 deletes=[a for a in calls if a[:2]==['release','delete']]
                 self.assertEqual(result.returncode==0,case in ('fresh','annotated','stale','advance'),result.stderr)
-                self.assertEqual(bool(creates),case in ('fresh','annotated','advance','recheck-error',
-                                                       'create-error','verify-error','title-error',
-                                                       'tag-error','tag-ref-error'))
-                self.assertEqual(len(gates),2 if case in ('fresh','annotated','advance','recheck-error') else 1)
-                tag=(base/'firmware/version.txt').read_text().strip()
-                tag_refs=[a for a in calls if a[:2]==['api','repos/yahuisme/mx4200-immortalwrt/git/ref/tags/'+tag]]
-                self.assertEqual(len(tag_refs),1 if case in ('fresh','annotated','advance','recheck-error',
-                                                            'tag-error','tag-ref-error') else 0)
+                self.assertEqual(len(creates),2 if case in ('fresh','annotated','advance','recheck-error') else
+                                 0 if case in ('stale','error','empty','malformed') else 1)
+                self.assertEqual(len(gates),5 if case in ('fresh','annotated') else
+                                 4 if case in ('advance','recheck-error') else
+                                 1 if case in ('stale','error','empty','malformed') else 2)
+                tag_refs=[a for a in calls if a[0]=='api' and '/git/ref/tags/' in a[1]]
+                self.assertEqual(len(tag_refs),2 if case in ('fresh','annotated','advance','recheck-error') else
+                                 1 if case in ('tag-error','tag-ref-error') else 0)
                 self.assertEqual([a[2] for a in deletes],
-                                 ['MX4200-ImmortalWrt-old', 'MX4200-ImmortalWrt-previous']
+                                 ['MX4200-ImmortalWrt-old','MX4300-HomeWRK-ImmortalWrt-old']
                                  if case in ('fresh','annotated') else [])
-                if creates:
-                    self.assertEqual(creates[0][creates[0].index('--target')+1],'a'*40)
                 self.assertTrue(all('immortalwrt/immortalwrt' not in ' '.join(a) for a in calls))

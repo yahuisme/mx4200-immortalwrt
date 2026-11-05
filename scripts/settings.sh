@@ -4,6 +4,11 @@
 
 set -e
 
+# Keep the menu package-owned so per-device removal leaves no orphan entry.
+ADVANCED_MENU=feeds/luci/applications/luci-app-advanced-reboot/root/usr/share/luci/menu.d/luci-app-advanced-reboot.json
+[ -s "$ADVANCED_MENU" ] || { echo "ERROR: Advanced Reboot menu not found" >&2; exit 1; }
+cp "${DK_PROFILE:-$(dirname "$0")/../user/default}/menus/luci-app-advanced-reboot.json" "$ADVANCED_MENU"
+
 COLLECTION_MAKEFILES=$(find ./feeds/luci/collections/ -type f -name "Makefile" 2>/dev/null)
 if [ -n "$COLLECTION_MAKEFILES" ]; then
 	echo "$COLLECTION_MAKEFILES" | while IFS= read -r mkfile; do

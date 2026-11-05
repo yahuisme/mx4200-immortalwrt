@@ -58,8 +58,10 @@ class OfficialMigrationTests(unittest.TestCase):
         self.assertIn('SOURCE_TAG', text[text.index('RELEASE_NOTES='):])
         self.assertIn('SOURCE_URL', text[text.index('RELEASE_NOTES='):])
         self.assertIn('SOURCE_VERSION="${SOURCE_TAG#v}"', text)
-        self.assertIn('VERSION="MX4200-ImmortalWrt-${SOURCE_VERSION}-r${WRT_REV}-${WRT_DATE/-/_}"', text)
-        self.assertIn('printf \'%s\\n\' "$VERSION" > firmware/title.txt', text)
+        self.assertIn('VERSION="${DEVICE}-ImmortalWrt-${SOURCE_VERSION}-r${WRT_REV}-${WRT_DATE/-/_}"', text)
+        self.assertIn('DEVICE=MX4200', text)
+        self.assertIn('DEVICE=MX4300-HomeWRK', text)
+        self.assertIn('printf \'%s\\n\' "$VERSION" > "firmware/$GROUP/title.txt"', text)
         self.assertEqual(workflow['jobs']['build']['runs-on'], 'ubuntu-24.04-arm')
         self.assertNotIn('集成 NSS', (ROOT / '.github/workflows/MX4200.yml').read_text())
 
@@ -118,7 +120,7 @@ class OfficialMigrationTests(unittest.TestCase):
         for line in requested:
             if line.startswith('CONFIG_PACKAGE_') and line.endswith('=y'):
                 self.assertTrue(line in config, line)
-        for device in ('mx4200v1', 'mx4200v2'):
+        for device in ('mx4200v1', 'mx4200v2', 'mx4300', 'homewrk'):
             self.assertIn('CONFIG_TARGET_DEVICE_qualcommax_ipq807x_DEVICE_linksys_' + device + '=y', config)
         for package in ('luci-i18n-advanced-reboot-zh-cn', 'luci-i18n-wol-zh-cn',
                         'luci-i18n-ttyd-zh-cn', 'ath11k-firmware-ipq8074',

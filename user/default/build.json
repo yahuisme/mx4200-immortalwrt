@@ -6,12 +6,44 @@
     "immortalwrt-qualcommax-ipq807x-linksys_mx4200v1-squashfs-factory.bin",
     "immortalwrt-qualcommax-ipq807x-linksys_mx4200v1-squashfs-sysupgrade.bin",
     "immortalwrt-qualcommax-ipq807x-linksys_mx4200v2-squashfs-factory.bin",
-    "immortalwrt-qualcommax-ipq807x-linksys_mx4200v2-squashfs-sysupgrade.bin"
+    "immortalwrt-qualcommax-ipq807x-linksys_mx4200v2-squashfs-sysupgrade.bin",
+    "immortalwrt-qualcommax-ipq807x-linksys_mx4300-squashfs-factory.bin",
+    "immortalwrt-qualcommax-ipq807x-linksys_mx4300-squashfs-sysupgrade.bin",
+    "immortalwrt-qualcommax-ipq807x-linksys_homewrk-squashfs-factory.ubi",
+    "immortalwrt-qualcommax-ipq807x-linksys_homewrk-squashfs-sysupgrade.bin"
   ],
   "cache_prefix": {
     "tc": "tc-v1-mx4200-arm64-",
     "cc": "cc-v1-mx4200-arm64.",
     "dl": "dl-v1-mx4200-arm64."
   },
-  "retired_cache_prefix": []
+  "retired_cache_prefix": [],
+  "release_groups": {
+    "mx4200": {
+      "device": "MX4200",
+      "profiles": [
+        "linksys_mx4200v1",
+        "linksys_mx4200v2"
+      ],
+      "images": [
+        "immortalwrt-qualcommax-ipq807x-linksys_mx4200v1-squashfs-factory.bin",
+        "immortalwrt-qualcommax-ipq807x-linksys_mx4200v1-squashfs-sysupgrade.bin",
+        "immortalwrt-qualcommax-ipq807x-linksys_mx4200v2-squashfs-factory.bin",
+        "immortalwrt-qualcommax-ipq807x-linksys_mx4200v2-squashfs-sysupgrade.bin"
+      ]
+    },
+    "mx4300-homewrk": {
+      "device": "MX4300-HomeWRK",
+      "profiles": [
+        "linksys_mx4300",
+        "linksys_homewrk"
+      ],
+      "images": [
+        "immortalwrt-qualcommax-ipq807x-linksys_mx4300-squashfs-factory.bin",
+        "immortalwrt-qualcommax-ipq807x-linksys_mx4300-squashfs-sysupgrade.bin",
+        "immortalwrt-qualcommax-ipq807x-linksys_homewrk-squashfs-factory.ubi",
+        "immortalwrt-qualcommax-ipq807x-linksys_homewrk-squashfs-sysupgrade.bin"
+      ]
+    }
+  }
 }

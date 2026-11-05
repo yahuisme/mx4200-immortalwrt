@@ -1,11 +1,15 @@
-# 官方 MX4200v1/v2 默认包与依赖由设备定义提供
+# 官方设备默认包与依赖由各自设备定义提供
 CONFIG_TARGET_qualcommax=y
 CONFIG_TARGET_qualcommax_ipq807x=y
 CONFIG_TARGET_DEVICE_qualcommax_ipq807x_DEVICE_linksys_mx4200v1=y
 CONFIG_TARGET_DEVICE_qualcommax_ipq807x_DEVICE_linksys_mx4200v2=y
+CONFIG_TARGET_DEVICE_qualcommax_ipq807x_DEVICE_linksys_mx4300=y
+CONFIG_TARGET_DEVICE_qualcommax_ipq807x_DEVICE_linksys_homewrk=y
 CONFIG_TARGET_MULTI_PROFILE=y
 CONFIG_TARGET_PER_DEVICE_ROOTFS=y
 CONFIG_TARGET_ROOTFS_INITRAMFS=n
+# HomeWRK 不安装高级重启及其中文包
+CONFIG_TARGET_DEVICE_PACKAGES_qualcommax_ipq807x_DEVICE_linksys_homewrk="-luci-app-advanced-reboot -luci-i18n-advanced-reboot-zh-cn"
 
 # 构建开关
 CONFIG_CCACHE=y

@@ -39,7 +39,7 @@ class ImageStageTests(unittest.TestCase):
             (directory / 'auxiliary.bin').write_bytes(b'not a release image')
             output = root / 'firmware'
             with patch.object(hashlib, 'file_digest', side_effect=AssertionError('unused staging hash')):
-                self.assertIsNone(release_images.stage(targets, output))
+                self.assertIsNone(release_images.stage(targets, output, "mx4200"))
             self.assertEqual({p.name: p.read_bytes() for p in output.iterdir()},
                              {p.name: p.read_bytes() for p in directory.glob('*.bin')
                               if p.name != 'auxiliary.bin'})
@@ -71,7 +71,7 @@ class ImageStageTests(unittest.TestCase):
                     image.rename(parent / image.name)
                 output = root / 'firmware'
                 with self.assertRaises(ValueError):
-                    release_images.stage(targets, output)
+                    release_images.stage(targets, output, "mx4200")
                 self.assertFalse(output.exists())
 
     def test_rejects_invalid_profiles_before_copy(self):
@@ -86,7 +86,7 @@ class ImageStageTests(unittest.TestCase):
                 (directory / 'profiles.json').write_text('{' if case == 'malformed' else json.dumps(data))
                 output = root / 'firmware'
                 with self.assertRaises(ValueError):
-                    release_images.stage(targets, output)
+                    release_images.stage(targets, output, "mx4200")
                 self.assertFalse(output.exists())
 
     def test_rejects_mismatched_image_metadata_before_copy(self):
@@ -108,7 +108,7 @@ class ImageStageTests(unittest.TestCase):
                 (directory / 'profiles.json').write_text(json.dumps(data))
                 output = root / 'firmware'
                 with self.assertRaises(ValueError):
-                    release_images.stage(targets, output)
+                    release_images.stage(targets, output, "mx4200")
                 self.assertFalse(output.exists())
 
     def test_staged_output_still_requires_nonempty_regular_nonsymlink_images(self):
@@ -122,4 +122,4 @@ class ImageStageTests(unittest.TestCase):
                     if case == 'symlink': destination.symlink_to(source)
                 with patch.object(release_images.shutil, 'copyfile', side_effect=bad_copy):
                     with self.assertRaises(ValueError):
-                        release_images.stage(targets, root / 'firmware')
+                        release_images.stage(targets, root / 'firmware', 'mx4200')

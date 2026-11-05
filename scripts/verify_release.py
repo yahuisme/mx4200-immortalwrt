@@ -16,10 +16,12 @@ except ImportError:
     from build_profile import load
 
 
-def verify(tag, files):
+def verify(tag, files, group=None):
+    profile = load(Path(__file__).resolve().parents[1] / 'user/default')
+    names = profile['release_groups'][group]['images'] if group is not None else profile['images']
     expected = {Path(name).name: Path(name) for name in files}
     if (not files or len(expected) != len(files)
-            or set(expected) != set(load(Path(__file__).resolve().parents[1] / 'user/default')['images'])
+            or set(expected) != set(names)
             or any(p.is_symlink() or not p.is_file() or not p.stat().st_size
                    for p in expected.values())):
         raise ValueError('Expected complete nonempty firmware image set')
@@ -82,4 +84,10 @@ def verify(tag, files):
 
 
 if __name__ == '__main__':
-    verify(sys.argv[1], sys.argv[2:])
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--group')
+    parser.add_argument('tag')
+    parser.add_argument('files', nargs='+')
+    args = parser.parse_args()
+    verify(args.tag, args.files, args.group)

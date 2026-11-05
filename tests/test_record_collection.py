@@ -15,9 +15,8 @@ class safety:
             output = base / 'bin/targets/qualcommax/ipq807x'
             output.mkdir(parents=True)
             (base / '.config').write_text('CONFIG_FIXTURE=y\n')
-            for device in ('mx4200v1', 'mx4200v2'):
-                for kind in ('factory', 'sysupgrade'):
-                    (output / f'immortalwrt-qualcommax-ipq807x-linksys_{device}-squashfs-{kind}.bin').write_bytes(b'fixture-not-firmware')
+            for name in json.loads((ROOT / 'user/default/build.json').read_text())['images']:
+                (output / name).write_bytes(b'fixture-not-firmware')
             return output, {}
 IMAGE = 'immortalwrt-qualcommax-ipq807x-linksys_mx4200v1-squashfs-factory.bin'
 def prepare(base):

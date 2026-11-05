@@ -36,6 +36,7 @@ uci() {
             [ "$2" != "$MISSING" ] || return 1
             case "$2" in
                 wireless.radio[012]) printf 'wifi-device\\n';;
+                wireless.default_radio[012]) printf 'wifi-iface\\n';;
                 wireless.radio0.htmode) printf 'HE80\\n';;
                 *) return 1;;
             esac;;
@@ -58,7 +59,9 @@ exit 1
 
     def test_both_models_and_retained_config(self):
         for board, hostname in (('linksys,mx4200v1', 'MX4200v1'),
-                                ('linksys,mx4200v2', 'MX4200v2')):
+                                ('linksys,mx4200v2', 'MX4200v2'),
+                                ('linksys,mx4300', 'MX4300'),
+                                ('linksys,homewrk', 'HomeWRK')):
             result, calls = self.run_defaults(board=board)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn('system.@system[0].hostname=' + hostname, calls)
@@ -66,6 +69,9 @@ exit 1
             self.assertIn('wireless.radio1.disabled=0', calls)
             self.assertIn('wireless.radio2.disabled=0', calls)
             self.assertIn('wireless.radio2.htmode=HE80', calls)
+            ssids = [line for line in calls if '.ssid=' in line]
+            self.assertEqual(ssids, [f'wireless.default_radio{i}.ssid=MX4300' for i in range(3)]
+                             if hostname in ('MX4300', 'HomeWRK') else [])
         result, calls = self.run_defaults(retained=True)
         self.assertEqual(result.returncode, 0)
         self.assertEqual(calls, [])
@@ -76,14 +82,25 @@ exit 1
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(calls, [])
 
-    def test_each_failed_write_keeps_script_for_later_boot(self):
-        _, expected = self.run_defaults()
-        self.assertTrue(expected)
-        for index, assignment in enumerate(expected):
-            with self.subTest(assignment=assignment):
-                result, calls = self.run_defaults(fail=assignment.split('=')[0])
+    def test_new_models_require_all_default_interfaces_before_ssid_writes(self):
+        for board in ('linksys,mx4300', 'linksys,homewrk'):
+            for radio in ('radio0', 'radio1', 'radio2'):
+                result, calls = self.run_defaults(board=board, missing='wireless.default_' + radio)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertEqual(calls, expected[:index + 1])
+                self.assertEqual(calls, [])
+            result, calls = self.run_defaults(board=board, retained=True)
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(calls, [])
+
+    def test_each_failed_write_keeps_script_for_later_boot(self):
+        for board in ('linksys,mx4200v2', 'linksys,mx4300', 'linksys,homewrk'):
+            _, expected = self.run_defaults(board=board)
+            self.assertTrue(expected)
+            for index, assignment in enumerate(expected):
+                with self.subTest(board=board, assignment=assignment):
+                    result, calls = self.run_defaults(board=board, fail=assignment.split('=')[0])
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(calls, expected[:index + 1])
 
 
 if __name__ == '__main__':

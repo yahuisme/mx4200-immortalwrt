@@ -25,4 +25,25 @@ def load(profile=None):
             raise ValueError('invalid release image name')
     if set(data['cache_prefix']) != {'tc', 'cc', 'dl'} or any(not v for v in data['cache_prefix'].values()):
         raise ValueError('incomplete cache namespaces')
+    if 'release_groups' in data:
+        names, boards = [], []
+        for key, group in data['release_groups'].items():
+            if not re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*', key):
+                raise ValueError('invalid release group')
+            if not re.fullmatch(r'[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*', group['device']):
+                raise ValueError('invalid release device')
+            profiles, images = group['profiles'], group['images']
+            if not profiles or not images or any(not re.fullmatch(r'linksys_[a-z0-9]+', p) for p in profiles):
+                raise ValueError('invalid release profiles/images')
+            # Each native profile supplies exactly its own factory/sysupgrade pair.
+            expected = {f"{data['system']}-{data['target'].replace('/', '-')}-{board}-squashfs-{kind}.{extension}"
+                        for board in profiles for kind, extension in
+                        (('factory', 'ubi' if board == 'linksys_homewrk' else 'bin'), ('sysupgrade', 'bin'))}
+            if len(images) != len(expected) or set(images) != expected:
+                raise ValueError('release images differ from native profiles')
+            names.extend(images)
+            boards.extend(profiles)
+        if (len(names) != len(set(names)) or set(names) != set(data['images'])
+                or len(boards) != len(set(boards))):
+            raise ValueError('release groups must partition images and profiles')
     return data

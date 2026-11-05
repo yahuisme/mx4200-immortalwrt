@@ -5,6 +5,7 @@ MX4200_PREPARED_SOURCE supplies a tagged stable Git tree with version/version.da
 and .config; the render harness runs no build targets or compilation.
 """
 import os
+import json
 import re
 import subprocess
 import tempfile
@@ -22,7 +23,10 @@ class SettingsScriptTests(unittest.TestCase):
         # coverage; the default fixture keeps the same full-script contract.
         import shutil
 
+        menu_path = 'feeds/luci/applications/luci-app-advanced-reboot/root/usr/share/luci/menu.d/luci-app-advanced-reboot.json'
+        source_menu = json.loads((ROOT / 'tests/fixtures/services-menu-contract.json').read_text())['menus']['luci-app-advanced-reboot.json']['text']
         fixtures = {
+            menu_path: source_menu,
             DTS: WIFI,
             DTS.replace('v2.dts', 'v1.dts'): '#include "ipq8074-512m.dtsi"\n',
             "feeds/luci/collections/luci/Makefile":
@@ -79,6 +83,8 @@ class SettingsScriptTests(unittest.TestCase):
             result = subprocess.run(["bash", str(ROOT / "scripts/settings.sh")],
                                     cwd=d, env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(Path(d, menu_path).read_bytes(),
+                             (ROOT / 'user/default/menus/luci-app-advanced-reboot.json').read_bytes())
             graph = {}
             for makefile in Path(d, 'feeds/luci').glob('*/*/Makefile'):
                 text = makefile.read_text().replace('\\\n', ' ')
@@ -188,6 +194,9 @@ render:
 
     def test_missing_fixture_fails(self):
         with tempfile.TemporaryDirectory() as d:
+            menu = Path(d, 'feeds/luci/applications/luci-app-advanced-reboot/root/usr/share/luci/menu.d/luci-app-advanced-reboot.json')
+            menu.parent.mkdir(parents=True)
+            menu.write_text('{}')
             for p in ("feeds/luci/collections", "feeds/luci/modules/luci-mod-system",
                       "package/network/config/wifi-scripts/files/lib/wifi"):
                 Path(d, p).mkdir(parents=True)

@@ -1,13 +1,16 @@
 # MX4200 ImmortalWrt
 
-基于 [ImmortalWrt 官方最新 stable release](https://github.com/immortalwrt/immortalwrt/releases)，适用于 Linksys MX4200v1 / MX4200v2。
+基于 [ImmortalWrt 官方最新 stable release](https://github.com/immortalwrt/immortalwrt/releases)，适用于 Linksys MX4200v1 / MX4200v2 / MX4300 / HomeWRK。
 
-固件下载见 [Releases](https://github.com/yahuisme/mx4200-immortalwrt/releases)。请选择对应硬件版本的镜像：
+固件下载见 [Releases](https://github.com/yahuisme/mx4200-immortalwrt/releases)，分为 **MX4200** 和 **MX4300 / HomeWRK** 两组独立发布。请选择对应机型及硬件版本的镜像：
 
 | 镜像 | 用途 |
 | --- | --- |
-| `factory.bin` | 从原厂固件刷入 |
-| `sysupgrade.bin` | 从已有 ImmortalWrt 升级 |
+| `factory.bin` | MX4200 / MX4300 从原厂固件刷入 |
+| `factory.ubi` | HomeWRK 初次安装的 UBI 镜像 |
+| `sysupgrade.bin` | 从已有 OpenWrt / ImmortalWrt 升级 |
+
+HomeWRK 初次安装需按[官方设备支持说明](https://github.com/openwrt/openwrt/commit/07f8319d2d9166a41c2fd94ec1422bcd80ada991)使用串口 / U-Boot 与 USB 启动临时系统，不支持套用 MX4300 的原厂网页刷入方式。升级建议不保留配置。
 
 ## 功能
 
@@ -22,9 +25,11 @@
 | --- | --- |
 | [HomeProxy](https://github.com/yahuisme/packages/tree/main/luci-app-homeproxy) | 基于 sing-box 的代理客户端 |
 | Aurora 配置 | 主题设置 |
-| 高级重启 | 双分区重启切换 |
+| 高级重启 | 支持机型的双分区重启切换 |
 | 网络唤醒 | 唤醒局域网设备 |
 | 网页终端 | 浏览器终端访问 |
+
+高级重启仅在 MX4200v1/v2、MX4300 中预装；HomeWRK 不预装，保留系统原生重启。
 
 HomeProxy 与 sing-box 使用 [yahuisme/packages](https://github.com/yahuisme/packages) 的最新源码构建。HomeProxy 默认停用，需自行配置节点或订阅后启用。
 
@@ -34,7 +39,7 @@ Aurora 主题及配置插件使用官方 APK 软件源，每次构建获取源�
 
 - 管理地址：`192.168.10.1`
 - 管理密码：无
-- Wi-Fi 名称：`MX4200`
+- Wi-Fi 名称：MX4200v1/v2 为 `MX4200`；MX4300 / HomeWRK 为 `MX4300`
 - Wi-Fi 密码：`12345678`
 
 | 项目 | 2.4 GHz | 5.2 GHz | 5.8 GHz |
@@ -49,4 +54,4 @@ Aurora 主题及配置插件使用官方 APK 软件源，每次构建获取源�
 
 每月 1、4、7……日自动构建，计划时间为香港时间 12:00。
 
-也可手动运行 Actions。使用 Ubuntu 24.04 ARM64 runner 与 Debian ARM64 Docker 环境，仅发布两个硬件版本各自的 `factory.bin` 与 `sysupgrade.bin`，保留最近一版。
+也可手动运行 Actions。使用 Ubuntu 24.04 ARM64 runner 与 Debian ARM64 Docker 环境，一次构建四个机型，各自沿用官方硬件定义与默认依赖。每次发布两组 Release，仅附对应机型的 factory 与 sysupgrade 镜像，每组独立保留最近一版。

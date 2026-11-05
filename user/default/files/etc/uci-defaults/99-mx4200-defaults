@@ -22,7 +22,20 @@ BOARD="$(cat /tmp/sysinfo/board_name 2>/dev/null || cat /tmp/sysinfo/model 2>/de
 case "$BOARD" in
     *mx4200v2*|*MX4200v2*) HOSTNAME="MX4200v2" ;;
     *mx4200v1*|*MX4200v1*) HOSTNAME="MX4200v1" ;;
+    *mx4300*|*MX4300*) HOSTNAME="MX4300" ;;
+    *homewrk*|*HomeWRK*) HOSTNAME="HomeWRK" ;;
     *) HOSTNAME="MX4200" ;;
+esac
+# MX4300 与 HomeWRK 共用 MX4300 SSID，MX4200 保持原有名称。
+case "$HOSTNAME" in
+    MX4300|HomeWRK)
+        for radio in radio0 radio1 radio2; do
+            [ "$(uci -q get wireless.default_$radio)" = 'wifi-iface' ] || exit 1
+        done
+        for radio in radio0 radio1 radio2; do
+            uci -q set wireless.default_$radio.ssid='MX4300' || exit 1
+        done
+        ;;
 esac
 uci -q set system.@system[0].hostname="$HOSTNAME" || exit 1
 

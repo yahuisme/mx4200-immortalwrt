@@ -12,8 +12,10 @@ from test_cache_workflow import ROOT
 from test_cache_helper import GH, entry
 from test_record_collection import prepare
 READBACK = """
-    assets=[dict(name=p.name,size=p.stat().st_size,state='uploaded',digest='sha256:'+__import__('hashlib').sha256(p.read_bytes()).hexdigest()) for p in Path('firmware').glob('*.bin')]
-    tag=Path('firmware/version.txt').read_text().strip()
+    from urllib.parse import unquote
+    tag=unquote(a[1].split('/releases/tags/')[1])
+    group='mx4300-homewrk' if tag.startswith('MX4300-HomeWRK-') else 'mx4200'
+    assets=[dict(name=p.name,size=p.stat().st_size,state='uploaded',digest='sha256:'+__import__('hashlib').sha256(p.read_bytes()).hexdigest()) for p in (Path('firmware')/group).iterdir() if p.suffix in ('.bin','.ubi')]
     print(json.dumps(dict(tag_name=tag,name=tag,draft=False,prerelease=False,assets=assets)))
 """
 
@@ -162,7 +164,7 @@ export -f make docker_exec sudo python3 git
                             k, v = line.split('=', 1)
                             values[f"steps.{item['id']}.outputs.{k}"] = v
                         output.unlink()
-                successful = successful and rc == 0
+                successful = successful and (rc == 0 or item.get('continue-on-error', False))
             calls = (base / 'bootstrap-calls').read_text() if (base / 'bootstrap-calls').exists() else ''
             return outcomes, executed, json.loads(state.read_text()), '\n'.join(logs) + '\n' + calls
 
@@ -198,7 +200,10 @@ export -f make docker_exec sudo python3 git
                     self.assertEqual(outcomes['Compile firmware'], 'skipped', log)
                     self.assertEqual(outcomes['Validate and stage firmware'], 'skipped', log)
                 creates = [call for call in inventory['calls'] if call[:2] == ['release', 'create']]
-                self.assertEqual(bool(creates), published, log)
+                self.assertEqual(len(creates),0 if not published else 1 if fault=='publish' else 2,log)
+                if fault=='metadata':
+                    self.assertIn('Upload build record',executed)
+                    self.assertEqual(outcomes['Upload build record'],'success',log)
                 self.assertEqual(outcomes['Publish firmware and prune releases'],
                                  'failure' if fault == 'publish' else 'success' if published else 'skipped', log)
                 if fault in ('none', 'publish', 'metadata', 'upload'):
