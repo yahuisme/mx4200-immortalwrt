@@ -59,8 +59,7 @@ class WorkflowMergeTests(unittest.TestCase):
             self.assertIn(step(name), STEPS)
 
     def test_complete_environment_success_and_early_failures(self):
-        expected = ['extract:ccarchive/ccache.tar.gz', 'extract:dlarchive/dl.tar.gz',
-                    'snapshot', 'daemon', 'reload', 'build', 'image', 'run', 'exec', 'install']
+        expected = ['snapshot', 'daemon', 'reload', 'build', 'image', 'run', 'exec', 'install']
         for fail in ['', *expected, 'missing-config']:
             with self.subTest(fail=fail), tempfile.TemporaryDirectory() as tmp:
                 base = Path(tmp)
@@ -79,7 +78,7 @@ class WorkflowMergeTests(unittest.TestCase):
                                          ENV_STUB + step('Prepare build environment')['run']],
                                         cwd=base, env=env, text=True, capture_output=True)
                 calls = (base/'calls').read_text().splitlines()
-                want = expected if not fail else expected[:3] if fail == 'missing-config' else expected[:expected.index(fail)+1]
+                want = expected if not fail else expected[:1] if fail == 'missing-config' else expected[:expected.index(fail)+1]
                 self.assertEqual(calls, want, result.stderr)
                 self.assertEqual(result.returncode == 0, not fail, result.stderr)
                 if not fail:
@@ -94,7 +93,7 @@ class WorkflowMergeTests(unittest.TestCase):
                 for fail, admit in [('', 'true'), ('', 'false')] + [(p, 'true') for p in expected]:
                     with self.subTest(warm=warm, changed=changed, fail=fail, admit=admit), tempfile.TemporaryDirectory() as tmp:
                         base = Path(tmp)
-                        values = {'steps.tc.outputs.cache-hit': str(warm).lower(),
+                        values = {'steps.tc_repair.outputs.save': 'true', 'steps.tc_restore.outputs.hit': str(warm).lower(),
                                   'steps.dl_changed.outputs.save': str(changed).lower(),
                                   'steps.inputs.outputs.key': 'tc-v1-mx4200-arm64-new',
                                   'steps.gh.outputs.cache-primary-key': 'cc-v1-mx4200-arm64.new'}

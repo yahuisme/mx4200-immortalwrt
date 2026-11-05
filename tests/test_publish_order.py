@@ -31,7 +31,7 @@ class CachePublicationIntegrationTests(unittest.TestCase):
             self.assertNotRegex(item.get('if', ''), r'\b(always|failure|cancelled)\(')
             self.assertFalse(item.get('continue-on-error', False))
 
-    def replay(self, fault, tc_hit='false', tb_hit='false'):
+    def replay(self, fault, tc_hit='false', tb_hit='false', repair='true'):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             release.ReleaseTests().fixture(base)
@@ -99,21 +99,27 @@ docker_exec() {
         "$@"
     fi
 }
-sudo() { "$@"; }
+sudo() {
+    if [ "$FAULT" = fingerprint ] && [ "${2:-}" = scripts/dlcache.py ] && [ "${3:-}" = check ]; then return 17; fi
+    "$@"
+}
 export -f make docker_exec sudo python3 git
 '''
             subprocess.run(['python3', str(ROOT/'scripts/dlcache.py'), 'snapshot',
                             str(base/'dlcache'), str(base/'dlcache-before.json')], check=True,
                            capture_output=True)
             (base/'dlcache/new-download').write_bytes(b'fixture download')
-            values = {'steps.tc.outputs.cache-hit': tc_hit,
-                      'steps.tb.outputs.cache-hit': tb_hit,
+            values = {'steps.tc_repair.outputs.save': repair, 'steps.tb_repair.outputs.save': repair,
+                      # A raw action hit can be rejected during extraction.
+                      'steps.tc.outputs.cache-hit': 'true', 'steps.tb.outputs.cache-hit': 'true',
+                      'steps.tc_restore.outputs.hit': tc_hit,
+                      'steps.tb_restore.outputs.hit': tb_hit,
                       'steps.tb_inputs.outputs.key': 'tb-v1-mx4200-arm64-new',
                       'secrets.RELEASE_TOKEN': 'fixture-token',
                       'steps.inputs.outputs.key': 'tc-v1-mx4200-arm64-new',
                       'steps.gh.outputs.cache-primary-key': 'cc-v1-mx4200-arm64.new',
                       'steps.dl.outputs.cache-primary-key': 'dl-v1-mx4200-arm64.new',
-                      'steps.dl.outputs.cache-matched-key': '',
+                      'steps.dl_restore.outputs.matched-key': '',
                       'steps.stage.outcome': 'skipped'}
             successful, cancelled = True, False
             outcomes, executed, logs = {}, [], []
@@ -179,6 +185,16 @@ export -f make docker_exec sudo python3 git
                 self.assertEqual('bootstrap pack' in log, want_pack, log)
                 self.assertEqual(outcomes['Publish firmware and prune releases'], 'success', log)
 
+    def test_unverified_poison_eviction_still_compiles_and_publishes_without_exact_save(self):
+        outcomes, executed, inventory, log = self.replay('none', repair='false')
+        self.assertIn('make tools/ccache/compile', log)
+        self.assertNotIn('bootstrap pack', log)
+        for name in ('Check toolchain cache budget', 'Save toolchain cache',
+                     'Check bootstrap cache budget', 'Save compiler bootstrap'):
+            self.assertEqual(outcomes[name], 'skipped', log)
+        self.assertIn('tc-v1-mx4200-arm64-old', {e['key'] for e in inventory['entries']})
+        self.assertEqual(outcomes['Publish firmware and prune releases'], 'success', log)
+
     def test_download_failure_never_compiles_stages_or_publishes(self):
         for tc, tb in (('true', ''), ('false', 'true'), ('false', 'false')):
             with self.subTest(tc=tc, tb=tb):
@@ -189,6 +205,17 @@ export -f make docker_exec sudo python3 git
                     self.assertEqual(outcomes[name], 'skipped', log)
                 self.assertFalse(any(call[:2] == ['release', 'create']
                                      for call in inventory['calls']), log)
+
+    def test_download_cache_fingerprint_failure_does_not_block_publication(self):
+        outcomes, executed, inventory, log = self.replay('fingerprint')
+        self.assertLess(executed.index('Validate and stage firmware'),
+                        executed.index('Check download cache changes'))
+        self.assertEqual(outcomes['Compile firmware'], 'success', log)
+        self.assertEqual(outcomes['Validate and stage firmware'], 'success', log)
+        self.assertEqual(outcomes['Check download cache changes'], 'failure', log)
+        self.assertEqual(outcomes['Check download cache budget'], 'skipped', log)
+        self.assertEqual(outcomes['Publish firmware and prune releases'], 'success', log)
+        self.assertEqual(len([c for c in inventory['calls'] if c[:2] == ['release', 'create']]), 2)
 
     def test_full_compile_stage_cache_publish_failure_matrix(self):
         for fault in ('none', 'download', 'compile', 'validation', 'cancel', 'package', 'save', 'readback', 'publish', 'metadata', 'upload', 'bootstrap_pack', 'bootstrap_save', 'bootstrap_readback'):

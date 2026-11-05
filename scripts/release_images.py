@@ -18,8 +18,9 @@ PROFILE = Path(__file__).resolve().parents[1] / 'user/default'
 
 def image_paths(directory, recursive=False):
     paths = directory.rglob('*') if recursive else directory.iterdir()
-    return [p for p in paths if p.suffix in ('.bin', '.ubi')
-            and ('factory' in p.name or 'sysupgrade' in p.name)]
+    return [p for p in paths if (p.suffix in ('.bin', '.ubi')
+            and ('factory' in p.name or 'sysupgrade' in p.name))
+            or p.name.endswith('sysupgrade.itb')]
 
 
 def validate_images(directory, names):

@@ -84,7 +84,8 @@ class LinksysModelsTests(unittest.TestCase):
 
     def test_missing_ubi_wrong_metadata_and_cross_target_reject_before_copy(self):
         module = helper('release_images')
-        for fault in ('missing-ubi', 'wrong-size', 'wrong-device', 'extra-bin', 'extra-ubi', 'cross-target'):
+        for fault in ('missing-ubi', 'wrong-size', 'wrong-device', 'extra-bin', 'extra-ubi', 'cross-target',
+                      'extra-itb', 'cross-target-itb'):
             with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 profile, targets, directory, data = self.fixture(root)
@@ -92,7 +93,12 @@ class LinksysModelsTests(unittest.TestCase):
                 if fault == 'missing-ubi': image.unlink()
                 if fault == 'wrong-size': data['profiles']['linksys_homewrk']['images'][0]['size'] += 1
                 if fault == 'wrong-device': data['profiles']['linksys_homewrk']['images'][0]['name'] = profile['images'][0]
-                if fault.startswith('extra-'): (directory / ('other-factory.' + fault[6:])).write_bytes(b'x')
+                if fault in ('extra-bin', 'extra-ubi'):
+                    (directory / ('other-factory.' + fault[6:])).write_bytes(b'x')
+                if fault in ('extra-itb', 'cross-target-itb'):
+                    parent = directory if fault == 'extra-itb' else targets / 'other/target'
+                    parent.mkdir(parents=True, exist_ok=True)
+                    (parent / 'other-sysupgrade.itb').write_bytes(b'not firmware')
                 if fault == 'cross-target':
                     other = targets / 'other/target'
                     other.mkdir(parents=True)
