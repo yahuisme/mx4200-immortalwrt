@@ -1,6 +1,8 @@
 # MX4200 ImmortalWrt
 
-基于 [ImmortalWrt 官方最新 stable release](https://github.com/immortalwrt/immortalwrt/releases)，适用于 Linksys MX4200v1 / MX4200v2 / MX4300 / HomeWRK。
+基于 [ImmortalWrt 官方最新 stable release](https://github.com/immortalwrt/immortalwrt/releases)，适用于 Linksys MX4200v1 / MX4200v2。
+
+2026.11.05：新增 MX4300 / HomeWRK 机型固件。
 
 固件下载见 [Releases](https://github.com/yahuisme/mx4200-immortalwrt/releases)，分为 **MX4200** 和 **MX4300 / HomeWRK** 两组独立发布。请选择对应机型及硬件版本的镜像：
 
