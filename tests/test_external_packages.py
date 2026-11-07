@@ -34,6 +34,8 @@ def helper():
 
 def fixture(test, name):
     value = os.environ.get(name)
+    if not value and name == 'MX_APK_SOURCE_FIXTURE':
+        value = str(ROOT / 'tests/fixtures/snapshot-source')
     if not value:
         test.skipTest('set ' + name + ' to an isolated real fixture; no verification substitute')
     assert value is not None
@@ -44,7 +46,7 @@ def fixture(test, name):
 
 def initialize(root):
     (root / 'include').mkdir()
-    (root / 'include/version.mk').write_text('VERSION_NUMBER:=25.12.2\n')
+    (root / 'include/version.mk').write_text('VERSION_NUMBER:=SNAPSHOT\n')
     (root / '.config').write_text('CONFIG_USE_APK=y\nCONFIG_TARGET_ARCH_PACKAGES="aarch64_cortex-a53"\n')
 
 
@@ -61,11 +63,11 @@ class ExternalPackageTests(unittest.TestCase):
         versions = (
             'VERSION_NUMBER:=26.01.0\n',
             'VERSION_NUMBER:=$(if $(VERSION_NUMBER),$(VERSION_NUMBER),26.01.0)\n',
-            'VERSION_NUMBER:=25.12.2garbage\n',
-            'VERSION_NUMBER:=$(unreviewed,25.12.2)\n',
-            'VERSION_NUMBER:=prefix25.12.2)\n',
-            'VERSION_NUMBER:=25.12.2\nVERSION_NUMBER:=26.01.0\n',
-            'VERSION_NUMBER:=25.12.2\nVERSION_NUMBER+=suffix\n',
+            'VERSION_NUMBER:=SNAPSHOTgarbage\n',
+            'VERSION_NUMBER:=$(unreviewed,SNAPSHOT)\n',
+            'VERSION_NUMBER:=prefixSNAPSHOT)\n',
+            'VERSION_NUMBER:=SNAPSHOT\nVERSION_NUMBER:=26.01.0\n',
+            'VERSION_NUMBER:=SNAPSHOT\nVERSION_NUMBER+=suffix\n',
             '# missing version assignment\n',
         )
         for version in versions:
@@ -80,14 +82,14 @@ class ExternalPackageTests(unittest.TestCase):
                 (root / '.external-packages.mk').write_text('existing snapshot inputs\n')
                 before = {str(p.relative_to(root)): p.read_bytes() if p.is_file() else None
                           for p in root.rglob('*')}
-                with self.assertRaisesRegex(ValueError, 'require reviewed ImmortalWrt 25.12'):
+                with self.assertRaisesRegex(ValueError, 'require reviewed ImmortalWrt snapshot'):
                     module.prepare(root)
                 self.assertEqual(before, {str(p.relative_to(root)): p.read_bytes() if p.is_file() else None
                                           for p in root.rglob('*')})
 
     def test_version_override_is_checked_before_prepare_writes(self):
         source = fixture(self, 'MX_APK_SOURCE_FIXTURE')
-        for override in ('26.01.0', '25.12.2garbage', 'SNAPSHOT'):
+        for override in ('26.01.0', 'SNAPSHOTgarbage', '25.12.2'):
             with self.subTest(override=override), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 for name in ('package/Makefile', 'include/rootfs.mk', 'include/image.mk', 'include/version.mk'):
@@ -97,16 +99,15 @@ class ExternalPackageTests(unittest.TestCase):
                 (root / '.config').write_text('CONFIG_VERSION_NUMBER="' + override + '"\n')
                 before = {str(p.relative_to(root)): p.read_bytes() if p.is_file() else None
                           for p in root.rglob('*')}
-                with self.assertRaisesRegex(ValueError, 'require reviewed ImmortalWrt 25.12'):
+                with self.assertRaisesRegex(ValueError, 'require reviewed ImmortalWrt snapshot'):
                     helper().prepare(root)
                 self.assertEqual(before, {str(p.relative_to(root)): p.read_bytes() if p.is_file() else None
                                           for p in root.rglob('*')})
 
     def test_supported_versions_prepare_idempotently_without_defconfig(self):
         source = fixture(self, 'MX_APK_SOURCE_FIXTURE')
-        for version in ('VERSION_NUMBER:=25.12.0\n', 'VERSION_NUMBER:=25.12.2\n',
-                        'VERSION_NUMBER:=25.12.999\n', (source / 'include/version.mk').read_text()):
-            for override in ('', 'CONFIG_VERSION_NUMBER=""\n', 'CONFIG_VERSION_NUMBER="25.12.2"\n'):
+        for version in ('VERSION_NUMBER:=SNAPSHOT\n', (source / 'include/version.mk').read_text()):
+            for override in ('', 'CONFIG_VERSION_NUMBER=""\n', 'CONFIG_VERSION_NUMBER="SNAPSHOT"\n'):
                 with self.subTest(version=version, override=override), tempfile.TemporaryDirectory() as tmp:
                     root = Path(tmp)
                     for name in ('package/Makefile', 'include/rootfs.mk', 'include/image.mk', 'include/version.mk'):
@@ -126,8 +127,8 @@ class ExternalPackageTests(unittest.TestCase):
         source = fixture(self, 'MX_APK_SOURCE_FIXTURE')
         for version, config in (
                 ('VERSION_NUMBER:=26.01.0\n', ''),
-                ('VERSION_NUMBER:=prefix25.12.2)\n', ''),
-                ('VERSION_NUMBER:=25.12.2\n', 'CONFIG_VERSION_NUMBER="26.01.0"\n')):
+                ('VERSION_NUMBER:=prefixSNAPSHOT)\n', ''),
+                ('VERSION_NUMBER:=SNAPSHOT\n', 'CONFIG_VERSION_NUMBER="26.01.0"\n')):
             with self.subTest(version=version, config=config), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 for name in ('package/Makefile', 'include/rootfs.mk', 'include/image.mk', 'include/version.mk'):
@@ -141,7 +142,7 @@ class ExternalPackageTests(unittest.TestCase):
                 (root / '.external-packages/provenance.json').write_text('existing evidence\n')
                 before = {str(p.relative_to(root)): p.read_bytes() if p.is_file() else None
                           for p in root.rglob('*')}
-                with self.assertRaisesRegex(ValueError, 'require reviewed ImmortalWrt 25.12'):
+                with self.assertRaisesRegex(ValueError, 'require reviewed ImmortalWrt snapshot'):
                     helper().snapshot(root, root / 'must-not-execute-apk')
                 self.assertEqual(before, {str(p.relative_to(root)): p.read_bytes() if p.is_file() else None
                                           for p in root.rglob('*')})
@@ -156,7 +157,9 @@ class ExternalPackageTests(unittest.TestCase):
                 shutil.copyfile(source / name, path)
             helper().prepare(root)
             common = (root / 'package/Makefile').read_text()
-            self.assertLess(common.index('external_packages.py snapshot'), common.index('$(call apk,$(TARGET_DIR)) add'))
+            self.assertIn('$(curdir)/merge-index mx-external-packages', common)
+            self.assertIn('mx-external-packages: $(TMP_DIR)/.build $(curdir)/merge $(curdir)/merge-index\n\tpython3 /cache-scripts/external_packages.py snapshot', common)
+            self.assertIn('$(TOPDIR)/.external-packages/provenance.json;', common)
             self.assertLess(common.index('$(MX_EXTERNAL_PACKAGES)'), common.index('$(CP) $(TARGET_DIR) $(TARGET_DIR_ORIG)'))
             shared = (root / 'include/rootfs.mk').read_text()
             self.assertIn('$(MX_EXTERNAL_REPOSITORIES)', shared)
@@ -172,6 +175,62 @@ class ExternalPackageTests(unittest.TestCase):
             first = {p.relative_to(root): p.read_bytes() for p in root.rglob('*') if p.is_file()}
             helper().prepare(root)
             self.assertEqual(first, {p.relative_to(root): p.read_bytes() for p in root.rglob('*') if p.is_file()})
+
+    def test_native_rootfs_cache_keys_refresh_signed_provenance_before_expansion(self):
+        """Run native key/eval expressions with harmless prebuilt-data recipes."""
+        source = fixture(self, 'MX_APK_SOURCE_FIXTURE')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(source, root, dirs_exist_ok=True)
+            helper().prepare(root)
+            text = (root / 'package/Makefile').read_text()
+            key = text.split('define rootfs_cache_key\n', 1)[1].split('\nendef', 1)[0]
+            snapshot = text.split('mx-external-packages: $(TMP_DIR)/.build $(curdir)/merge $(curdir)/merge-index\n', 1)[1].split('\n\n', 1)[0]
+            # Relocate only the signed-APK tool boundary; test make ordering here.
+            snapshot = snapshot.replace('python3 /cache-scripts/external_packages.py snapshot $(TOPDIR) $(STAGING_DIR_HOST)/bin/apk',
+                                        'test "$(FAIL)" != yes && cp $(TOPDIR)/next.json $(TOPDIR)/.external-packages/provenance.json')
+            selection = '\n'.join(line for line in text.splitlines()
+                                  if '\t$(eval ROOTFS_KEY:=' in line or '\t$(if $(filter $(ROOTFS_KEY)' in line)
+            for name in ('packages.adb', '.config', 'bin/apk', 'bin/tar', 'bin/gzip'):
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('prebuilt key input\n')
+            (root / '.external-packages').mkdir()
+            (root / 'next.json').write_text('signed-index-A\n')
+            mkhash = root / 'mkhash'
+            mkhash.write_text('#!/usr/bin/env python3\nimport hashlib,sys\nprint(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())\n')
+            mkhash.chmod(0o755)
+            for name in ('.build', 'package/merge', 'package/merge-index'):
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('native prerequisite\n')
+            harness = ('TOPDIR:=' + str(root) + '\n'
+                       'TMP_DIR:=$(TOPDIR)\ncurdir:=package\n'
+                       'STAGING_DIR_HOST:=$(TOPDIR)\nPACKAGE_DIR_ALL:=$(TOPDIR)\n'
+                       'INCLUDE_DIR:=$(TOPDIR)/include\nROOTFS_CACHE:=$(TOPDIR)/cache\n'
+                       'MKHASH:=$(TOPDIR)/mkhash\nSOURCE_DATE_EPOCH:=1\n'
+                       'define rootfs_cache_key\n' + key + '\nendef\n'
+                       'define apk_install_rootfs\n'
+                       '\t@mkdir -p $(ROOTFS_CACHE); echo "$(ROOTFS_KEY)" >$(ROOTFS_CACHE)/key; echo miss > result\nendef\n'
+                       'define rootfs_cache_restore\n\t@echo hit > result\nendef\n'
+                       '.PHONY: install mx-external-packages\n'
+                       'mx-external-packages: $(TMP_DIR)/.build $(curdir)/merge $(curdir)/merge-index\n' + snapshot + '\n'
+                       'install: mx-external-packages\n' + selection + '\n')
+            (root / 'harness.mk').write_text(harness)
+            def run(fail=False):
+                return subprocess.run(['make', '--no-print-directory', '-sf', 'harness.mk', 'install',
+                                       'FAIL=' + ('yes' if fail else 'no')], cwd=root,
+                                      text=True, capture_output=True)
+            for changed, expected in ((False, 'miss'), (False, 'hit'), (True, 'miss')):
+                if changed:
+                    (root / 'next.json').write_text('signed-index-B\n')
+                result = run()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual((root / 'result').read_text().strip(), expected)
+            (root / 'result').unlink()
+            result = run(fail=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse((root / 'result').exists())
 
     def test_signed_snapshot_preserves_official_bytes_and_rejects_tampering(self):
         runtime = fixture(self, 'MX_APK_RUNTIME_FIXTURE')

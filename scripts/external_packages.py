@@ -38,22 +38,22 @@ def put(root, name, text):
 
 
 def reviewed_version(root):
-    """Accept only the reviewed stable literal or official Kconfig fallback."""
+    """Accept only the reviewed snapshot literal or official Kconfig fallback."""
     text = (root / 'include/version.mk').read_text()
     assignments = re.findall(r'^VERSION_NUMBER\s*[:+?]?=.*$', text, re.M)
-    direct = r'VERSION_NUMBER:=25\.12\.[0-9]+'
-    fallback = r'VERSION_NUMBER:=\$\(if \$\(VERSION_NUMBER\),\$\(VERSION_NUMBER\),25\.12\.[0-9]+\)'
+    direct = r'VERSION_NUMBER:=SNAPSHOT'
+    fallback = r'VERSION_NUMBER:=\$\(if \$\(VERSION_NUMBER\),\$\(VERSION_NUMBER\),SNAPSHOT\)'
     config_path = root / '.config'
     config = config_path.read_text() if config_path.exists() else ''
     overrides = re.findall(r'^CONFIG_VERSION_NUMBER=(.*)$', config, re.M)
     if len(overrides) > 1 or (overrides and overrides[0] != '""' and
-                             not re.fullmatch(r'"25\.12\.[0-9]+"', overrides[0])):
-        raise ValueError('External APK feeds require reviewed ImmortalWrt 25.12')
+                             overrides[0] != '"SNAPSHOT"'):
+        raise ValueError('External APK feeds require reviewed ImmortalWrt snapshot')
     if not ((len(assignments) == 1 and re.fullmatch(direct, assignments[0])) or
             (len(assignments) == 2 and
              assignments[0] == 'VERSION_NUMBER:=$(call qstrip,$(CONFIG_VERSION_NUMBER))' and
              re.fullmatch(fallback, assignments[1]))):
-        raise ValueError('External APK feeds require reviewed ImmortalWrt 25.12')
+        raise ValueError('External APK feeds require reviewed ImmortalWrt snapshot')
 
 
 def prepare(root):
@@ -71,13 +71,19 @@ def prepare(root):
                  '\t--keys-dir $(if $(APK_KEYS),$(APK_KEYS),$(TOPDIR)) \\\n',
                  '\t--keys-dir $(TOPDIR)/.external-packages/keys \\\n'
                  '\t--no-network $(MX_EXTERNAL_REPOSITORIES) \\\n')
+    # A prerequisite runs before make expands install's immediate cache-key eval.
     replace_once(root / 'package/Makefile',
-                 '\t$(call apk,$(TARGET_DIR)) add --no-cache --initdb --no-scripts --arch $(ARCH_PACKAGES) \\\n',
-                 '\tpython3 /cache-scripts/external_packages.py snapshot $(TOPDIR) $(STAGING_DIR_HOST)/bin/apk\n'
-                 '\t$(call apk,$(TARGET_DIR)) add --no-cache --initdb --no-scripts --arch $(ARCH_PACKAGES) \\\n')
+                 '$(curdir)/install: $(TMP_DIR)/.build $(curdir)/merge $(curdir)/merge-index\n',
+                 '.PHONY: mx-external-packages\n'
+                 'mx-external-packages: $(TMP_DIR)/.build $(curdir)/merge $(curdir)/merge-index\n'
+                 '\tpython3 /cache-scripts/external_packages.py snapshot $(TOPDIR) $(STAGING_DIR_HOST)/bin/apk\n\n'
+                 '$(curdir)/install: $(TMP_DIR)/.build $(curdir)/merge $(curdir)/merge-index mx-external-packages\n')
     replace_once(root / 'package/Makefile',
-                 '\t\t$$(cat $(TMP_DIR)/apk_install_list) \\\n',
-                 '\t\t$$(cat $(TMP_DIR)/apk_install_list) $(MX_EXTERNAL_PACKAGES) \\\n')
+                 '\t\t$(INCLUDE_DIR)/rootfs.mk $(TOPDIR)/package/Makefile; \\\n',
+                 '\t\t$(INCLUDE_DIR)/rootfs.mk $(TOPDIR)/package/Makefile $(TOPDIR)/.external-packages/provenance.json; \\\n')
+    replace_once(root / 'package/Makefile',
+                 '\t\t$$(cat $(TMP_DIR)/apk_install_list)\n',
+                 '\t\t$$(cat $(TMP_DIR)/apk_install_list) $(MX_EXTERNAL_PACKAGES)\n')
     replace_once(root / 'include/rootfs.mk',
                  '\t$(call mklibs,$(1))\n',
                  '\t$(call mklibs,$(1))\n'

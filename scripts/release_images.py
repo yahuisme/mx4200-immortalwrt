@@ -16,15 +16,15 @@ except ImportError:
 PROFILE = Path(__file__).resolve().parents[1] / 'user/default'
 
 
-def image_paths(directory, recursive=False):
+def image_paths(directory, recursive=False, names=()):
     paths = directory.rglob('*') if recursive else directory.iterdir()
     return [p for p in paths if (p.suffix in ('.bin', '.ubi')
             and ('factory' in p.name or 'sysupgrade' in p.name))
-            or p.name.endswith('sysupgrade.itb')]
+            or p.name.endswith('sysupgrade.itb') or p.name in names]
 
 
 def validate_images(directory, names):
-    paths = image_paths(directory)
+    paths = image_paths(directory, names=names)
     if len(paths) != len(names) or {p.name for p in paths} != set(names) or any(
             p.is_symlink() or not p.is_file() or not p.stat().st_size for p in paths):
         raise ValueError('unexpected, missing, empty or symlink release images')
@@ -38,7 +38,7 @@ def stage(targets, output, group=None):
     names = {name for item in groups.values() for name in item['images']}
     boards = {board for item in groups.values() for board in item['profiles']}
     directory = targets / contract['target']
-    selected = image_paths(targets, recursive=True)
+    selected = image_paths(targets, recursive=True, names=names)
     # Auxiliary binaries are allowed, but never another target's flash image.
     if len(selected) != len(names) or {p.name for p in selected} != names or any(
             p.parent != directory or p.is_symlink() or not p.is_file() or not p.stat().st_size for p in selected):
@@ -49,14 +49,16 @@ def stage(targets, output, group=None):
     if not re.fullmatch(r'r[0-9]+-[0-9a-f]+', data['version_code']):
         raise ValueError('unexpected version_code')
     for board, profile in data['profiles'].items():
-        images = profile.get('images', [])
-        expected = {name: 'factory' if '-factory.' in name else 'sysupgrade'
+        images = [entry for entry in profile.get('images', [])
+                  if entry.get('filesystem') != 'initramfs' or entry.get('name') in names]
+        expected = {name: 'kernel' if '-initramfs-' in name else
+                    'factory' if '-factory.' in name else 'sysupgrade'
                     for name in names if '-' + board + '-' in name}
         if len(images) != len(expected) or {entry.get('name') for entry in images} != set(expected):
             raise ValueError('unexpected image metadata: ' + board)
         for entry in images:
             if (entry.get('type') != expected[entry['name']]
-                    or entry.get('filesystem') != 'squashfs'
+                    or entry.get('filesystem') != ('initramfs' if expected[entry['name']] == 'kernel' else 'squashfs')
                     or entry.get('size') != (directory / entry['name']).stat().st_size):
                 raise ValueError('image metadata differs from output: ' + entry['name'])
     # Reject all metadata/input failures before creating either group's output.

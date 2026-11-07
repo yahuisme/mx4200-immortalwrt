@@ -11,6 +11,7 @@ import unittest
 from test_cache_workflow import ROOT, step
 
 GROUPS = {'mx4200': 'MX4200', 'mx4300-homewrk': 'MX4300-HomeWRK'}
+INITRAMFS = 'immortalwrt-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb'
 STUB = r'''#!/usr/bin/env python3
 import hashlib, json, os, sys
 from pathlib import Path
@@ -75,20 +76,17 @@ def row(tag, **kwargs):
 
 
 def profile_fixture(base):
-    """Private pinned metadata for harmless fixture bytes, not real firmware."""
+    """Use the production nine-image contract, with harmless local scripts."""
     shutil.copytree(ROOT/'scripts', base/'scripts')
     directory = base/'user/default'
     directory.mkdir(parents=True)
     shutil.copyfile(ROOT/'user/default/build.json', directory/'build.json')
-    config = json.loads((ROOT/'user/default/official-initramfs.json').read_text())
-    config.update(size=len(b'fixture image'), sha256=hashlib.sha256(b'fixture image').hexdigest())
-    (directory/'official-initramfs.json').write_text(json.dumps(config))
-    return config
+
 
 
 def staged_fixture(base):
     """Minimal valid stage tree used only at the publication boundary."""
-    config = profile_fixture(base)
+    profile_fixture(base)
     profile = json.loads((ROOT/'user/default/build.json').read_text())
     rows = []
     for group, device in GROUPS.items():
@@ -96,13 +94,20 @@ def staged_fixture(base):
         directory.mkdir(parents=True)
         for name in profile['release_groups'][group]['images']:
             (directory/name).write_bytes(b'fixture image')
-        if group == config['group']:
-            (directory/config['name']).write_bytes(b'fixture image')
+
         tag = device+'-ImmortalWrt-current'
         (directory/'version.txt').write_text(tag)
         (directory/'title.txt').write_text(tag)
         (directory/'release-notes.md').write_text('fixture notes')
         rows.extend([row(tag), row(device+'-ImmortalWrt-old')])
+    # Publication compares RAM-image bytes with the checker's build record.
+    # Capture this before any negative mutation, so equal-size damage is visible.
+    record = base/'build-record'
+    record.mkdir()
+    (record/'initramfs.json').write_text(json.dumps(dict(
+        name=INITRAMFS, size=len(b'fixture image'), complete_cpio=True,
+        sha256=hashlib.sha256(b'fixture image').hexdigest())))
+
     return [rows]
 
 
@@ -118,12 +123,11 @@ def replay(base, pages, mode='fresh'):
 
 
 class DualPublicationTests(unittest.TestCase):
-    def test_official_image_failure_blocks_both_publications(self):
+    def test_native_initramfs_failure_blocks_both_publications(self):
         for mode in ('missing', 'empty', 'same-size-corrupt', 'symlink', 'wrong-group'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
                 base = Path(tmp); pages = staged_fixture(base)
-                config = json.loads((base/'user/default/official-initramfs.json').read_text())
-                image = base/'firmware'/config['group']/config['name']
+                image = base/'firmware/mx4300-homewrk'/INITRAMFS
                 if mode == 'missing': image.unlink()
                 if mode == 'empty': image.write_bytes(b'')
                 if mode == 'same-size-corrupt': image.write_bytes(b'x' * image.stat().st_size)
@@ -133,6 +137,25 @@ class DualPublicationTests(unittest.TestCase):
                 result, calls = replay(base, pages)
                 self.assertNotEqual(result.returncode, 0, result.stderr)
                 self.assertFalse(any(a[0] == 'release' for a in calls))
+                if mode == 'same-size-corrupt':
+                    self.assertIn('digest mismatch', result.stderr)
+
+    def test_initramfs_evidence_failure_blocks_both_publications(self):
+        for fault in ('missing', 'malformed', 'incomplete-cpio', 'wrong-name', 'wrong-size', 'wrong-digest'):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
+                base = Path(tmp); pages = staged_fixture(base)
+                evidence = base/'build-record/initramfs.json'
+                data = json.loads(evidence.read_text())
+                if fault == 'incomplete-cpio': data['complete_cpio'] = False
+                if fault == 'wrong-name': data['name'] = 'other.itb'
+                if fault == 'wrong-size': data['size'] += 1
+                if fault == 'wrong-digest': data['sha256'] = '0'*64
+                evidence.write_text('{' if fault == 'malformed' else json.dumps(data))
+                if fault == 'missing': evidence.unlink()
+                result, calls = replay(base, pages)
+                self.assertNotEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(any(a[0] == 'release' for a in calls))
+                self.assertNotIn('ModuleNotFoundError', result.stderr)
 
     def test_unexpected_initramfs_rejected_before_any_mutation(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -156,8 +179,7 @@ class DualPublicationTests(unittest.TestCase):
                 call = creates[index]
                 self.assertEqual(call[2], device+'-ImmortalWrt-current')
                 expected = set(profile['release_groups'][group]['images'])
-                if group == 'mx4300-homewrk':
-                    expected.add(json.loads((ROOT/'user/default/official-initramfs.json').read_text())['name'])
+
                 self.assertEqual({Path(p).name for p in call[3:call.index('--target')]},
                                  expected)
                 self.assertEqual(call[call.index('--target')+1], 'a'*40)

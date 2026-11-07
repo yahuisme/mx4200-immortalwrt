@@ -20,9 +20,10 @@ except ImportError:
         import cache_config
 
 EPOCH = 946684800
-# MX4200 production post-customization lock (ImmortalWrt v25.12.2):
+# Historical MX4200 post-customization lock (ImmortalWrt v25.12.2):
 # canonical path/permission/content records after the complete custom.sh path,
-# including MX mirror filtering. Unknown inventories bind to the full TC_KEY.
+# including MX mirror filtering. Current rolling snapshot inventories are not
+# implicitly reviewed: unknown inventories bind safely to the full TC_KEY.
 REVIEWED = {
     '5e09e8d00cbee466260d9391bab5d5f38a41ed7a439e553a9ee49a517deb435f',
 }

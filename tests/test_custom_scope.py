@@ -27,8 +27,8 @@ class CustomScopeTests(unittest.TestCase):
         # container mount path relocated. Local real Git objects avoid network.
         cases = (
             ('unsupported', 'VERSION_NUMBER:=26.01.0\n', ''),
-            ('malformed', 'VERSION_NUMBER:=25.12.2garbage\n', ''),
-            ('override', 'VERSION_NUMBER:=25.12.2\n', 'CONFIG_VERSION_NUMBER="26.01.0"\n'),
+            ('malformed', 'VERSION_NUMBER:=SNAPSHOTgarbage\n', ''),
+            ('override', 'VERSION_NUMBER:=SNAPSHOT\n', 'CONFIG_VERSION_NUMBER="26.01.0"\n'),
         )
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -76,7 +76,7 @@ class CustomScopeTests(unittest.TestCase):
                                             GIT_CONFIG_GLOBAL=str(config), GIT_CONFIG_NOSYSTEM='1',
                                             TMPDIR=tmp))
                     self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-                    self.assertIn('require reviewed ImmortalWrt 25.12', result.stderr)
+                    self.assertIn('require reviewed ImmortalWrt snapshot', result.stderr)
                     self.assertEqual(before, tree_contents(base),
                                      'custom must reject before changing any fixture file/directory')
 
@@ -86,7 +86,7 @@ class CustomScopeTests(unittest.TestCase):
                 root = Path(tmp)
                 (root / 'package').mkdir()
                 (root / 'include').mkdir()
-                (root / 'include/version.mk').write_text('VERSION_NUMBER:=25.12.2\n')
+                (root / 'include/version.mk').write_text('VERSION_NUMBER:=SNAPSHOT\n')
                 (root / 'tmp/info').mkdir(parents=True)
                 (root / 'tmp/.packageinfo').write_text('old metadata')
                 env = dict(os.environ, DK_OPENWRT=tmp, LOG=str(root / 'calls'),

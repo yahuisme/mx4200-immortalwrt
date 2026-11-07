@@ -10,7 +10,8 @@
     "immortalwrt-qualcommax-ipq807x-linksys_mx4300-squashfs-factory.bin",
     "immortalwrt-qualcommax-ipq807x-linksys_mx4300-squashfs-sysupgrade.bin",
     "immortalwrt-qualcommax-ipq807x-linksys_homewrk-squashfs-factory.ubi",
-    "immortalwrt-qualcommax-ipq807x-linksys_homewrk-squashfs-sysupgrade.bin"
+    "immortalwrt-qualcommax-ipq807x-linksys_homewrk-squashfs-sysupgrade.bin",
+    "immortalwrt-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb"
   ],
   "cache_prefix": {
     "tc": "tc-v1-mx4200-arm64-",
@@ -42,7 +43,8 @@
         "immortalwrt-qualcommax-ipq807x-linksys_mx4300-squashfs-factory.bin",
         "immortalwrt-qualcommax-ipq807x-linksys_mx4300-squashfs-sysupgrade.bin",
         "immortalwrt-qualcommax-ipq807x-linksys_homewrk-squashfs-factory.ubi",
-        "immortalwrt-qualcommax-ipq807x-linksys_homewrk-squashfs-sysupgrade.bin"
+        "immortalwrt-qualcommax-ipq807x-linksys_homewrk-squashfs-sysupgrade.bin",
+        "immortalwrt-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb"
       ]
     }
   }

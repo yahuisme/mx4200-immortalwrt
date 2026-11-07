@@ -60,8 +60,5 @@ if ! grep -Fq "$WRT_IP" "$CFG_FILE"; then
 	exit 1
 fi
 
-# Keep upstream stable version placeholders intact.
-if [ -f "./include/version.mk" ]; then
-	sed -i 's/ImmortalWRT/ImmortalWrt/g' ./include/version.mk
-fi
+# Keep official version templates and machine/feed identifiers unchanged.
 

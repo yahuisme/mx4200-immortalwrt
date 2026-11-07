@@ -61,10 +61,14 @@ must precede world. Other W1700K customization writes apps, target/package/feed
 patches and runtime files, outside this producer inventory. No customization
 adds a host producer or edits tools/scripts.
 
-MX4200 retains its existing `5e09e8d00cbee466260d9391bab5d5f38a41ed7a439e553a9ee49a517deb435f`
-lock: ImmortalWrt `4fc16f2985a358bd43bb522e43f05395fcbd6ed5` with its production
+MX4200 retains its historical `5e09e8d00cbee466260d9391bab5d5f38a41ed7a439e553a9ee49a517deb435f`
+reference lock: stable ImmortalWrt `4fc16f2985a358bd43bb522e43f05395fcbd6ed5` with its production
 scripts/projectsmirrors.json filtering reproduces that hash. Its 16 early
 producers also match; its helper and cache namespaces remain separate.
+
+MX4200 now builds rolling official `master`. This historical inventory does not
+authorize a new snapshot inventory: unreviewed inventories retain full TC_KEY
+binding automatically. No new independent-reuse lock is asserted by migration.
 
 ## Acceptance and limits
 

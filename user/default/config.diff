@@ -7,7 +7,7 @@ CONFIG_TARGET_DEVICE_qualcommax_ipq807x_DEVICE_linksys_mx4300=y
 CONFIG_TARGET_DEVICE_qualcommax_ipq807x_DEVICE_linksys_homewrk=y
 CONFIG_TARGET_MULTI_PROFILE=y
 CONFIG_TARGET_PER_DEVICE_ROOTFS=y
-CONFIG_TARGET_ROOTFS_INITRAMFS=n
+CONFIG_TARGET_ROOTFS_INITRAMFS=y
 # HomeWRK 不安装高级重启及其中文包
 CONFIG_TARGET_DEVICE_PACKAGES_qualcommax_ipq807x_DEVICE_linksys_homewrk="-luci-app-advanced-reboot -luci-i18n-advanced-reboot-zh-cn"
 

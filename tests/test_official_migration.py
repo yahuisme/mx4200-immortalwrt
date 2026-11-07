@@ -1,4 +1,4 @@
-"""Official stable-source defaults and intentional customization requirements."""
+"""Official snapshot-source defaults and intentional customization requirements."""
 import os
 import re
 from pathlib import Path
@@ -17,7 +17,7 @@ class OfficialMigrationTests(unittest.TestCase):
         for row in re.findall(r'^DEFAULT_PACKAGES\s*\+=\s*(.*)$', flattened, re.M):
             defaults.update(row.split())
         native = {package for package in defaults if package.startswith('kmod-qca-nss-')}
-        # Reviewed stable target owns this driver; do not whitelist arbitrary new
+        # Reviewed official target owns this driver; do not whitelist arbitrary new
         # target symbols or conflate it with external acceleration integrations.
         self.assertEqual(native, {'kmod-qca-nss-dp'})
         selected = {line.split('=', 1)[0].removeprefix('CONFIG_PACKAGE_')
@@ -49,16 +49,18 @@ class OfficialMigrationTests(unittest.TestCase):
         workflow = yaml.safe_load((ROOT / '.github/workflows/MX4200.yml').read_text())
         settings = (ROOT / 'user/default/settings.ini').read_text()
         self.assertIn('REPO_URL="https://github.com/immortalwrt/immortalwrt.git"', settings)
-        self.assertIn('REPO_REF="latest-release"', settings)
+        self.assertIn('REPO_REF="master"', settings)
         self.assertNotIn('REPO_BRANCH=', settings)
-        self.assertIn('最新 stable release', (ROOT / 'README.md').read_text())
+        self.assertIn('最新 snapshot 源码', (ROOT / 'README.md').read_text())
         text = (ROOT / '.github/workflows/MX4200.yml').read_text()
-        self.assertIn('sort -V | tail -1', text)
+        self.assertNotIn('git ls-remote --tags', text)
+        self.assertIn('git fetch --depth=1 origin "$SOURCE_REF"', text)
+        self.assertIn('SOURCE_REF="refs/heads/$REPO_REF"', text)
         self.assertIn('SOURCE_REF=', text)
-        self.assertIn('SOURCE_TAG', text[text.index('RELEASE_NOTES='):])
+        self.assertIn('SOURCE_SHA', text[text.index('RELEASE_NOTES='):])
         self.assertIn('SOURCE_URL', text[text.index('RELEASE_NOTES='):])
-        self.assertIn('SOURCE_VERSION="${SOURCE_TAG#v}"', text)
-        self.assertIn('VERSION="${DEVICE}-ImmortalWrt-${SOURCE_VERSION}-r${WRT_REV}-${WRT_DATE/-/_}"', text)
+        self.assertNotIn('SOURCE_VERSION=', text)
+        self.assertIn('VERSION="${DEVICE}-ImmortalWrt-r${WRT_REV}-${WRT_DATE/-/_}"', text)
         self.assertIn('DEVICE=MX4200', text)
         self.assertIn('DEVICE=MX4300-HomeWRK', text)
         self.assertIn('printf \'%s\\n\' "$VERSION" > "firmware/$GROUP/title.txt"', text)

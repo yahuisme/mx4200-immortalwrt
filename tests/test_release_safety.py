@@ -1,4 +1,4 @@
-"""Exercise the real eight-image stage and own-main publication gates."""
+"""Exercise the real nine-image stage and own-main publication gates."""
 import json
 import os
 from pathlib import Path
@@ -6,33 +6,35 @@ import subprocess
 import tempfile
 import unittest
 from test_cache_workflow import ROOT, step
-from test_dual_publish import profile_fixture
+from test_dual_publish import INITRAMFS, profile_fixture
 
-OFFICIAL_BOUNDARY = '''
-python3() {
-    if [ "${1:-}" = scripts/official_initramfs.py ]; then
-        [ "${FAULT:-}" != initramfs ] || return 31
-        command python3 - "$2" <<'PY'
-import json,sys
+INITRAMFS_BOUNDARY = '''
+check_initramfs() {
+    [ "${FAULT:-}" != initramfs ] || return 31
+    # Only the Docker image inspector is stubbed; staging/config/metadata and
+    # later build-record digest/readback gates run their production code.
+    command python3 - "$@" <<'PY'
+import hashlib,json,sys
 from pathlib import Path
-from scripts.official_initramfs import load_config, verify
-config=load_config()
-destination=Path(sys.argv[1])/config['name']
-destination.write_bytes(b'fixture image')
-verify(destination)
-Path('build-record/official-initramfs.json').write_text(json.dumps(config))
+assert len(sys.argv) == 4 and sys.argv[2:] == ['--record', '/build-record/initramfs.json']
+image=Path(sys.argv[1])
+assert image.name == 'immortalwrt-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb'
+assert not image.is_symlink() and image.is_file() and image.stat().st_size
+Path('build-record/initramfs.json').write_text(json.dumps(dict(
+    name=image.name, size=image.stat().st_size, sha256=hashlib.sha256(image.read_bytes()).hexdigest(),
+    complete_cpio=True, fixture_inspection=True)))
 PY
-    else
-        command python3 "$@"
-    fi
 }
 '''
 
 
 class ReleaseTests(unittest.TestCase):
-    def test_official_image_download_is_part_of_stage_acceptance(self):
+    def test_native_initramfs_inspection_precedes_staging(self):
         body=step('Validate and stage firmware')['run']
-        self.assertIn('python3 scripts/official_initramfs.py firmware/mx4300-homewrk --record build-record/official-initramfs.json', body)
+        check='docker_exec DK python3 /cache-scripts/check_initramfs.py "$DK_BIN/targets/qualcommax/ipq807x/'+INITRAMFS+'" --record /build-record/initramfs.json'
+        self.assertIn(check, body)
+        self.assertLess(body.index(check), body.index('python3 scripts/release_images.py stage'))
+        self.assertNotIn('official_initramfs.py', body)
 
     def fixture(self, base):
         profile_fixture(base)
@@ -44,7 +46,8 @@ class ReleaseTests(unittest.TestCase):
         (base/'tmp').mkdir()
         (base/'tmp/.packageinfo').write_text('')
         (base/'build-record').mkdir()
-        (base/'build-record/source-tag.txt').write_text('v25.12.2\n')
+        (base/'build-record/source-ref.txt').write_text('master\n')
+        (base/'build-record/source-sha.txt').write_text('c'*40+'\n')
         data={'target':'qualcommax/ipq807x','version_code':'r123-abcdef', 'profiles': {}}
         for device in ('mx4200v1','mx4200v2','mx4300','homewrk'):
             images = []
@@ -53,14 +56,29 @@ class ReleaseTests(unittest.TestCase):
                 image = output/f'immortalwrt-qualcommax-ipq807x-linksys_{device}-squashfs-{kind}.{suffix}'
                 image.write_bytes(b'fixture-not-firmware')
                 images.append(dict(name=image.name, type=kind, filesystem='squashfs', size=image.stat().st_size))
+            # Global native INITRAMFS also emits the other models' RAM images;
+            # all are in profiles.json, but only HomeWRK is a Release asset.
+            image=output/f'immortalwrt-qualcommax-ipq807x-linksys_{device}-initramfs-uImage.itb'
+            image.write_bytes(b'fixture-not-firmware')
+            images.append(dict(name=image.name, type='kernel', filesystem='initramfs', size=image.stat().st_size))
             data['profiles']['linksys_'+device] = {'images': images}
         (output/'profiles.json').write_text(json.dumps(data))
         return output,data
 
     def stage(self,base):
-        prefix='sudo() { "$@"; }; docker_exec() { shift; "$@"; };\n'+OFFICIAL_BOUNDARY
+        prefix=INITRAMFS_BOUNDARY+'''
+sudo() { "$@"; }
+docker_exec() {
+    shift
+    if [ "$1" = python3 ] && [ "$2" = /cache-scripts/check_initramfs.py ]; then
+        shift 2; check_initramfs "$@"
+    else
+        "$@"
+    fi
+}
+'''
         return subprocess.run(['bash','-eo','pipefail','-c',prefix+step('Validate and stage firmware')['run']],
-                              cwd=base,env=dict(os.environ,DK_OPENWRT=str(base)),text=True,capture_output=True)
+                              cwd=base,env=dict(os.environ,DK_OPENWRT=str(base),DK_BIN=str(base/'openwrt_bin')),text=True,capture_output=True)
 
     def test_complete_stage_and_bad_image_configuration_matrix(self):
         cases=('valid','missing','empty','extra','wrong-device','wrong-prefix','symlink',
@@ -95,11 +113,12 @@ class ReleaseTests(unittest.TestCase):
                     suffixes=[]
                     for group,device in GROUPS.items():
                         directory=base/'firmware'/group
-                        self.assertEqual({p.name for p in directory.iterdir() if p.suffix in ('.bin','.ubi')},
+                        self.assertEqual({p.name for p in directory.iterdir() if p.suffix in ('.bin','.ubi','.itb')},
                                          set(profile['release_groups'][group]['images']))
                         tag=(directory/'version.txt').read_text().strip()
                         title=(directory/'title.txt').read_text().strip()
-                        self.assertRegex(tag,rf'^{device}-ImmortalWrt-25\.12\.2-r123-\d\d\.\d\d\.\d\d_\d\d\.\d\d\.\d\d$')
+                        self.assertRegex(tag,rf'^{device}-ImmortalWrt-r123-\d\d\.\d\d\.\d\d_\d\d\.\d\d\.\d\d$')
+                        self.assertNotIn('snapshot', title.lower())
                         self.assertEqual(title,tag)
                         suffixes.append(tag.removeprefix(device+'-ImmortalWrt-'))
                         notes=(directory/'release-notes.md').read_text()
@@ -110,11 +129,11 @@ class ReleaseTests(unittest.TestCase):
                     notes=(base/'firmware/mx4300-homewrk/release-notes.md').read_text()
                     self.assertIn('`factory.ubi`',notes)
                     self.assertIn('LuCI',notes)
-                    self.assertIn('25.12.2',notes)
+                    self.assertIn('官方 snapshot（master）',notes)
+                    self.assertIn('c'*40,notes)
                     self.assertIn('initramfs-uImage.itb',notes)
-                    self.assertTrue((base/'build-record/official-initramfs.json').is_file())
-                    config=json.loads((base/'user/default/official-initramfs.json').read_text())
-                    self.assertTrue((base/'firmware/mx4300-homewrk'/config['name']).is_file())
+                    self.assertTrue((base/'build-record/initramfs.json').is_file())
+                    self.assertTrue((base/'firmware/mx4300-homewrk'/INITRAMFS).is_file())
                     self.assertNotIn('`factory.ubi`',(base/'firmware/mx4200/release-notes.md').read_text())
                     self.assertNotIn('not found',result.stderr)
                 else:

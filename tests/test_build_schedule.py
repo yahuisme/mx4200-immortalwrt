@@ -15,9 +15,9 @@ class BuildScheduleTests(unittest.TestCase):
         cls.workflow = yaml.safe_load(
             (ROOT / '.github/workflows/MX4200.yml').read_text())
 
-    def test_direct_three_day_cron_at_hong_kong_noon(self):
+    def test_daily_cron_at_hong_kong_noon(self):
         triggers = self.workflow.get('on', self.workflow.get(True))
-        self.assertEqual(triggers['schedule'], [{'cron': '0 4 */3 * *'}])
+        self.assertEqual(triggers['schedule'], [{'cron': '0 4 * * *'}])
         self.assertEqual(set(triggers), {'schedule', 'workflow_dispatch'})
         local = datetime(2026, 11, 1, 4, tzinfo=ZoneInfo('UTC')).astimezone(
             ZoneInfo('Asia/Hong_Kong'))

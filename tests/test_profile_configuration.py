@@ -21,10 +21,13 @@ class ProfileConfigurationTests(unittest.TestCase):
         lines = set(PROFILE.read_text().splitlines())
         for symbol in ('TARGET_MULTI_PROFILE',
                        'TARGET_PER_DEVICE_ROOTFS',
+                       'TARGET_ROOTFS_INITRAMFS',
                        'TARGET_DEVICE_qualcommax_ipq807x_DEVICE_linksys_mx4200v1',
-                       'TARGET_DEVICE_qualcommax_ipq807x_DEVICE_linksys_mx4200v2'):
+                       'TARGET_DEVICE_qualcommax_ipq807x_DEVICE_linksys_mx4200v2',
+                       'TARGET_DEVICE_qualcommax_ipq807x_DEVICE_linksys_mx4300',
+                       'TARGET_DEVICE_qualcommax_ipq807x_DEVICE_linksys_homewrk'):
             self.assertIn('CONFIG_' + symbol + '=y', lines)
-        for symbol in ('TARGET_ROOTFS_INITRAMFS', 'FEED_video',
+        for symbol in ('FEED_video',
                        'PACKAGE_luci-app-attendedsysupgrade'):
             self.assertIn('CONFIG_' + symbol + '=n', lines)
 

@@ -9,7 +9,7 @@ def collect(targets, profile):
     candidates = sorted(p for p in directory.iterdir()
                         if (('factory' in p.name or 'sysupgrade' in p.name)
                             and p.suffix in ('.bin', '.ubi'))
-                        or p.name.endswith('sysupgrade.itb'))
+                        or p.name.endswith('sysupgrade.itb') or p.name in names)
     if len(candidates) != len(names) or {p.name for p in candidates} != set(names):
         raise ValueError("unexpected release image names/count")
     result = []

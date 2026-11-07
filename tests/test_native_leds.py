@@ -1,7 +1,9 @@
 """Ensure MX4200 does not install a custom LED preset or runtime owner."""
 from pathlib import Path
 import hashlib
+import os
 import re
+import subprocess
 import tempfile
 import unittest
 
@@ -9,7 +11,9 @@ from installed_rootfs import roots
 
 
 REPO = Path(__file__).resolve().parents[1]
-# Byte-for-byte official v25.12.2 source, commit below; not extracted-image
+# Historical fallback: byte-for-byte official v25.12.2 source, commit below.
+# Snapshot acceptance requires MX_OFFICIAL_SOURCE=<matching official checkout>.
+# Hash Git objects, never customized worktree/output files; not extracted-image
 # self-hashes or APK records (which a faulty overlay could leave unchanged).
 # Source: https://github.com/immortalwrt/immortalwrt/tree/
 # 4fc16f2985a358bd43bb522e43f05395fcbd6ed5
@@ -31,6 +35,30 @@ LED_POLICY = re.compile(
     r'\bconfig\s+[\'\"]?led\b|/lib/functions/leds\.sh')
 
 
+def official_hashes(root):
+    release = (root / 'etc/openwrt_release').read_text()
+    source = os.environ.get('MX_OFFICIAL_SOURCE')
+    if not source:
+        if "DISTRIB_RELEASE='25.12.2'" not in release:
+            raise AssertionError('set MX_OFFICIAL_SOURCE to the matching official source; fallback covers only 25.12.2')
+        return NATIVE_LED_SHA256
+    def git(*args):
+        return subprocess.check_output(['git', '-C', source, *args], stderr=subprocess.DEVNULL)
+    origin = git('remote', 'get-url', 'origin').decode().strip().removesuffix('.git')
+    if origin != 'https://github.com/immortalwrt/immortalwrt':
+        raise AssertionError('MX_OFFICIAL_SOURCE must identify the official ImmortalWrt origin')
+    sha = git('rev-parse', '--verify', 'HEAD').decode().strip()
+    revision = re.search(r"^DISTRIB_REVISION='(r[0-9]+-([0-9a-f]{7,40}))'$", release, re.M)
+    if not revision or not sha.startswith(revision[2]):
+        raise AssertionError('installed root revision does not match MX_OFFICIAL_SOURCE HEAD')
+    result = {}
+    for name in NATIVE_LED_SHA256:
+        path = ('target/linux/qualcommax/ipq807x/base-files/etc/board.d/01_leds'
+                if name == 'etc/board.d/01_leds' else 'package/base-files/files/' + name)
+        result[name] = hashlib.sha256(git('show', 'HEAD:' + path)).hexdigest()
+    return result
+
+
 class NativeLEDContractTests(unittest.TestCase):
     def assert_no_extra_led_policy(self, root, native=False):
         for directory in ('etc', 'lib', 'sbin', 'usr/bin', 'usr/sbin', 'usr/libexec'):
@@ -45,8 +73,48 @@ class NativeLEDContractTests(unittest.TestCase):
                     self.assertIsNone(LED_POLICY.search(raw.decode(errors='replace')),
                                       'unexpected LED policy: ' + rel)
 
-    def assert_native_led_file(self, rel, raw):
-        self.assertEqual(hashlib.sha256(raw).hexdigest(), NATIVE_LED_SHA256[rel], rel)
+    def assert_native_led_file(self, rel, raw, expected=None):
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), (expected or NATIVE_LED_SHA256)[rel], rel)
+
+    def test_snapshot_expected_hashes_use_matching_official_git_objects(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            source, root = Path(tmp) / 'source', Path(tmp) / 'root'
+            source.mkdir()
+            (root / 'etc').mkdir(parents=True)
+            def git(*args):
+                return subprocess.check_output(['git', '-C', str(source), *args],
+                                               stderr=subprocess.DEVNULL, text=True).strip()
+            git('init', '-q')
+            git('remote', 'add', 'origin', 'https://github.com/immortalwrt/immortalwrt.git')
+            for name in NATIVE_LED_SHA256:
+                path = source / ('target/linux/qualcommax/ipq807x/base-files/etc/board.d/01_leds'
+                                 if name == 'etc/board.d/01_leds' else 'package/base-files/files/' + name)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('source-object fixture: ' + name)
+            git('add', '.')
+            git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                'commit', '-qm', 'source metadata fixture; not firmware')
+            sha = git('rev-parse', 'HEAD')
+            release = root / 'etc/openwrt_release'
+            release.write_text("DISTRIB_RELEASE='SNAPSHOT'\nDISTRIB_REVISION='r1-" + sha[:10] + "'\n")
+            with patch.dict(os.environ, MX_OFFICIAL_SOURCE=str(source)):
+                expected = official_hashes(root)
+                for name in NATIVE_LED_SHA256:
+                    self.assertEqual(expected[name], hashlib.sha256(('source-object fixture: ' + name).encode()).hexdigest())
+                # Dirty worktree cannot bless a changed expected hash.
+                (source / 'package/base-files/files/etc/diag.sh').write_text('customized worktree must be ignored')
+                self.assertEqual(expected, official_hashes(root))
+                release.write_text("DISTRIB_RELEASE='SNAPSHOT'\nDISTRIB_REVISION='r1-0000000000'\n")
+                with self.assertRaisesRegex(AssertionError, 'does not match'):
+                    official_hashes(root)
+                release.write_text("DISTRIB_RELEASE='SNAPSHOT'\nDISTRIB_REVISION='r1-" + sha[:10] + "'\n")
+                git('remote', 'set-url', 'origin', 'https://example.invalid/fork')
+                with self.assertRaisesRegex(AssertionError, 'official ImmortalWrt origin'):
+                    official_hashes(root)
+            with patch.dict(os.environ, MX_OFFICIAL_SOURCE=''):
+                with self.assertRaisesRegex(AssertionError, 'fallback covers only 25.12.2'):
+                    official_hashes(root)
 
     def test_actual_installed_native_leds(self):
         selected = roots()
@@ -54,8 +122,9 @@ class NativeLEDContractTests(unittest.TestCase):
             self.skipTest('set MX_ROOTFS_BASE or MX_MENU_ROOT + MX_MENU_DEVICE')
         for device, root in selected:
             with self.subTest(device=device):
+                expected = official_hashes(root)
                 for rel in NATIVE_LED_SHA256:
-                    self.assert_native_led_file(rel, (root / rel).read_bytes())
+                    self.assert_native_led_file(rel, (root / rel).read_bytes(), expected)
                 self.assert_no_extra_led_policy(root, native=True)
 
     def test_actual_native_file_mutations_are_rejected(self):
@@ -63,12 +132,13 @@ class NativeLEDContractTests(unittest.TestCase):
         if not selected:
             self.skipTest('set MX_ROOTFS_BASE or MX_MENU_ROOT + MX_MENU_DEVICE')
         for device, root in selected:
+            expected = official_hashes(root)
             for rel in NATIVE_LED_SHA256:
                 with self.subTest(device=device, path=rel):
                     raw = (root / rel).read_bytes()
-                    self.assert_native_led_file(rel, raw)
+                    self.assert_native_led_file(rel, raw, expected)
                     with self.assertRaises(AssertionError):
-                        self.assert_native_led_file(rel, raw + b'\necho 0 > /sys/class/leds/blue:status/brightness\n')
+                        self.assert_native_led_file(rel, raw + b'\necho 0 > /sys/class/leds/blue:status/brightness\n', expected)
 
     def test_differently_named_runtime_led_policies_are_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:

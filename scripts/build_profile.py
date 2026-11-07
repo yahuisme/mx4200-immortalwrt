@@ -39,6 +39,8 @@ def load(profile=None):
             expected = {f"{data['system']}-{data['target'].replace('/', '-')}-{board}-squashfs-{kind}.{extension}"
                         for board in profiles for kind, extension in
                         (('factory', 'ubi' if board == 'linksys_homewrk' else 'bin'), ('sysupgrade', 'bin'))}
+            if 'linksys_homewrk' in profiles:
+                expected.add(f"{data['system']}-{data['target'].replace('/', '-')}-linksys_homewrk-initramfs-uImage.itb")
             if len(images) != len(expected) or set(images) != expected:
                 raise ValueError('release images differ from native profiles')
             names.extend(images)

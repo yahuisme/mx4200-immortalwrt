@@ -72,16 +72,15 @@ elif a == ['api', '--paginate'""")
                        MOCK_STATE=str(state), GITHUB_REF='refs/heads/main',
                        GITHUB_SHA='a'*40, GITHUB_REPOSITORY='fixture/repo',
                        GITHUB_OUTPUT=str(base / 'output'), RUNNER_TEMP=tmp,
-                       DK_OPENWRT=tmp, FAULT=fault, IMAGE_ID='sha256:'+'a'*64, BUILDER_FINGERPRINT='b'*64)
+                       DK_OPENWRT=tmp, DK_BIN=str(base/'openwrt_bin'), FAULT=fault,
+                       IMAGE_ID='sha256:'+'a'*64, BUILDER_FINGERPRINT='b'*64)
             # Real nested compile shell and stage; compiler, Docker and archive
             # compressor are external boundaries. No firmware build/network occurs.
-            prefix = release.OFFICIAL_BOUNDARY.replace('python3() {', 'official_python3() {') + '''
+            prefix = release.INITRAMFS_BOUNDARY + '''
 make() { printf 'make %s\n' "$*" >> "$RUNNER_TEMP/bootstrap-calls"; if [ "$1" = download ]; then [ "$FAULT" != download ]; else [ "$FAULT" != compile ]; fi; }
 git() { [ "$*" = 'config --global tar.umask 0022' ]; }
 python3() {
-    if [ "$1" = scripts/official_initramfs.py ]; then
-        official_python3 "$@"
-    elif [ "$1" = /cache-scripts/bootstrap_cache.py ]; then
+    if [ "$1" = /cache-scripts/bootstrap_cache.py ]; then
         printf 'bootstrap pack\n' >> "$RUNNER_TEMP/bootstrap-calls"
         [ "$FAULT" != bootstrap_pack ] || return 29
         truncate -s 100 tbarchive/bootstrap.tar.gz
@@ -93,6 +92,8 @@ docker_exec() {
     shift
     if [ "$1" = python3 ] && [ "$2" = /cache-scripts/build_record.py ]; then
         python3 scripts/build_record.py "$DK_OPENWRT" build-record
+    elif [ "$1" = python3 ] && [ "$2" = /cache-scripts/check_initramfs.py ]; then
+        shift 2; check_initramfs "$@"
     elif [ "$1" = python3 ] && [ "$2" = /cache-scripts/cache.py ]; then
         [ "$FAULT" != package ] || return 17
         mkdir -p "${5#/}"
@@ -235,6 +236,10 @@ export -f make docker_exec sudo python3 git
                     self.assertEqual(outcomes['Upload build record'],'success',log)
                 self.assertEqual(outcomes['Publish firmware and prune releases'],
                                  'failure' if fault == 'publish' else 'success' if published else 'skipped', log)
+                if fault == 'initramfs':
+                    self.assertEqual(outcomes['Compile firmware'], 'success', log)
+                    self.assertEqual(outcomes['Validate and stage firmware'], 'failure', log)
+                    self.assertNotIn('ModuleNotFoundError', log)
                 if fault in ('none', 'publish', 'metadata', 'upload'):
                     self.assertEqual({item['key'] for item in inventory['entries']},
                                      {'cc-v1-mx4200-arm64.new', 'tc-v1-mx4200-arm64-new',

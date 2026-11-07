@@ -3,9 +3,9 @@ name: MX4200 ImmortalWrt Builds
 on:
   workflow_dispatch:
 
-  # Every third day of the month at 12:00 Hong Kong time (04:00 UTC).
+  # Daily at 12:00 Hong Kong time (04:00 UTC).
   schedule:
-    - cron: '0 4 */3 * *'
+    - cron: '0 4 * * *'
 concurrency:
   group: mx4200-build
   cancel-in-progress: false
@@ -73,22 +73,22 @@ jobs:
         docker_exec DK bash -e -c '
           . $DK_PROFILE/settings.ini
           [[ $REPO_URL && $REPO_REF ]] || { echo "::error::Missing REPO_URL or REPO_REF"; exit 1; }
-          [[ $REPO_REF = latest-release ]] || { echo "::error::REPO_REF must be latest-release"; exit 1; }
+          [[ $REPO_REF = master ]] || { echo "::error::REPO_REF must be master"; exit 1; }
           umask 022
           git config --global tar.umask 0022
           mkdir -p $DK_OPENWRT
           cd $DK_OPENWRT
           if [ ! -d .git ]; then git init; fi
           git remote set-url origin $REPO_URL 2>&- || git remote add origin $REPO_URL
-          SOURCE_TAG=$(git ls-remote --tags --refs "$REPO_URL" "refs/tags/v*" | awk -F/ "\$3 ~ /^v[0-9]+\\.[0-9]+\\.[0-9]+$/ {print \$3}" | sort -V | tail -1)
-          [[ $SOURCE_TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::No stable release tag found"; exit 1; }
-          SOURCE_REF="refs/tags/$SOURCE_TAG"
-          echo "SOURCE_TAG=$SOURCE_TAG"
+          SOURCE_REF="refs/heads/$REPO_REF"
           echo "SOURCE_REF=$SOURCE_REF"
-          echo "$SOURCE_TAG" > /build-record/source-tag.txt
           git fetch --depth=1 origin "$SOURCE_REF"
           git checkout -f --detach FETCH_HEAD
           git reset --hard FETCH_HEAD
+          SOURCE_SHA=$(git rev-parse --verify HEAD)
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          printf "%s\n" "$REPO_REF" > /build-record/source-ref.txt
+          printf "%s\n" "$SOURCE_SHA" > /build-record/source-sha.txt
           # Remove ALL builder-preseeded patches, feeds, overlays and ABI files.
           git clean -ffdx
           mountpoint $DK_BIN || { echo "::error::not mounted" >&2; exit 1; }
@@ -219,16 +219,15 @@ jobs:
         docker_exec DK cat "$DK_OPENWRT/.config" > final.config
         docker_exec DK cat "$DK_OPENWRT/tmp/.packageinfo" > final.packageinfo
         python3 scripts/check_defaults.py final.config final.packageinfo user/default/config.diff
+        docker_exec DK python3 /cache-scripts/check_initramfs.py "$DK_BIN/targets/qualcommax/ipq807x/immortalwrt-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb" --record /build-record/initramfs.json
         python3 scripts/release_images.py stage openwrt_bin/targets firmware
-        python3 scripts/official_initramfs.py firmware/mx4300-homewrk --record build-record/official-initramfs.json
-        OFFICIAL_VERSION=$(jq -er '.version' user/default/official-initramfs.json)
-        OFFICIAL_URL=$(jq -er '.url' user/default/official-initramfs.json)
         WRT_DATE="$(TZ=Asia/Hong_Kong date +'%y.%m.%d-%H.%M.%S')"
         WRT_REV=$(jq -er '.version_code | capture("^r(?<revision>[0-9]+)-[0-9a-f]+$").revision' openwrt_bin/targets/qualcommax/ipq807x/profiles.json)
-        SOURCE_TAG="$(cat build-record/source-tag.txt)"
-        [[ "$SOURCE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-        SOURCE_VERSION="${SOURCE_TAG#v}"
-        SOURCE_URL="https://github.com/immortalwrt/immortalwrt/tree/$SOURCE_TAG"
+        SOURCE_REF="$(cat build-record/source-ref.txt)"
+        [[ "$SOURCE_REF" = master ]]
+        SOURCE_SHA="$(cat build-record/source-sha.txt)"
+        [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+        SOURCE_URL="https://github.com/immortalwrt/immortalwrt/tree/$SOURCE_SHA"
         BUILD_TIME="$(TZ=Asia/Hong_Kong date '+%Y-%m-%d %H:%M:%S %Z')"
         for GROUP in mx4200 mx4300-homewrk; do
           case "$GROUP" in
@@ -240,17 +239,17 @@ jobs:
             mx4300-homewrk)
               DEVICE=MX4300-HomeWRK
               MODELS='Linksys MX4300 / HomeWRK'
-              INSTALL="MX4300 使用 \`factory.bin\` 从原厂 Web 刷入；HomeWRK 使用附带的[官方 ImmortalWrt $OFFICIAL_VERSION 临时镜像]($OFFICIAL_URL) \`initramfs-uImage.itb\` 从 USB 启动，再通过 LuCI 刷入 \`sysupgrade.bin\`，无需 \`factory.ubi\`。临时镜像保持官方原样，已校验 SHA-256，不含本项目定制。"
+              INSTALL="MX4300 使用 \`factory.bin\` 从原厂 Web 刷入；HomeWRK 使用本次官方 snapshot 源码同批构建、含 LuCI 的 \`initramfs-uImage.itb\` 从 USB 启动，打开 http://192.168.10.1 再刷入 \`sysupgrade.bin\`，无需 \`factory.ubi\`。临时系统包含本项目默认设置，不是官方原版下载镜像。"
               ;;
           esac
-          VERSION="${DEVICE}-ImmortalWrt-${SOURCE_VERSION}-r${WRT_REV}-${WRT_DATE/-/_}"
+          VERSION="${DEVICE}-ImmortalWrt-r${WRT_REV}-${WRT_DATE/-/_}"
           printf '%s\n' "$VERSION" > "firmware/$GROUP/version.txt"
           printf '%s\n' "$VERSION" > "firmware/$GROUP/title.txt"
           RELEASE_NOTES="firmware/$GROUP/release-notes.md"
           cat > "$RELEASE_NOTES" <<EOF
         ## $MODELS ImmortalWrt 固件
 
-        - 源码：[$SOURCE_TAG]($SOURCE_URL)
+        - 源码：官方 snapshot（$SOURCE_REF），[$SOURCE_SHA]($SOURCE_URL)
         - 构建时间：$BUILD_TIME
         - 机型：$MODELS，请选择对应硬件型号的镜像，不可混刷。
         - 镜像：$INSTALL
@@ -373,20 +372,28 @@ jobs:
         }
         current_main
         # Validate BOTH local groups before any Release mutation. Metadata stays
-        # in Actions artifacts; the official temporary image is also validated.
+        # in Actions artifacts; the same-build LuCI temporary image is validated.
         python3 - <<'PY'
+        import hashlib
         import json
         from pathlib import Path
-        from scripts.official_initramfs import load_config, verify
         profile = json.loads(Path('user/default/build.json').read_text())
-        official = load_config()
+        initramfs = json.loads(Path('build-record/initramfs.json').read_text())
+        temporary_name = 'immortalwrt-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb'
+        temporary = Path('firmware/mx4300-homewrk') / temporary_name
+        if (initramfs.get('complete_cpio') is not True or initramfs.get('name') != temporary_name
+                or temporary.is_symlink() or not temporary.is_file()
+                or type(initramfs.get('size')) is not int or initramfs['size'] <= 0
+                or temporary.stat().st_size != initramfs['size']):
+            raise ValueError('Invalid same-build HomeWRK initramfs evidence')
+        with temporary.open('rb') as stream:
+            if hashlib.file_digest(stream, 'sha256').hexdigest() != initramfs.get('sha256'):
+                raise ValueError('Same-build HomeWRK initramfs digest mismatch')
         suffixes = []
         for group, device in [('mx4200', 'MX4200'), ('mx4300-homewrk', 'MX4300-HomeWRK')]:
             directory = Path('firmware') / group
             expected = set(profile['release_groups'][group]['images'])
-            if group == official['group']:
-                expected.add(official['name'])
-                verify(directory / official['name'], official)
+
             images = [p for p in directory.iterdir() if p.suffix in ('.bin', '.ubi', '.itb')]
             if (len(images) != len(expected) or {p.name for p in images} != expected
                     or any(p.is_symlink() or not p.is_file() or not p.stat().st_size for p in images)):
@@ -398,11 +405,11 @@ jobs:
                 raise ValueError('Invalid staged release identity: ' + group)
             suffixes.append(tag.removeprefix(device + '-ImmortalWrt-'))
         if len(set(suffixes)) != 1:
-            raise ValueError('Release groups must share source version, revision and timestamp')
+            raise ValueError('Release groups must share revision and timestamp')
         PY
         shopt -s nullglob
         # A single build supplies two independent releases. Keep MX4200 as the
-        # repository's latest download; the second group has its own stable tag.
+        # repository's latest download; the second group has its own tag.
         for GROUP in mx4200 mx4300-homewrk; do
           current_main
           VERSION="$(cat "firmware/$GROUP/version.txt")"
