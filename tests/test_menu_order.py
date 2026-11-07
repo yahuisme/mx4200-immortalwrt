@@ -1,15 +1,16 @@
 """Source-grounded Services menu contract; no installed-image/trust claims.
 
 The digest-locked fixture contains complete package-source menu files at exact
-Git revisions, not firmware overlays. MX_MENU_ROOT optionally checks an actual
-installed root, including all its additional Services siblings.
+Git revisions, not firmware overlays. See installed_rootfs for opt-in single
+or four-device extracted root checks, including all actual menu siblings.
 """
 import copy
 import hashlib
 import json
-import os
 from pathlib import Path
 import unittest
+
+from installed_rootfs import roots
 
 ROOT = Path(__file__).resolve().parents[1]
 MENUS = ROOT / 'user/default/files/usr/share/luci/menu.d'
@@ -45,7 +46,7 @@ class MenuOrderTests(unittest.TestCase):
         # Advanced Reboot's order is installed by its own package, not shared files/.
         self.overlay.update(menu_files(ROOT / 'user/default/menus'))
 
-    def assert_contract(self, overlay, installed):
+    def assert_contract(self, overlay, installed, device='mx4200v1', installed_root=False):
         # HomeProxy already supplies order 10. A same-name overlay would replace
         # the whole source menu, hiding future submenus, fields and dependencies.
         self.assertNotIn(PROXY_MENU, overlay, 'Use the native HomeProxy menu without an overlay')
@@ -64,8 +65,14 @@ class MenuOrderTests(unittest.TestCase):
         self.assertEqual(cpu, self.source[cpu_menu], 'CPU Freq may change only its parent order')
         for name, source in self.source.items():
             if name not in (TERMINAL_MENU, reboot_menu, cpu_menu):
+                self.assertIn(name, installed)
                 self.assertEqual(installed[name], source, name)
-        self.assertIn(installed[reboot_menu], (self.source[reboot_menu], overlay[reboot_menu]))
+        if device == 'homewrk':
+            self.assertNotIn(reboot_menu, installed)
+        else:
+            self.assertIn(reboot_menu, installed)
+            self.assertIn(installed[reboot_menu], (self.source[reboot_menu], overlay[reboot_menu]))
+        self.assertIn(cpu_menu, installed)
         self.assertIn(installed[cpu_menu], (self.source[cpu_menu], overlay[cpu_menu]))
         self.assertEqual(installed[PROXY_MENU], self.source[PROXY_MENU])
         self.assertEqual(installed[PROXY_MENU][PARENT]['order'], 10)
@@ -80,10 +87,20 @@ class MenuOrderTests(unittest.TestCase):
         else:
             terminal[TERMINAL].pop('order')
         self.assertEqual(terminal, upstream, 'Terminal may change only its route prefix and parent order')
-        self.assertIn(installed[TERMINAL_MENU],
-                      (self.source[TERMINAL_MENU], overlay[TERMINAL_MENU]))
+        self.assertIn(TERMINAL_MENU, installed)
+        if not installed_root:
+            self.assertIn(installed[TERMINAL_MENU],
+                          (self.source[TERMINAL_MENU], overlay[TERMINAL_MENU]))
+        effective_overlay = {name: rows for name, rows in overlay.items()
+                             if device != 'homewrk' or name != reboot_menu}
+        # An extracted root must stand on its own: overlaying the recipe here
+        # would conceal a missing/stale installed menu or incorrect order.
+        menus = installed if installed_root else installed | effective_overlay
+        if installed_root:
+            for name, rows in effective_overlay.items():
+                self.assertEqual(installed.get(name), rows, name)
         merged = {}
-        for entries in (installed | overlay).values():
+        for entries in menus.values():
             for path, row in entries.items():
                 self.assertNotIn(path, merged, 'Duplicate menu route can clobber package metadata')
                 merged[path] = row
@@ -101,8 +118,13 @@ class MenuOrderTests(unittest.TestCase):
                         key=lambda path: (merged[path].get('order', 10000),
                                           merged[path].get('title') or path))
         i = system.index(cpu_route)
-        self.assertEqual(system[i:i + 4], [cpu_route, 'admin/system/reboot', reboot_route,
-                                          'admin/system/aurora'])
+        tail = [cpu_route, 'admin/system/reboot']
+        if device != 'homewrk':
+            tail.append(reboot_route)
+        tail.append('admin/system/aurora')
+        if device == 'homewrk':
+            self.assertFalse(any('advanced-reboot' in path for path in merged))
+        self.assertEqual(system[i:], tail)
 
     def test_complete_source_menus_and_actual_sibling_adjacency(self):
         expected = {'luci-app-homeproxy.json', 'luci-app-ttyd.json', 'luci-app-wol.json',
@@ -199,16 +221,49 @@ class MenuOrderTests(unittest.TestCase):
                 with self.assertRaises(AssertionError):
                     self.assert_contract(self.overlay, changed)
 
-    @unittest.skipUnless(os.environ.get('MX_MENU_ROOT'), 'set MX_MENU_ROOT to an installed root')
+    def test_homewrk_source_contract_has_three_entry_tail(self):
+        installed = copy.deepcopy(self.source)
+        del installed['luci-app-advanced-reboot.json']
+        self.assert_contract(self.overlay, installed, device='homewrk')
+
     def test_actual_installed_root_contract(self):
-        directory = Path(os.environ['MX_MENU_ROOT']) / 'usr/share/luci/menu.d'
-        self.assertTrue(directory.is_dir())
-        self.assert_contract(self.overlay, menu_files(directory))
-        self.assertEqual(menu_files(directory)[TERMINAL_MENU], self.overlay[TERMINAL_MENU])
-        self.assertEqual(menu_files(directory)['luci-app-advanced-reboot.json'],
-                         self.overlay['luci-app-advanced-reboot.json'])
-        self.assertEqual(menu_files(directory)['luci-app-cpufreq.json'],
-                         self.overlay['luci-app-cpufreq.json'])
+        selected = roots()
+        if not selected:
+            self.skipTest('set MX_ROOTFS_BASE or MX_MENU_ROOT + MX_MENU_DEVICE')
+        for device, root in selected:
+            with self.subTest(device=device):
+                directory = root / 'usr/share/luci/menu.d'
+                self.assertTrue(directory.is_dir())
+                self.assert_contract(self.overlay, menu_files(directory), device, installed_root=True)
+
+    def test_actual_installed_menu_mutations_are_rejected(self):
+        selected = roots()
+        if not selected:
+            self.skipTest('set MX_ROOTFS_BASE or MX_MENU_ROOT + MX_MENU_DEVICE')
+        for device, root in selected:
+            installed = menu_files(root / 'usr/share/luci/menu.d')
+            mutations = []
+            changed = copy.deepcopy(installed)
+            # A valid upstream order must still fail for a final root; recipe
+            # overlays must not be applied in-memory to hide a stale install.
+            changed['luci-app-cpufreq.json']['admin/system/cpufreq']['order'] = 90
+            mutations.append(('stale-cpu-order', changed))
+            changed = copy.deepcopy(installed)
+            del changed[TERMINAL_MENU]
+            mutations.append(('missing-terminal', changed))
+            changed = copy.deepcopy(installed)
+            if device == 'homewrk':
+                changed['renamed.json'] = copy.deepcopy(self.source['luci-app-advanced-reboot.json'])
+            else:
+                del changed['luci-app-advanced-reboot.json']
+            mutations.append(('wrong-device-advanced-reboot', changed))
+            changed = copy.deepcopy(installed)
+            changed['between.json'] = {'admin/system/between': {'title': 'Between', 'order': 95}}
+            mutations.append(('interposed-system-sibling', changed))
+            for mutation, changed in mutations:
+                with self.subTest(device=device, mutation=mutation):
+                    with self.assertRaises(AssertionError):
+                        self.assert_contract(self.overlay, changed, device, installed_root=True)
 
 
 if __name__ == '__main__':

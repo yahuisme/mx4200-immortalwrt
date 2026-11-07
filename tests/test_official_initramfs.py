@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import io
 import json
+from email.message import Message
 from unittest.mock import patch
 from pathlib import Path
 import shutil
@@ -108,6 +109,74 @@ class VerifyTests(unittest.TestCase):
 
 
 class DownloadTests(unittest.TestCase):
+    def test_transient_http_failure_retries_then_verifies(self):
+        import urllib.error
+        module = helper()
+        data = b"verified retry payload"
+        config = dict(PIN, size=len(data), sha256=hashlib.sha256(data).hexdigest())
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pin = root / 'pin.json'
+            pin.write_text(json.dumps(config))
+            failure = urllib.error.HTTPError(URL, 503, 'temporary unavailable', Message(), None)
+            with patch.object(module, 'CONFIG', pin), patch('urllib.request.urlopen',
+                    side_effect=[failure, io.BytesIO(data)]) as request, patch.object(module.time, 'sleep') as sleep, \
+                    patch('sys.stderr', new_callable=io.StringIO):
+                self.assertEqual(module.main([str(root / 'dest')]), 0)
+            self.assertEqual(request.call_count, 2)
+            sleep.assert_called_once_with(1)
+            self.assertEqual((root / 'dest' / NAME).read_bytes(), data)
+
+    def test_retry_budget_and_permanent_failures_preserve_existing_files(self):
+        import urllib.error
+        module = helper()
+        data = b'verified fixture'
+        config = dict(PIN, size=len(data), sha256=hashlib.sha256(data).hexdigest())
+        for code, attempts in ((503, 3), (429, 3), (404, 1), (403, 1)):
+            with self.subTest(code=code), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                target = root / NAME
+                target.write_bytes(b'previous image')
+                record = root / 'record.json'
+                record.write_text('previous record')
+                failure = urllib.error.HTTPError(URL, code, 'fixture failure', Message(), None)
+                with patch.object(module, 'load_config', return_value=config), \
+                     patch('urllib.request.urlopen', side_effect=failure) as request, \
+                     patch.object(module.time, 'sleep') as sleep, \
+                     patch('sys.stderr', new_callable=io.StringIO):
+                    self.assertEqual(module.main([str(root), '--record', str(record)]), 1)
+                self.assertEqual(request.call_count, attempts)
+                self.assertEqual([c.args[0] for c in sleep.call_args_list], [1, 2][:attempts - 1])
+                self.assertEqual(target.read_bytes(), b'previous image')
+                self.assertEqual(record.read_text(), 'previous record')
+                self.assertEqual({p.name for p in root.iterdir()}, {NAME, 'record.json'})
+
+    def test_interrupted_response_restarts_from_zero_and_corruption_never_retries(self):
+        module = helper()
+        data = b'verified fixture'
+        config = dict(PIN, size=len(data), sha256=hashlib.sha256(data).hexdigest())
+
+        class Interrupted(io.BytesIO):
+            def read(self, size=None):
+                if self.tell():
+                    raise ConnectionResetError('fixture reset')
+                return super().read(4)
+
+        for fault in ('reset', 'hash', 'oversize'):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                responses = ([Interrupted(data), io.BytesIO(data)] if fault == 'reset' else
+                             [io.BytesIO(b'!' * len(data) if fault == 'hash' else data + b'x')])
+                with patch.object(module, 'load_config', return_value=config), \
+                     patch('urllib.request.urlopen', side_effect=responses) as request, \
+                     patch.object(module.time, 'sleep'), patch('sys.stderr', new_callable=io.StringIO):
+                    self.assertEqual(module.main([str(root)]), 0 if fault == 'reset' else 1)
+                self.assertEqual(request.call_count, 2 if fault == 'reset' else 1)
+                if fault == 'reset':
+                    self.assertEqual((root / NAME).read_bytes(), data)
+                else:
+                    self.assertEqual(list(root.iterdir()), [])
+
     def test_record_preparation_failure_preserves_existing_image(self):
         module = helper()
         data = b"fixture bytes"
@@ -212,10 +281,14 @@ class DownloadTests(unittest.TestCase):
                 target.write_bytes(b"previous image")
                 record = root / "record.json"
                 record.write_text("previous record")
-                network = patch("urllib.request.urlopen", side_effect=failure) if isinstance(failure, Exception) else patch("urllib.request.urlopen", return_value=io.BytesIO(failure) if isinstance(failure, bytes) else failure)
-                with patch.object(module, "CONFIG", pin), network, patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                network = (patch("urllib.request.urlopen", side_effect=failure) if isinstance(failure, Exception)
+                           else patch("urllib.request.urlopen", side_effect=lambda *a, **k:
+                                      io.BytesIO(failure) if isinstance(failure, bytes) else Interrupted(data)))
+                with patch.object(module, "CONFIG", pin), network as request, \
+                     patch.object(module.time, 'sleep'), patch("sys.stderr", new_callable=io.StringIO) as stderr:
                     self.assertEqual(module.main([str(dest), "--record", str(record)]), 1)
                     self.assertIn("official initramfs:", stderr.getvalue())
+                    self.assertEqual(request.call_count, 1 if isinstance(failure, bytes) else 3)
                 self.assertEqual(target.read_bytes(), b"previous image")
                 self.assertEqual(record.read_text(), "previous record")
                 self.assertEqual(list(dest.iterdir()), [target])

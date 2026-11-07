@@ -8,6 +8,8 @@ import os
 import re
 import sys
 import tempfile
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -80,13 +82,24 @@ def download(destination, record=None):
     try:
         with tempfile.NamedTemporaryFile(dir=destination, prefix=".official-initramfs-", delete=False) as stream:
             partial = Path(stream.name)
-            received = 0
-            with urllib.request.urlopen(config["url"], timeout=30) as response:
-                while block := response.read(min(128 * 1024, config["size"] - received + 1)):
-                    received += len(block)
-                    if received > config["size"]:
-                        raise ValueError("official initramfs exceeds pinned size")
-                    stream.write(block)
+            for attempt in range(3):
+                stream.seek(0)
+                stream.truncate()
+                received = 0
+                try:
+                    with urllib.request.urlopen(config["url"], timeout=30) as response:
+                        while block := response.read(min(128 * 1024, config["size"] - received + 1)):
+                            received += len(block)
+                            if received > config["size"]:
+                                raise ValueError("official initramfs exceeds pinned size")
+                            stream.write(block)
+                    break
+                except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException) as error:
+                    if (attempt == 2 or isinstance(error, urllib.error.HTTPError)
+                            and error.code not in (408, 429, 500, 502, 503, 504)):
+                        raise
+                    print(f"official initramfs: retry {attempt + 1}/2 after {error}", file=sys.stderr)
+                    time.sleep(2 ** attempt)
             stream.flush()
             os.fsync(stream.fileno())
         verify(partial, config)

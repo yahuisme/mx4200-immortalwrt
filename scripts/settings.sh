@@ -35,6 +35,18 @@ if [ -f "$WIFI_UC" ]; then
 	sed -i "s/ssid='.*'/ssid='$WRT_SSID'/g" "$WIFI_UC"
 	sed -i "s/key='.*'/key='$WRT_WORD'/g" "$WIFI_UC"
 	sed -i "s/encryption='.*'/encryption='psk2+ccmp'/g" "$WIFI_UC"
+	if ! grep -Fxq "set \${si}.ssid='$WRT_SSID'" "$WIFI_UC"; then
+		echo "ERROR: failed to set default wireless ssid; abort" >&2
+		exit 1
+	fi
+	if ! grep -Fxq "set \${si}.key='$WRT_WORD'" "$WIFI_UC"; then
+		echo "ERROR: failed to set default wireless key; abort" >&2
+		exit 1
+	fi
+	if ! grep -Fxq "set \${si}.encryption='psk2+ccmp'" "$WIFI_UC"; then
+		echo "ERROR: failed to set default wireless encryption; abort" >&2
+		exit 1
+	fi
 	echo "wifi default ssid/key has been set!"
 else
 	echo "ERROR: mac80211.uc not found; stopping build!" >&2

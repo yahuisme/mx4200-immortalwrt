@@ -30,16 +30,17 @@ class BuildTimingTests(unittest.TestCase):
                 if hot:
                     cc.write_bytes(stub.read_bytes())
                     cc.chmod(0o755)
-                values = {'steps.tc.outputs.cache-hit': 'true' if hot else 'false',
-                          'steps.tb.outputs.cache-hit': 'true',
+                values = {'steps.tc_restore.outputs.hit': 'true' if hot else 'false',
+                          'steps.tb_restore.outputs.hit': 'true',
                           'steps.tb_inputs.outputs.key': 'tb-fixture'}
                 env = dict(os.environ, **render_env(item, values), DK_OPENWRT=tmp,
                            PRE=str(pre), MAIN=str(main), FALLBACK=str(fallback),
-                           STATS=str(stats), STUB=str(stub))
+                           STATS=str(stats), STUB=str(stub), CALLS=str(root/'calls'))
                 prefix = '''
                 docker_exec() { shift; "$@"; }
                 nproc() { printf '4\n'; }
                 make() {
+                  printf '%s\n' "$*" >> "$CALLS"
                   if [[ "$*" == tools/ccache/compile* ]]; then
                     [ "$PRE" = 0 ] || return "$PRE"
                     cp "$STUB" staging_dir/host/bin/ccache
@@ -54,6 +55,8 @@ class BuildTimingTests(unittest.TestCase):
                                         env=env, text=True, capture_output=True)
                 expected = pre or (fallback if main else 0)
                 self.assertEqual(result.returncode, expected, result.stderr)
+                calls = (root/'calls').read_text().splitlines()
+                self.assertEqual(any(call.startswith('tools/ccache/compile') for call in calls), not hot)
                 self.assertRegex(result.stdout, rf'Build timing: bootstrap=[0-9]+s status={pre}')
                 if pre:
                     self.assertNotIn('Build timing: world=', result.stdout)

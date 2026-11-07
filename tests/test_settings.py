@@ -18,6 +18,45 @@ WIFI = '&wifi {\n\tstatus = "okay";\n\n\tqcom,ath11k-calibration-variant = "Link
 
 
 class SettingsScriptTests(unittest.TestCase):
+    def run_wireless_settings(self, wireless):
+        with tempfile.TemporaryDirectory() as d:
+            fixtures = {
+                'feeds/luci/applications/luci-app-advanced-reboot/root/usr/share/luci/menu.d/luci-app-advanced-reboot.json': '{}',
+                'feeds/luci/collections/luci/Makefile': 'LUCI_DEPENDS:=+luci-light\n',
+                'feeds/luci/modules/luci-mod-system/htdocs/flash.js': "const ip = '192.168.1.1';\n",
+                'package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc': wireless,
+                'package/base-files/files/bin/config_generate': "ipaddr='192.168.1.1'\n",
+            }
+            for relative, text in fixtures.items():
+                path = Path(d, relative)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text)
+            env = os.environ | {'WRT_IP': '192.168.10.1', 'WRT_SSID': 'MX4200',
+                                'WRT_WORD': '12345678'}
+            result = subprocess.run(['bash', str(ROOT / 'scripts/settings.sh')],
+                                    cwd=d, env=env, capture_output=True, text=True)
+            return result, Path(d, 'package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc').read_text()
+
+    def assert_wireless_zero_match_rejected(self, option, requested):
+        defaults = {'ssid': 'ImmortalWrt', 'key': 'password', 'encryption': 'none'}
+        wireless = ''.join(f"set ${{si}}.{name}='{value}'\n"
+                           for name, value in defaults.items() if name != option)
+        for comment in ('', f"// set ${{si}}.{option}='{requested}'\n"):
+            with self.subTest(option=option, misleading_comment=bool(comment)):
+                result, _ = self.run_wireless_settings(wireless + comment)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn(f'failed to set default wireless {option}', result.stderr)
+                self.assertNotIn('wifi default ssid/key has been set!', result.stdout)
+
+    def test_wireless_ssid_zero_match_rejected(self):
+        self.assert_wireless_zero_match_rejected('ssid', 'MX4200')
+
+    def test_wireless_key_zero_match_rejected(self):
+        self.assert_wireless_zero_match_rejected('key', '12345678')
+
+    def test_wireless_encryption_zero_match_rejected(self):
+        self.assert_wireless_zero_match_rejected('encryption', 'psk2+ccmp')
+
     def test_complete_settings_preserves_stable_version_templates(self):
         # Set SETTINGS_PRISTINE_SOURCE to pristine real stable files for integration
         # coverage; the default fixture keeps the same full-script contract.
@@ -38,7 +77,7 @@ class SettingsScriptTests(unittest.TestCase):
             "feeds/luci/modules/luci-mod-system/htdocs/flash.js":
                 "const ip = '192.168.1.1';\n",
             "package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc":
-                "ssid='ImmortalWrt'\nkey='password'\nencryption='none'\n",
+                "set ${si}.ssid='ImmortalWrt'\nset ${si}.key='password'\nset ${si}.encryption='none'\n",
             "package/base-files/files/bin/config_generate":
                 "ipaddr='192.168.1.1'\n",
             "package/base-files/files/etc/openwrt_release":
@@ -110,9 +149,9 @@ class SettingsScriptTests(unittest.TestCase):
                              for top in ('target', 'package/kernel')
                              for p in Path(d, top).rglob('*') if p.is_file()})
             wifi = Path(d, "package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc").read_text()
-            self.assertIn("encryption='psk2+ccmp'", wifi)
-            self.assertIn("ssid='MX4200'", wifi)
-            self.assertIn("key='12345678'", wifi)
+            self.assertIn("set ${si}.encryption='psk2+ccmp'", wifi.splitlines())
+            self.assertIn("set ${si}.ssid='MX4200'", wifi.splitlines())
+            self.assertIn("set ${si}.key='12345678'", wifi.splitlines())
             for relative in version_files:
                 self.assertEqual(Path(d, relative).read_text(), before[relative], relative)
             self.assertIn("192.168.10.1", Path(d,
