@@ -80,6 +80,32 @@ class CustomScopeTests(unittest.TestCase):
                     self.assertEqual(before, tree_contents(base),
                                      'custom must reject before changing any fixture file/directory')
 
+    def test_homewrk_guard_failure_stops_all_downstream_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'package').mkdir()
+            (root / 'scripts').mkdir()
+            mirror = root / 'scripts/projectsmirrors.json'
+            mirror.write_text('https://mirror.cn/source\n')
+            dts = root / 'target/linux/qualcommax/dts/ipq8174-homewrk.dts'
+            dts.parent.mkdir(parents=True)
+            dts.write_text('unsupported upstream layout\n')
+            custom = CUSTOM.read_text().replace('/cache-scripts/', str(ROOT / 'scripts') + '/')
+            boundary = '''
+python3() {
+    if [ "$1" = "$REAL_EXTERNAL" ]; then return 0; fi
+    command python3 "$@"
+}
+'''
+            before = tree_contents(root)
+            result = subprocess.run(['bash', '-euo', 'pipefail', '-c', boundary + custom],
+                                    cwd=root, capture_output=True, text=True,
+                                    env=dict(os.environ, DK_OPENWRT=tmp,
+                                             REAL_EXTERNAL=str(ROOT / 'scripts/external_packages.py')))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('review MAC protection', result.stderr)
+            self.assertEqual(before, tree_contents(root))
+
     def test_customization_does_not_read_unselected_gnutls(self):
         for temperature_status in ('0', '17'):
             with self.subTest(temperature_status=temperature_status), tempfile.TemporaryDirectory() as tmp:
@@ -89,7 +115,12 @@ class CustomScopeTests(unittest.TestCase):
                 (root / 'include/version.mk').write_text('VERSION_NUMBER:=SNAPSHOT\n')
                 (root / 'tmp/info').mkdir(parents=True)
                 (root / 'tmp/.packageinfo').write_text('old metadata')
+                dts = root / 'target/linux/qualcommax/dts/ipq8174-homewrk.dts'
+                dts.parent.mkdir(parents=True)
+                original_dts = (ROOT / 'tests/fixtures/homewrk/ipq8174-homewrk.dts').read_text()
+                dts.write_text(original_dts)
                 env = dict(os.environ, DK_OPENWRT=tmp, LOG=str(root / 'calls'),
+                           HOMEWRK_HELPER=str(ROOT / 'scripts/homewrk_dts.py'),
                            TEMP_STATUS=temperature_status,
                            REAL_EXTERNAL=str(ROOT / 'scripts/external_packages.py'))
                 boundary = '''
@@ -101,6 +132,12 @@ bash() {
     esac
 }
 python3() {
+    if [ "$1" = /cache-scripts/homewrk_dts.py ]; then
+        printf 'homewrk\\n' >> "$LOG"
+        shift
+        command python3 "$HOMEWRK_HELPER" "$@"
+        return "$?"
+    fi
     if [ "$1" = /cache-scripts/external_packages.py ]; then
         [ "$2" = preflight ] && [ "$3" = "$DK_OPENWRT" ] || return 99
         printf 'preflight\\n' >> "$LOG"
@@ -117,8 +154,9 @@ python3() {
                                         cwd=root, env=env, text=True, capture_output=True)
                 self.assertEqual(result.returncode, int(temperature_status), result.stderr)
                 self.assertEqual((root / 'calls').read_text().splitlines(),
-                                 ['preflight', 'packages', 'temperature', 'settings'] if temperature_status == '0'
-                                 else ['preflight', 'packages', 'temperature'])
+                                 ['preflight', 'homewrk', 'packages', 'temperature', 'settings'] if temperature_status == '0'
+                                 else ['preflight', 'homewrk', 'packages', 'temperature'])
+                self.assertIn('status = "disabled";', dts.read_text())
                 self.assertEqual((root / 'tmp/.packageinfo').exists(), temperature_status != '0')
                 self.assertEqual((root / 'tmp/info').exists(), temperature_status != '0')
                 self.assertFalse((root / 'feeds/packages/libs/gnutls/Makefile').exists())
