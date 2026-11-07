@@ -22,7 +22,7 @@
 
 MX4300 / HomeWRK 发布组附带 HomeWRK 官方原版临时镜像。每次构建自动获取 ImmortalWrt 官方最新稳定 Release，校验大小与 SHA-256，不重新编译、不修改系统和默认配置，管理地址为 `192.168.1.1`。
 
-**首次刷机请参照 [Linksys 首次刷机教程](linksys-first-flash.md)：MX4200 / MX4300 使用原厂后台刷入，HomeWRK 使用 Windows＋TTL 启动临时系统后刷入。升级建议不保留配置。**
+**首次安装：[Linksys 刷机教程](linksys-first-flash.md)。MX4200 / MX4300 网页刷入，HomeWRK 使用 TTL＋U 盘。**
 
 ## 功能与应用
 
