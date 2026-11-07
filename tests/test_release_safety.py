@@ -6,12 +6,37 @@ import subprocess
 import tempfile
 import unittest
 from test_cache_workflow import ROOT, step
+from test_dual_publish import profile_fixture
+
+OFFICIAL_BOUNDARY = '''
+python3() {
+    if [ "${1:-}" = scripts/official_initramfs.py ]; then
+        [ "${FAULT:-}" != initramfs ] || return 31
+        command python3 - "$2" <<'PY'
+import json,sys
+from pathlib import Path
+from scripts.official_initramfs import load_config, verify
+config=load_config()
+destination=Path(sys.argv[1])/config['name']
+destination.write_bytes(b'fixture image')
+verify(destination)
+Path('build-record/official-initramfs.json').write_text(json.dumps(config))
+PY
+    else
+        command python3 "$@"
+    fi
+}
+'''
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_official_image_download_is_part_of_stage_acceptance(self):
+        body=step('Validate and stage firmware')['run']
+        self.assertIn('python3 scripts/official_initramfs.py firmware/mx4300-homewrk --record build-record/official-initramfs.json', body)
+
     def fixture(self, base):
-        (base/'scripts').symlink_to(ROOT/'scripts')
-        (base/'user').symlink_to(ROOT/'user')
+        profile_fixture(base)
+        (base/'user/default/config.diff').write_text((ROOT/'user/default/config.diff').read_text())
         output=base/'openwrt_bin/targets/qualcommax/ipq807x'
         output.mkdir(parents=True)
         config=(ROOT/'user/default/config.diff').read_text()
@@ -33,7 +58,7 @@ class ReleaseTests(unittest.TestCase):
         return output,data
 
     def stage(self,base):
-        prefix='sudo() { "$@"; }; docker_exec() { shift; "$@"; };\n'
+        prefix='sudo() { "$@"; }; docker_exec() { shift; "$@"; };\n'+OFFICIAL_BOUNDARY
         return subprocess.run(['bash','-eo','pipefail','-c',prefix+step('Validate and stage firmware')['run']],
                               cwd=base,env=dict(os.environ,DK_OPENWRT=str(base)),text=True,capture_output=True)
 
@@ -84,8 +109,12 @@ class ReleaseTests(unittest.TestCase):
                     self.assertEqual(suffixes[0],suffixes[1])
                     notes=(base/'firmware/mx4300-homewrk/release-notes.md').read_text()
                     self.assertIn('`factory.ubi`',notes)
-                    self.assertIn('串口/U-Boot',notes)
-                    self.assertIn('不能当作原厂 Web 镜像',notes)
+                    self.assertIn('LuCI',notes)
+                    self.assertIn('25.12.2',notes)
+                    self.assertIn('initramfs-uImage.itb',notes)
+                    self.assertTrue((base/'build-record/official-initramfs.json').is_file())
+                    config=json.loads((base/'user/default/official-initramfs.json').read_text())
+                    self.assertTrue((base/'firmware/mx4300-homewrk'/config['name']).is_file())
                     self.assertNotIn('`factory.ubi`',(base/'firmware/mx4200/release-notes.md').read_text())
                     self.assertNotIn('not found',result.stderr)
                 else:

@@ -18,6 +18,9 @@
 | `factory.bin` | MX4200 / MX4300 从原厂固件刷入 |
 | `factory.ubi` | HomeWRK 命令行写入用，本教程无需使用 |
 | `sysupgrade.bin` | 系统升级；也用于 HomeWRK 启动临时系统后的首次安装 |
+| `initramfs-uImage.itb` | HomeWRK 从 USB 启动的临时系统，自带 LuCI |
+
+MX4300 / HomeWRK 发布组附带官方 ImmortalWrt 25.12.2 的 HomeWRK 临时镜像，原样提供并校验 SHA-256，不含本项目定制。
 
 **首次刷机请参照 [Linksys 首次刷机教程](linksys-first-flash.md)：MX4200 / MX4300 使用原厂后台刷入，HomeWRK 使用 Windows＋TTL 启动临时系统后刷入。升级建议不保留配置。**
 
@@ -60,4 +63,4 @@ Aurora 主题及配置插件从官方签名 APK 软件源预装，并保留公�
 
 每月 1、4、7……日自动构建，计划时间为香港时间 12:00；也可手动运行 [Actions](https://github.com/yahuisme/mx4200-immortalwrt/actions/workflows/MX4200.yml)。
 
-使用 Ubuntu 24.04 ARM64 runner 与 Debian ARM64 Docker 环境，一次构建四个机型，发布两组 Release。每组仅包含对应机型的 factory 与 sysupgrade 镜像，独立保留最近一版。
+使用 Ubuntu 24.04 ARM64 runner 与 Debian ARM64 Docker 环境，一次构建四个机型，发布两组 Release。提供对应机型的 factory 与 sysupgrade 镜像，MX4300 / HomeWRK 组另附 HomeWRK 官方临时镜像，每组独立保留最近一版。

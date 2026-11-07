@@ -15,7 +15,7 @@ READBACK = """
     from urllib.parse import unquote
     tag=unquote(a[1].split('/releases/tags/')[1])
     group='mx4300-homewrk' if tag.startswith('MX4300-HomeWRK-') else 'mx4200'
-    assets=[dict(name=p.name,size=p.stat().st_size,state='uploaded',digest='sha256:'+__import__('hashlib').sha256(p.read_bytes()).hexdigest()) for p in (Path('firmware')/group).iterdir() if p.suffix in ('.bin','.ubi')]
+    assets=[dict(name=p.name,size=p.stat().st_size,state='uploaded',digest='sha256:'+__import__('hashlib').sha256(p.read_bytes()).hexdigest()) for p in (Path('firmware')/group).iterdir() if p.suffix in ('.bin','.ubi','.itb')]
     print(json.dumps(dict(tag_name=tag,name=tag,draft=False,prerelease=False,assets=assets)))
 """
 
@@ -75,11 +75,13 @@ elif a == ['api', '--paginate'""")
                        DK_OPENWRT=tmp, FAULT=fault, IMAGE_ID='sha256:'+'a'*64, BUILDER_FINGERPRINT='b'*64)
             # Real nested compile shell and stage; compiler, Docker and archive
             # compressor are external boundaries. No firmware build/network occurs.
-            prefix = '''
+            prefix = release.OFFICIAL_BOUNDARY.replace('python3() {', 'official_python3() {') + '''
 make() { printf 'make %s\n' "$*" >> "$RUNNER_TEMP/bootstrap-calls"; if [ "$1" = download ]; then [ "$FAULT" != download ]; else [ "$FAULT" != compile ]; fi; }
 git() { [ "$*" = 'config --global tar.umask 0022' ]; }
 python3() {
-    if [ "$1" = /cache-scripts/bootstrap_cache.py ]; then
+    if [ "$1" = scripts/official_initramfs.py ]; then
+        official_python3 "$@"
+    elif [ "$1" = /cache-scripts/bootstrap_cache.py ]; then
         printf 'bootstrap pack\n' >> "$RUNNER_TEMP/bootstrap-calls"
         [ "$FAULT" != bootstrap_pack ] || return 29
         truncate -s 100 tbarchive/bootstrap.tar.gz
@@ -218,10 +220,10 @@ export -f make docker_exec sudo python3 git
         self.assertEqual(len([c for c in inventory['calls'] if c[:2] == ['release', 'create']]), 2)
 
     def test_full_compile_stage_cache_publish_failure_matrix(self):
-        for fault in ('none', 'download', 'compile', 'validation', 'cancel', 'package', 'save', 'readback', 'publish', 'metadata', 'upload', 'bootstrap_pack', 'bootstrap_save', 'bootstrap_readback'):
+        for fault in ('none', 'download', 'compile', 'validation', 'initramfs', 'cancel', 'package', 'save', 'readback', 'publish', 'metadata', 'upload', 'bootstrap_pack', 'bootstrap_save', 'bootstrap_readback'):
             with self.subTest(fault=fault):
                 outcomes, executed, inventory, log = self.replay(fault)
-                published = fault not in ('download', 'compile', 'validation', 'cancel', 'metadata', 'upload')
+                published = fault not in ('download', 'compile', 'validation', 'initramfs', 'cancel', 'metadata', 'upload')
                 if fault == 'download':
                     self.assertEqual(outcomes['Download sources'], 'failure', log)
                     self.assertEqual(outcomes['Compile firmware'], 'skipped', log)

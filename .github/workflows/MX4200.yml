@@ -220,6 +220,9 @@ jobs:
         docker_exec DK cat "$DK_OPENWRT/tmp/.packageinfo" > final.packageinfo
         python3 scripts/check_defaults.py final.config final.packageinfo user/default/config.diff
         python3 scripts/release_images.py stage openwrt_bin/targets firmware
+        python3 scripts/official_initramfs.py firmware/mx4300-homewrk --record build-record/official-initramfs.json
+        OFFICIAL_VERSION=$(jq -er '.version' user/default/official-initramfs.json)
+        OFFICIAL_URL=$(jq -er '.url' user/default/official-initramfs.json)
         WRT_DATE="$(TZ=Asia/Hong_Kong date +'%y.%m.%d-%H.%M.%S')"
         WRT_REV=$(jq -er '.version_code | capture("^r(?<revision>[0-9]+)-[0-9a-f]+$").revision' openwrt_bin/targets/qualcommax/ipq807x/profiles.json)
         SOURCE_TAG="$(cat build-record/source-tag.txt)"
@@ -232,12 +235,12 @@ jobs:
             mx4200)
               DEVICE=MX4200
               MODELS='Linksys MX4200v1 / MX4200v2'
-              INSTALL='`factory.bin` 用于从原厂固件刷入，`sysupgrade.bin` 用于从已有 ImmortalWrt 升级。'
+              INSTALL="\`factory.bin\` 用于从原厂固件刷入，\`sysupgrade.bin\` 用于从已有 ImmortalWrt 升级。"
               ;;
             mx4300-homewrk)
               DEVICE=MX4300-HomeWRK
               MODELS='Linksys MX4300 / HomeWRK'
-              INSTALL='MX4300 的 `factory.bin` 用于原厂 Web 刷入；HomeWRK 的 `factory.ubi` 须按其串口/U-Boot 安装流程使用，不能当作原厂 Web 镜像。两者的 `sysupgrade.bin` 用于已有 ImmortalWrt 升级。'
+              INSTALL="MX4300 使用 \`factory.bin\` 从原厂 Web 刷入；HomeWRK 使用附带的[官方 ImmortalWrt $OFFICIAL_VERSION 临时镜像]($OFFICIAL_URL) \`initramfs-uImage.itb\` 从 USB 启动，再通过 LuCI 刷入 \`sysupgrade.bin\`，无需 \`factory.ubi\`。临时镜像保持官方原样，已校验 SHA-256，不含本项目定制。"
               ;;
           esac
           VERSION="${DEVICE}-ImmortalWrt-${SOURCE_VERSION}-r${WRT_REV}-${WRT_DATE/-/_}"
@@ -254,6 +257,7 @@ jobs:
         - 定制：中文 LuCI、Aurora、HomeProxy 及既定网络与无线设置。
 
         [默认设置与使用说明](https://github.com/yahuisme/mx4200-immortalwrt#默认设置)
+        [首次刷机教程](https://github.com/yahuisme/mx4200-immortalwrt/blob/main/linksys-first-flash.md)
         EOF
         done
 
@@ -369,16 +373,21 @@ jobs:
         }
         current_main
         # Validate BOTH local groups before any Release mutation. Metadata stays
-        # in Actions artifacts; only the profile's exact .bin/.ubi set is public.
+        # in Actions artifacts; the official temporary image is also validated.
         python3 - <<'PY'
         import json
         from pathlib import Path
+        from scripts.official_initramfs import load_config, verify
         profile = json.loads(Path('user/default/build.json').read_text())
+        official = load_config()
         suffixes = []
         for group, device in [('mx4200', 'MX4200'), ('mx4300-homewrk', 'MX4300-HomeWRK')]:
             directory = Path('firmware') / group
             expected = set(profile['release_groups'][group]['images'])
-            images = [p for p in directory.iterdir() if p.suffix in ('.bin', '.ubi')]
+            if group == official['group']:
+                expected.add(official['name'])
+                verify(directory / official['name'], official)
+            images = [p for p in directory.iterdir() if p.suffix in ('.bin', '.ubi', '.itb')]
             if (len(images) != len(expected) or {p.name for p in images} != expected
                     or any(p.is_symlink() or not p.is_file() or not p.stat().st_size for p in images)):
                 raise ValueError('Invalid staged release images: ' + group)
@@ -398,7 +407,7 @@ jobs:
           current_main
           VERSION="$(cat "firmware/$GROUP/version.txt")"
           RELEASE_TITLE="$(cat "firmware/$GROUP/title.txt")"
-          IMAGES=("firmware/$GROUP/"*.bin "firmware/$GROUP/"*.ubi)
+          IMAGES=("firmware/$GROUP/"*.bin "firmware/$GROUP/"*.ubi "firmware/$GROUP/"*.itb)
           LATEST=false
           [ "$GROUP" != mx4200 ] || LATEST=true
           gh release create "$VERSION" "${IMAGES[@]}" --target "$GITHUB_SHA" --title "$RELEASE_TITLE" --notes-file "firmware/$GROUP/release-notes.md" --latest="$LATEST" --prerelease=false --draft=false

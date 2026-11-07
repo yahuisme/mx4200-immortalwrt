@@ -1,7 +1,9 @@
 """Replay real dual publication with a local gh boundary; no remote mutations."""
 import json
+import hashlib
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -33,7 +35,7 @@ if a[0] == 'api' and '/releases/tags/' in a[1]:
     directory = root/'firmware'/group
     assets = [dict(id=i, name=p.name, size=p.stat().st_size, state='uploaded',
                    digest='sha256:'+hashlib.sha256(p.read_bytes()).hexdigest())
-              for i,p in enumerate(sorted(p for p in directory.iterdir() if p.suffix in ('.bin','.ubi')), 1)]
+              for i,p in enumerate(sorted(p for p in directory.iterdir() if p.suffix in ('.bin','.ubi','.itb')), 1)]
     if mode == 'readback': sys.exit(8)
     if mode == 'bad-json': print('{'); sys.exit(0)
     if mode == 'missing': assets.pop()
@@ -72,10 +74,21 @@ def row(tag, **kwargs):
     return dict(tag_name=tag, draft=False, prerelease=False) | kwargs
 
 
+def profile_fixture(base):
+    """Private pinned metadata for harmless fixture bytes, not real firmware."""
+    shutil.copytree(ROOT/'scripts', base/'scripts')
+    directory = base/'user/default'
+    directory.mkdir(parents=True)
+    shutil.copyfile(ROOT/'user/default/build.json', directory/'build.json')
+    config = json.loads((ROOT/'user/default/official-initramfs.json').read_text())
+    config.update(size=len(b'fixture image'), sha256=hashlib.sha256(b'fixture image').hexdigest())
+    (directory/'official-initramfs.json').write_text(json.dumps(config))
+    return config
+
+
 def staged_fixture(base):
     """Minimal valid stage tree used only at the publication boundary."""
-    (base/'scripts').symlink_to(ROOT/'scripts')
-    (base/'user').symlink_to(ROOT/'user')
+    config = profile_fixture(base)
     profile = json.loads((ROOT/'user/default/build.json').read_text())
     rows = []
     for group, device in GROUPS.items():
@@ -83,6 +96,8 @@ def staged_fixture(base):
         directory.mkdir(parents=True)
         for name in profile['release_groups'][group]['images']:
             (directory/name).write_bytes(b'fixture image')
+        if group == config['group']:
+            (directory/config['name']).write_bytes(b'fixture image')
         tag = device+'-ImmortalWrt-current'
         (directory/'version.txt').write_text(tag)
         (directory/'title.txt').write_text(tag)
@@ -103,6 +118,30 @@ def replay(base, pages, mode='fresh'):
 
 
 class DualPublicationTests(unittest.TestCase):
+    def test_official_image_failure_blocks_both_publications(self):
+        for mode in ('missing', 'empty', 'same-size-corrupt', 'symlink', 'wrong-group'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
+                base = Path(tmp); pages = staged_fixture(base)
+                config = json.loads((base/'user/default/official-initramfs.json').read_text())
+                image = base/'firmware'/config['group']/config['name']
+                if mode == 'missing': image.unlink()
+                if mode == 'empty': image.write_bytes(b'')
+                if mode == 'same-size-corrupt': image.write_bytes(b'x' * image.stat().st_size)
+                if mode == 'symlink':
+                    image.rename(image.parent/'payload'); image.symlink_to('payload')
+                if mode == 'wrong-group': image.rename(base/'firmware/mx4200'/image.name)
+                result, calls = replay(base, pages)
+                self.assertNotEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(any(a[0] == 'release' for a in calls))
+
+    def test_unexpected_initramfs_rejected_before_any_mutation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp); pages = staged_fixture(base)
+            (base/'firmware/mx4300-homewrk/unexpected.itb').write_bytes(b'wrong model')
+            result, calls = replay(base, pages)
+            self.assertNotEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(any(a[0] == 'release' for a in calls))
+
     def test_exact_group_assets_explicit_latest_and_verify_before_any_prune(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp); pages = staged_fixture(base)
@@ -116,8 +155,11 @@ class DualPublicationTests(unittest.TestCase):
             for index, (group, device) in enumerate(GROUPS.items()):
                 call = creates[index]
                 self.assertEqual(call[2], device+'-ImmortalWrt-current')
+                expected = set(profile['release_groups'][group]['images'])
+                if group == 'mx4300-homewrk':
+                    expected.add(json.loads((ROOT/'user/default/official-initramfs.json').read_text())['name'])
                 self.assertEqual({Path(p).name for p in call[3:call.index('--target')]},
-                                 set(profile['release_groups'][group]['images']))
+                                 expected)
                 self.assertEqual(call[call.index('--target')+1], 'a'*40)
                 self.assertEqual(call[call.index('--title')+1], call[2])
                 self.assertEqual(call[call.index('--notes-file')+1], f'firmware/{group}/release-notes.md')

@@ -11,20 +11,27 @@ from urllib.parse import quote
 
 try:
     from .build_profile import load
+    from .official_initramfs import load_config, verify as verify_official
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from build_profile import load
+    from official_initramfs import load_config, verify as verify_official
 
 
 def verify(tag, files, group=None):
     profile = load(Path(__file__).resolve().parents[1] / 'user/default')
-    names = profile['release_groups'][group]['images'] if group is not None else profile['images']
+    names = list(profile['release_groups'][group]['images'] if group is not None else profile['images'])
+    official = load_config()
+    if group == official['group']:
+        names.append(official['name'])
     expected = {Path(name).name: Path(name) for name in files}
     if (not files or len(expected) != len(files)
             or set(expected) != set(names)
             or any(p.is_symlink() or not p.is_file() or not p.stat().st_size
                    for p in expected.values())):
         raise ValueError('Expected complete nonempty firmware image set')
+    if official['name'] in expected:
+        verify_official(expected[official['name']], official)
     workflow_sha = os.environ.get('GITHUB_SHA', '')
     if not re.fullmatch(r'[0-9a-f]{40}', workflow_sha):
         raise ValueError('GITHUB_SHA must be an explicit full commit SHA')

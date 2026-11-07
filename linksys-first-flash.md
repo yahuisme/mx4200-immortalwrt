@@ -1,11 +1,11 @@
 # Linksys 首次刷机教程
 
-适用于 MX4200v1、MX4200v2、MX4300 和 HomeWRK，安装 OpenWrt / ImmortalWrt。
+适用于 MX4200v1、MX4200v2、MX4300 和 HomeWRK，安装本仓库的 ImmortalWrt 固件。
 
 - **MX4200 / MX4300：原厂后台刷入，步骤相同。**
 - **HomeWRK：Windows 电脑接 TTL，启动临时系统后在网页刷入。**
 
-刷机前备份需要保留的配置，刷写期间不要断电。**固件必须匹配机型，MX4200 还要区分 v1 / v2，不可混刷。** 部分带 HomeWRK 标签的机器实际已配置为 MX4300，先按[官方说明](https://openwrt.org/toh/linksys/mx4300#before_installation)确认实际机型，不能只看外壳标签。
+刷机前备份需要保留的配置，刷写期间不要断电。**固件必须匹配机型，MX4200 还要区分 v1 / v2，不可混刷。** 部分带 HomeWRK 标签的机器实际已配置为 MX4300，先按[机型辨识说明](https://openwrt.org/toh/linksys/mx4300#before_installation)确认实际机型，不能只看外壳标签；无法确认时不要继续刷写。
 
 ## 一、下载固件
 
@@ -19,11 +19,14 @@
 
 MX4300 下载本机型的 `squashfs-factory.bin` 和 `squashfs-sysupgrade.bin`；
 
-HomeWRK 下载 `squashfs-sysupgrade.bin`。首次安装按本教程使用此文件，无需下载或刷入 `factory.ubi`。
+HomeWRK 下载以下两个文件，均选择文件名含 `linksys_homewrk` 的镜像：
 
-也可使用 [OpenWrt 官方固件](https://firmware-selector.openwrt.org/)或 [ImmortalWrt 官方固件](https://firmware-selector.immortalwrt.org/)，在选择器搜索自己的机型，并按下载页核对 SHA-256。
+- `initramfs-uImage.itb`：从 USB 启动临时系统，使用本发布组附带的官方 ImmortalWrt 25.12.2 镜像。
+- `squashfs-sysupgrade.bin`：在临时系统的 LuCI 后台安装正式固件。
 
-**HomeWRK 额外准备一个官方临时镜像**：在官方选择器选择 HomeWRK 的稳定版，下载 `initramfs-uImage.itb`，用于从 USB 启动临时系统。
+首次安装按本教程使用上述两个文件，无需下载或刷入 `factory.ubi`，也无需另去官方网站下载临时镜像。
+
+发布组附带的 HomeWRK 临时镜像保持官方原样，不含本项目的地址、无线或应用定制。
 
 ## 二、MX4200 / MX4300：原厂后台刷入
 
@@ -38,7 +41,7 @@ HomeWRK 下载 `squashfs-sysupgrade.bin`。首次安装按本教程使用此文�
 
 ### 2. 在新系统后台再升级一次
 
-1. 电脑重新获取 IP，打开新系统后台。本项目固件为 `http://192.168.10.1`，官方固件通常为 `http://192.168.1.1`。
+1. 电脑重新获取 IP，打开新系统后台 `http://192.168.10.1`。
 2. 进入 **系统 → 备份 / 升级 → 刷写新的固件**。
 3. 上传对应机型的 `squashfs-sysupgrade.bin`，**取消勾选“保留配置”**。
 4. 校验通过后开始升级，等待重启。若有“升级当前分区”选项，**不要勾选**。
@@ -111,21 +114,18 @@ usb start && usbboot 44000000 0 && bootm 44000000
 
 出现不兼容或校验错误就停止，不要强制刷入。这里不需要 WinSCP，也不需要命令行上传固件。
 
-本教程已核对 HomeWRK 的官方 **ImmortalWrt 25.12.2 / OpenWrt 25.12.6** 临时镜像，均自带 LuCI 和固件升级页面；选择其它版本时不要默认所有 snapshot 或自定义镜像都有网页后台。
+发布组附带的官方 **ImmortalWrt 25.12.2** HomeWRK 临时镜像已核对自带 LuCI 和固件升级页面，发布前校验官方 SHA-256。自行选择其它临时镜像时，不要默认所有 snapshot 或自定义镜像都有网页后台。
 
 ## 四、刷完登录与以后升级
 
-电脑重新获取 IP 后登录：
+电脑重新获取 IP，打开 `http://192.168.10.1`，用户名 `root`，初始管理密码为空。无线等设置见 [README](README.md#默认设置)。HomeWRK 正式安装后的地址与临时系统不同。
 
-- **本项目固件**：管理地址 `192.168.10.1`，用户名 `root`，初始管理密码为空；无线等设置见 [README](README.md#默认设置)。
-- **官方固件**：通常为 `192.168.1.1`，以对应固件默认设置为准。
-
-登录后设置管理员密码和 Wi-Fi 密码。以后升级直接在 **系统 → 备份 / 升级** 上传对应机型的 `sysupgrade.bin`；切换 OpenWrt / ImmortalWrt 或不同定制固件时，不保留配置。
+登录后设置管理员密码和 Wi-Fi 密码。以后升级直接在 **系统 → 备份 / 升级** 上传对应机型的 `sysupgrade.bin`，建议不保留配置，无需再次启动临时系统。
 
 ## 参考
 
 - [OpenWrt：MX4200 v1 / v2](https://openwrt.org/toh/linksys/mx4200_v1_and_v2)
 - [OpenWrt：MX4300](https://openwrt.org/toh/linksys/mx4300)
-- [HomeWRK 官方安装说明](https://github.com/openwrt/openwrt/commit/07f8319d2d9166a41c2fd94ec1422bcd80ada991)
+- [HomeWRK 上游安装说明](https://github.com/openwrt/openwrt/commit/07f8319d2d9166a41c2fd94ec1422bcd80ada991)
 
 本文按官方资料与镜像内容核对，未进行实机刷写。
