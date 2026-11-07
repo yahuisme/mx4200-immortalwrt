@@ -308,6 +308,53 @@ def official_packages(files, source):
     return sorted(allowed)
 
 
+def official_alternatives(files, packages, inventories, owned):
+    """Authenticate postinst links against literal ALTERNATIVES of installed packages.
+
+    Do not evaluate Makefiles or trust the image's alternatives as an allowlist.
+    Unsupported computed declarations fail closed until explicitly reviewed.
+    """
+    declarations = {}
+    for base, inventory in inventories:
+        for name in inventory:
+            if not name.endswith('/Makefile'):
+                continue
+            recipe = blob(base, inventory, name).decode().replace('\\\n', ' ')
+            for package, body in re.findall(r'^define Package/([^/\s]+)\s*\n(.*?)^endef', recipe, re.M | re.S):
+                if package not in packages:
+                    continue
+                for value in re.findall(r'ALTERNATIVES\s*[:+]?=([^\n]*)', body):
+                    declarations.setdefault(package, set()).update(
+                        re.findall(r'\d+:/[A-Za-z0-9_./+-]+:/[A-Za-z0-9_./+-]+', value))
+    selected = {}
+    for name, (mode, data) in files.items():
+        if not name.startswith('lib/apk/packages/') or not name.endswith('.alternatives'):
+            continue
+        package = name.removeprefix('lib/apk/packages/').removesuffix('.alternatives')
+        values = data.decode().split()
+        if (package not in packages or not stat.S_ISREG(mode) or not values
+                or len(set(values)) != len(values)
+                or not set(values) <= declarations.get(package, set())):
+            raise ValueError('unauthenticated official alternatives: ' + name)
+        for value in values:
+            priority, path, target = value.split(':')
+            target_mode, target_data = files.get(target.lstrip('/'), (0, b''))
+            if (not stat.S_ISREG(target_mode) or not target_mode & 0o111 or not target_data
+                    or target.lstrip('/') not in owned
+                    or '..' in Path(path).parts or '..' in Path(target).parts):
+                raise ValueError('invalid official alternative target: ' + target)
+            previous = selected.get(path)
+            if previous and previous[0] == int(priority) and previous[1] != target:
+                raise ValueError('ambiguous official alternative: ' + path)
+            if previous is None or int(priority) > previous[0]:
+                selected[path] = (int(priority), target)
+    for path, (_, target) in selected.items():
+        mode, data = files.get(path.lstrip('/'), (0, b''))
+        if not stat.S_ISLNK(mode) or data not in (target.encode(), target.encode() + b'\0'):
+            raise ValueError('official alternative link missing or changed: ' + path)
+    return {path.lstrip('/') for path in selected}
+
+
 def verify_official(files, source):
     source = Path(source)
     sha, tree = official_tree(source, 'immortalwrt')
@@ -363,6 +410,7 @@ def verify_official(files, source):
     if (packages_feed / '.git').exists():
         _, package_tree = official_tree(packages_feed, 'packages')
         inventories.append((packages_feed, package_tree))
+    config_inputs = {}
     for base, inventory in inventories:
         for name in inventory:
             for marker in ('etc/uci-defaults/', 'usr/share/luci/menu.d/'):
@@ -371,6 +419,18 @@ def verify_official(files, source):
                     candidates.setdefault(destination, []).append(blob(base, inventory, name))
             if name.endswith('/Makefile'):
                 recipe = blob(base, inventory, name).decode()
+                # Literal package config copies require no build-time conversion.
+                # Limit candidates to recipes defining an installed package, not
+                # arbitrary same-named files elsewhere in the official tree.
+                defined = set(re.findall(r'^define Package/([^/\s]+)', recipe, re.M))
+                if defined.intersection(packages):
+                    for match in re.finditer(r'\$\((?:INSTALL_DATA|INSTALL_CONF|CP)\)\s+((?:\./|\$\(CURDIR\)/)[^\s]+)\s+\$\(1\)/(etc/config(?:/[^\s,]*)?)', recipe):
+                        original, destination = match.groups()
+                        original = str(Path(name).parent / original.replace('$(CURDIR)/', '').removeprefix('./'))
+                        if original in inventory:
+                            if destination == 'etc/config' or destination.endswith('/'):
+                                destination = destination.rstrip('/') + '/' + Path(original).name
+                            config_inputs.setdefault(destination, []).append(blob(base, inventory, original))
                 # Resolve native renamed INSTALL_* inputs from committed recipes.
                 # Never use package output or an image's APK checksums as source.
                 for match in re.finditer(r'\$\((?:INSTALL_DATA|INSTALL_BIN|INSTALL_CONF)\)\s+((?:\./|\$\(CURDIR\)/)[^\s]+)\s+\$\(1\)/(etc/uci-defaults(?:/[^\s,]*)?)', recipe):
@@ -405,9 +465,17 @@ def verify_official(files, source):
             directory = line[2:]
         elif line.startswith('R:'):
             owned.add((directory + '/' + line[2:]).lstrip('/'))
+    for name, expected in config_inputs.items():
+        # Only enforce installed configs: recipes can contain optional variants.
+        if name in files or name in owned:
+            mode, data = files.get(name, (0, b''))
+            if not stat.S_ISREG(mode) or not any(uci_rows(data) == uci_rows(value) for value in expected):
+                raise ValueError('official default missing or changed: ' + name)
+            defaults[name] = hashlib.sha256(data).hexdigest()
+    alternatives = official_alternatives(files, packages, inventories, owned)
     for name, (mode, _) in files.items():
         if (not stat.S_ISDIR(mode) and name.startswith(('etc/config/', 'usr/bin/', 'usr/sbin/', 'www/luci-static/'))
-                and name not in owned):
+                and name not in owned and name not in alternatives):
             raise ValueError('unowned RAM-system config/program/theme: ' + name)
     return dict(**chinese, official_source=sha, official_luci=luci_sha,
                 official_defaults=defaults, installed_packages=packages)

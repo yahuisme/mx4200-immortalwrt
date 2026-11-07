@@ -134,7 +134,7 @@ class MenuOrderTests(unittest.TestCase):
                     'luci-app-aurora.json', 'luci-app-cpufreq.json'}
         self.assertEqual(set(self.source), expected)
         recipe = (ROOT / 'user/default/config.diff').read_text()
-        for package in ('homeproxy', 'ttyd', 'wol', 'advanced-reboot'):
+        for package in ('homeproxy', 'ttyd', 'wol', 'advanced-reboot', 'cpufreq'):
             self.assertIn('CONFIG_PACKAGE_luci-app-' + package + '=y', recipe)
         self.assertEqual(set(self.source[PROXY_MENU]),
                          {PARENT, *(PARENT + '/' + n for n in ('client', 'node', 'server', 'status'))})
@@ -235,6 +235,14 @@ class MenuOrderTests(unittest.TestCase):
                 directory = root / 'usr/share/luci/menu.d'
                 self.assertTrue(directory.is_dir())
                 self.assert_contract(self.overlay, menu_files(directory), device, installed_root=True)
+                database = (root / 'lib/apk/db/installed').read_text()
+                for name in ('luci-app-cpufreq', 'luci-i18n-cpufreq-zh-cn'):
+                    self.assertIn('P:' + name + '\n', database)
+                for name in ('www/luci-static/resources/view/cpufreq.js',
+                             'usr/share/rpcd/acl.d/luci-app-cpufreq.json',
+                             'usr/lib/lua/luci/i18n/cpufreq.zh-cn.lmo'):
+                    path = root / name
+                    self.assertTrue(path.is_file() and path.stat().st_size, name)
 
     def test_actual_installed_menu_mutations_are_rejected(self):
         selected = roots()

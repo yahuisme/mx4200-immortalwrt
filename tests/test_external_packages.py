@@ -20,6 +20,11 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_PACKAGES = ('luci-app-homeproxy', 'luci-i18n-homeproxy-zh-cn', 'sing-box')
+CPU_PACKAGES = ('luci-app-cpufreq', 'luci-i18n-cpufreq-zh-cn')
+CPU_FILES = ('www/luci-static/resources/view/cpufreq.js',
+             'usr/share/rpcd/acl.d/luci-app-cpufreq.json',
+             'usr/share/luci/menu.d/luci-app-cpufreq.json',
+             'usr/lib/lua/luci/i18n/cpufreq.zh-cn.lmo')
 RUNTIME_FILES = ('etc/config/homeproxy', 'usr/share/luci/menu.d/luci-app-homeproxy.json',
                  'usr/lib/lua/luci/i18n/homeproxy.zh-cn.lmo')
 
@@ -371,7 +376,7 @@ class ExternalPackageTests(unittest.TestCase):
             root = Path(tmp)
             packages = [dict(name=name, version='fixture-version', repository=tag)
                         for tag, repo in module.REPOSITORIES.items() for name in repo['packages']]
-            installed = {name: 'fixture-version' for name in SOURCE_PACKAGES}
+            installed = {name: 'fixture-version' for name in SOURCE_PACKAGES + CPU_PACKAGES}
             installed.update({row['name']: row['version'] for row in packages})
             def write_installed():
                 (root / 'lib/apk/db/installed').write_text(''.join(
@@ -392,12 +397,27 @@ class ExternalPackageTests(unittest.TestCase):
             for tag in module.REPOSITORIES:
                 key = put('etc/apk/keys/' + tag + '.pem', b'unit key, not a signature fixture\n')
                 keys.append(dict(name=tag, key_sha256=hashlib.sha256(key.read_bytes()).hexdigest()))
-            for name in RUNTIME_FILES:
+            for name in RUNTIME_FILES + CPU_FILES:
                 put(name)
             core = put('usr/bin/sing-box', b'not a compiled core; never executed\n')
             core.chmod(0o755)
             provenance = put('provenance.json', json.dumps(dict(packages=packages, repositories=keys)).encode())
             self.assertEqual(module.verify_root(root, provenance), installed)
+            for name in CPU_PACKAGES:
+                with self.subTest(cpu_package=name):
+                    version = installed.pop(name)
+                    write_installed()
+                    with self.assertRaisesRegex(ValueError, 'Missing CPU performance package'):
+                        module.verify_root(root, provenance)
+                    installed[name] = version
+                    write_installed()
+            for name in CPU_FILES:
+                path = root / name
+                saved = path.read_bytes()
+                path.unlink()
+                with self.subTest(cpu_payload=name), self.assertRaisesRegex(ValueError, 'Missing CPU performance runtime file'):
+                    module.verify_root(root, provenance)
+                path.write_bytes(saved)
             for name in SOURCE_PACKAGES:
                 with self.subTest(package=name):
                     version = installed.pop(name)

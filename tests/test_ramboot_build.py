@@ -75,7 +75,37 @@ with open(os.environ['CALLS'],'a') as stream: stream.write('make '+ ' '.join(arg
 fault=os.environ.get('FAULT','')
 phase='defconfig' if args[0]=='defconfig' else 'download' if args[0]=='download' else 'world'
 if fault==phase: sys.exit(29)
+if phase=='defconfig':
+    config=Path('.config'); text=config.read_text()
+    host='CONFIG_CCACHE=y' in text
+    if host and fault=='second-defconfig': sys.exit(29)
+    # Simulated native output only: no make/conf/compiler is executed locally.
+    text+='CONFIG_TARGET_ROOTFS_SQUASHFS=y\\nCONFIG_BUSYBOX_DEFAULT_PING=y\\nCONFIG_VERSION_DIST="ImmortalWrt"\\n'
+    if host:
+        text+='CONFIG_GOLANG_BUILD_CACHE_DIR=""\\n# CONFIG_GOLANG_MOD_CACHE_WORLD_READABLE is not set\\n'
+        mutations={'extra-app':'CONFIG_PACKAGE_luci-app-homeproxy=y\\n',
+                   'version-drift':'CONFIG_VERSION_DIST="ProjectRAM"',
+                   'rootfs-drift':'# CONFIG_TARGET_ROOTFS_SQUASHFS is not set',
+                   'busybox-drift':'# CONFIG_BUSYBOX_DEFAULT_PING is not set'}
+        if fault=='extra-app': text+=mutations[fault]
+        if fault in ('version-drift','rootfs-drift','busybox-drift'):
+            original={'version-drift':'CONFIG_VERSION_DIST="ImmortalWrt"',
+                      'rootfs-drift':'CONFIG_TARGET_ROOTFS_SQUASHFS=y',
+                      'busybox-drift':'CONFIG_BUSYBOX_DEFAULT_PING=y'}[fault]
+            text=text.replace(original,mutations[fault])
+        baseline=Path(os.environ['RECORD'])/'ramboot-baseline.config'
+        if fault=='baseline-tamper': baseline.write_text(baseline.read_text()+'# tampered\\n')
+        if fault=='baseline-identity':
+            meta=Path(str(baseline)+'.json'); proof=json.loads(meta.read_text())
+            proof['source_sha']='0'*40; meta.write_text(json.dumps(proof))
+    else:
+        text+='CONFIG_GOLANG_BUILD_BOOTSTRAP=y\\nCONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT=""\\n'
+    config.write_text(text)
+if phase=='download' and fault=='download-config-drift':
+    with Path('.config').open('a') as stream: stream.write('CONFIG_PACKAGE_unexpected-app=y\\n')
 if phase=='world':
+    if fault=='world-config-drift':
+        with Path('.config').open('a') as stream: stream.write('CONFIG_PACKAGE_unexpected-app=y\\n')
     import subprocess
     rev=subprocess.check_output(['./scripts/getver.sh'],text=True).strip()
     out=Path('bin/targets/qualcommax/ipq807x'); out.mkdir(parents=True)
@@ -104,7 +134,7 @@ else: os.execv(sys.executable,[sys.executable,*sys.argv[1:]])
             shell = shell.replace(old, new)
         env = dict(os.environ, DK_OPENWRT=str(source), DK_USER=str(base / 'user'),
                    DK_BIN=str(base / 'output'), PATH=str(tools) + os.pathsep + os.environ['PATH'],
-                   CALLS=str(base / 'calls'), FAULT=fault,
+                   CALLS=str(base / 'calls'), FAULT=fault, RECORD=str(record),
                    GIT_CONFIG_GLOBAL=str(base / 'gitconfig'), GIT_CONFIG_NOSYSTEM='1')
         return shell, env, source, ram, output, record
 
@@ -134,8 +164,13 @@ else: os.execv(sys.executable,[sys.executable,*sys.argv[1:]])
             self.assertEqual(hashlib.sha256((output / INITRAMFS).read_bytes()).hexdigest(),
                              json.loads((record / 'initramfs.json').read_text())['sha256'])
             calls = (base / 'calls').read_text().splitlines()
-            self.assertEqual(calls[:4], ['feeds update -i', 'feeds install -a', 'make defconfig', 'make download -j8'])
-            self.assertEqual(len([row for row in calls if row.startswith('make ')]), 3)
+            self.assertEqual(calls[:5], ['feeds update -i', 'feeds install -a', 'make defconfig', 'make defconfig', 'make download -j8'])
+            self.assertEqual(len([row for row in calls if row.startswith('make ')]), 4)
+            baseline = record / 'ramboot-baseline.config'
+            self.assertTrue(baseline.is_file())
+            self.assertNotIn('CONFIG_CCACHE=y', baseline.read_text())
+            self.assertEqual(proof['baseline_sha256'], hashlib.sha256(baseline.read_bytes()).hexdigest())
+            self.assertEqual(proof['baseline_resolver'], 'make defconfig')
 
     def test_merger_rejects_incompatible_or_duplicate_ram_without_overwriting_main(self):
         import importlib.util
@@ -178,6 +213,40 @@ else: os.execv(sys.executable,[sys.executable,*sys.argv[1:]])
                 if case == 'preexisting': self.assertEqual((target / INITRAMFS).read_bytes(), b'must preserve')
                 else: self.assertFalse((target / INITRAMFS).exists())
                 self.assertFalse((base / 'outside').exists())
+
+    def test_production_rejects_resolved_target_drift_before_download(self):
+        for fault in ('extra-app', 'version-drift', 'rootfs-drift', 'busybox-drift', 'second-defconfig',
+                      'baseline-tamper', 'baseline-identity'):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as directory:
+                base = Path(directory)
+                shell, env, source, ram, output, record = self.fixture(base, fault)
+                before = (output / 'profiles.json').read_bytes()
+                result = subprocess.run(['bash', '-c', shell], env=env, text=True, capture_output=True)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertNotIn('make download', (base / 'calls').read_text())
+                self.assertEqual(before, (output / 'profiles.json').read_bytes())
+                self.assertFalse((record / 'ramboot.json').exists())
+                self.assertFalse((output / INITRAMFS).exists())
+
+    def test_download_config_drift_is_rechecked_before_compilation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            shell, env, source, ram, output, record = self.fixture(base, 'download-config-drift')
+            result = subprocess.run(['bash', '-c', shell], env=env, text=True, capture_output=True)
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertNotIn('make -j', (base / 'calls').read_text())
+            self.assertFalse((record / 'initramfs.json').exists())
+
+    def test_world_config_drift_is_rechecked_before_inspection_and_merge(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            shell, env, source, ram, output, record = self.fixture(base, 'world-config-drift')
+            before = (output / 'profiles.json').read_bytes()
+            result = subprocess.run(['bash', '-c', shell], env=env, text=True, capture_output=True)
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(before, (output / 'profiles.json').read_bytes())
+            self.assertFalse((record / 'initramfs.json').exists())
+            self.assertFalse((output / INITRAMFS).exists())
 
     def test_build_or_inspection_failure_never_merges_temporary_image(self):
         for fault in ('defconfig', 'download', 'world', 'inspection'):

@@ -195,6 +195,15 @@ def verify_root(root, provenance):
             raise ValueError('Missing HomeProxy runtime file: ' + name)
     if not os.access(root / 'usr/bin/sing-box', os.X_OK):
         raise ValueError('Missing executable sing-box core')
+    for name in ('luci-app-cpufreq', 'luci-i18n-cpufreq-zh-cn'):
+        if not installed.get(name):
+            raise ValueError('Missing CPU performance package: ' + name)
+    for name in ('www/luci-static/resources/view/cpufreq.js',
+                 'usr/share/rpcd/acl.d/luci-app-cpufreq.json',
+                 'usr/share/luci/menu.d/luci-app-cpufreq.json',
+                 'usr/lib/lua/luci/i18n/cpufreq.zh-cn.lmo'):
+        if not (root / name).is_file() or not (root / name).stat().st_size:
+            raise ValueError('Missing CPU performance runtime file: ' + name)
     for row in record['packages']:
         if installed.get(row['name']) != row['version']:
             raise ValueError('Missing or wrong official APK version: ' + row['name'])

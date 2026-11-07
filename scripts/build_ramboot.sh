@@ -27,19 +27,15 @@ done < feeds.conf
 ./scripts/feeds update -i
 ./scripts/feeds install -a
 ln -s /dlcache dl
-cp "$DK_USER/ramboot/config.diff" .config
-# Build-host controls only: these do not change firmware packages or defaults.
-cat >> .config <<'EOF'
-CONFIG_CCACHE=y
-CONFIG_CCACHE_DIR="/ghcache"
-# CONFIG_GOLANG_BUILD_BOOTSTRAP is not set
-CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT="/usr/lib/go"
-EOF
 python3 /cache-scripts/check_go.py "$ram" /usr/lib/go
-make defconfig
-python3 /cache-scripts/check_ramboot.py "$ram" "$source" /build-record/ramboot.json
+# Native-resolve an independent canonical seed before adding host controls.
+# The producer retains/binds that baseline and compares the complete final config.
+python3 /cache-scripts/check_ramboot.py --configure "$ram" "$source" /build-record/ramboot.json
 export FORCE_UNSAFE_CONFIGURE=1 CCACHE_MAXSIZE=3G CCACHE_NOHASHDIR=true CCACHE_COMPILERCHECK=content
 make download -j8
+python3 /cache-scripts/check_ramboot.py --baseline /build-record/ramboot-baseline.config "$ram" "$source" /build-record/ramboot.json
 make -j"$(($(nproc) + 1))" || make -j1 V=s
+# Native make may re-resolve .config; do not trust the pre-build subset/proof.
+python3 /cache-scripts/check_ramboot.py --baseline /build-record/ramboot-baseline.config "$ram" "$source" /build-record/ramboot.json
 python3 /cache-scripts/check_initramfs.py "$ram/bin/targets/qualcommax/ipq807x/$name" --source "$ram" --record /build-record/initramfs.json
 python3 /cache-scripts/stage_ramboot.py "$ram/bin/targets/qualcommax/ipq807x" "$DK_BIN/targets/qualcommax/ipq807x"

@@ -101,7 +101,8 @@ class DefaultPackageTests(unittest.TestCase):
             (build / 'tmp/.packageinfo').write_text('')
             config = 'CONFIG_MODULE_DEFAULT_driver=y\nCONFIG_PACKAGE_driver=m\n' + requested
             for fault in ('', 'missing-app', 'excluded-module', 'missing-v2',
-                          'missing-rootfs', 'missing-homeproxy', 'missing-core', 'missing-translation'):
+                          'missing-rootfs', 'missing-homeproxy', 'missing-core', 'missing-translation',
+                          'missing-cpu-ui'):
                 broken = config
                 if fault == 'missing-app':
                     broken = broken.replace('CONFIG_PACKAGE_luci-app-ttyd=y', '')
@@ -112,6 +113,7 @@ class DefaultPackageTests(unittest.TestCase):
                         ('missing-v2', 'TARGET_DEVICE_qualcommax_ipq807x_DEVICE_linksys_mx4200v2'),
                         ('missing-rootfs', 'TARGET_PER_DEVICE_ROOTFS'),
                         ('missing-homeproxy', 'PACKAGE_luci-app-homeproxy'),
+                        ('missing-cpu-ui', 'PACKAGE_luci-app-cpufreq'),
                         ('missing-core', 'PACKAGE_sing-box'),
                         ('missing-translation', 'PACKAGE_luci-i18n-homeproxy-zh-cn')):
                     if fault == name:

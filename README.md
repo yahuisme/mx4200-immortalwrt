@@ -35,6 +35,7 @@ MX4300 / HomeWRK 发布组附带 HomeWRK 临时镜像，独立使用同版官方
 | [HomeProxy](https://github.com/yahuisme/packages/tree/main/luci-app-homeproxy) | 基于 sing-box 的代理客户端 |
 | Aurora 配置 | 主题设置 |
 | 高级重启 | MX4200v1/v2、MX4300 双分区重启切换，HomeWRK 不预装 |
+| CPU 性能 | 调节 CPU 调频策略 |
 | 网络唤醒 | 唤醒局域网设备 |
 | 网页终端 | 浏览器终端访问 |
 
