@@ -82,15 +82,24 @@ jobs:
           git remote set-url origin $REPO_URL 2>&- || git remote add origin $REPO_URL
           SOURCE_REF="refs/heads/$REPO_REF"
           echo "SOURCE_REF=$SOURCE_REF"
-          git fetch --depth=1 origin "$SOURCE_REF"
-          git checkout -f --detach FETCH_HEAD
-          git reset --hard FETCH_HEAD
+          # Official getver counts history and needs a tracking branch.
+          if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+            git fetch --unshallow origin "$SOURCE_REF:refs/remotes/origin/master"
+          else
+            git fetch origin "$SOURCE_REF:refs/remotes/origin/master"
+          fi
+          git checkout -f -B master refs/remotes/origin/master
+          git branch --set-upstream-to=origin/master master
+          git reset --hard refs/remotes/origin/master
           SOURCE_SHA=$(git rev-parse --verify HEAD)
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           printf "%s\n" "$REPO_REF" > /build-record/source-ref.txt
           printf "%s\n" "$SOURCE_SHA" > /build-record/source-sha.txt
           # Remove ALL builder-preseeded patches, feeds, overlays and ABI files.
           git clean -ffdx
+          SOURCE_REV=$(./scripts/getver.sh)
+          [[ "$SOURCE_REV" =~ ^r[1-9][0-9]*-[0-9a-f]+$ ]] || { echo "::error::Invalid official revision: $SOURCE_REV"; exit 1; }
+          printf "%s\n" "$SOURCE_REV" > /build-record/source-revision.txt
           mountpoint $DK_BIN || { echo "::error::not mounted" >&2; exit 1; }
           ln -s $DK_BIN bin && ln -s /dlcache dl
           cp -f feeds.conf.default feeds.conf
@@ -212,6 +221,9 @@ jobs:
           exit "$status"
         '
 
+    - name: Build official HomeWRK RAM system
+      run: docker_exec DK bash /cache-scripts/build_ramboot.sh
+
     - name: Validate and stage firmware
       id: stage
       run: |
@@ -219,10 +231,12 @@ jobs:
         docker_exec DK cat "$DK_OPENWRT/.config" > final.config
         docker_exec DK cat "$DK_OPENWRT/tmp/.packageinfo" > final.packageinfo
         python3 scripts/check_defaults.py final.config final.packageinfo user/default/config.diff
-        docker_exec DK python3 /cache-scripts/check_initramfs.py "$DK_BIN/targets/qualcommax/ipq807x/immortalwrt-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb" --record /build-record/initramfs.json
+        docker_exec DK python3 /cache-scripts/check_initramfs.py "$DK_BIN/targets/qualcommax/ipq807x/immortalwrt-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb" --source /bld/ramboot --record /build-record/initramfs.json
         python3 scripts/release_images.py stage openwrt_bin/targets firmware
         WRT_DATE="$(TZ=Asia/Hong_Kong date +'%y.%m.%d-%H.%M.%S')"
         WRT_REV=$(jq -er '.version_code | capture("^r(?<revision>[0-9]+)-[0-9a-f]+$").revision' openwrt_bin/targets/qualcommax/ipq807x/profiles.json)
+        [[ "$WRT_REV" =~ ^[1-9][0-9]*$ ]]
+        [[ "$(jq -er .version_code openwrt_bin/targets/qualcommax/ipq807x/profiles.json)" = "$(cat build-record/source-revision.txt)" ]]
         SOURCE_REF="$(cat build-record/source-ref.txt)"
         [[ "$SOURCE_REF" = master ]]
         SOURCE_SHA="$(cat build-record/source-sha.txt)"
@@ -239,7 +253,7 @@ jobs:
             mx4300-homewrk)
               DEVICE=MX4300-HomeWRK
               MODELS='Linksys MX4300 / HomeWRK'
-              INSTALL="MX4300 使用 \`factory.bin\` 从原厂 Web 刷入；HomeWRK 使用本次官方 snapshot 源码同批构建、含 LuCI 的 \`initramfs-uImage.itb\` 从 USB 启动，打开 http://192.168.10.1 再刷入 \`sysupgrade.bin\`，无需 \`factory.ubi\`。临时系统包含本项目默认设置，不是官方原版下载镜像。"
+              INSTALL="MX4300 使用 \`factory.bin\` 从原厂 Web 刷入；HomeWRK 使用 \`initramfs-uImage.itb\` 从 USB 启动，打开 http://192.168.1.1 再通过中文 LuCI 刷入 \`sysupgrade.bin\`，无需 \`factory.ubi\`。临时系统独立使用同版官方 snapshot 源码构建，仅添加中文 LuCI 及必需依赖，其余保留官方设置与默认配置。"
               ;;
           esac
           VERSION="${DEVICE}-ImmortalWrt-r${WRT_REV}-${WRT_DATE/-/_}"
@@ -379,6 +393,14 @@ jobs:
         from pathlib import Path
         profile = json.loads(Path('user/default/build.json').read_text())
         initramfs = json.loads(Path('build-record/initramfs.json').read_text())
+        ramboot = json.loads(Path('build-record/ramboot.json').read_text())
+        source_sha = Path('build-record/source-sha.txt').read_text().strip()
+        source_revision = Path('build-record/source-revision.txt').read_text().strip()
+        if (ramboot.get('pristine') is not True or ramboot.get('source_sha') != source_sha
+                or ramboot.get('revision') != source_revision
+                or initramfs.get('official_source') != source_sha or initramfs.get('language') != 'zh_cn'
+                or not isinstance(initramfs.get('official_defaults'), dict) or not initramfs['official_defaults']):
+            raise ValueError('Missing pristine official Chinese LuCI RAM-system evidence')
         temporary_name = 'immortalwrt-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb'
         temporary = Path('firmware/mx4300-homewrk') / temporary_name
         if (initramfs.get('complete_cpio') is not True or initramfs.get('name') != temporary_name

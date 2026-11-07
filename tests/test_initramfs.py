@@ -17,6 +17,12 @@ checker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checker)
 
 
+def chinese_lmo():
+    data = '刷写固件'.encode()
+    data += b'\0' * (-len(data) % 4)
+    return data + struct.pack('>5I', 1, 1, 0, len('刷写固件'.encode()), len(data))
+
+
 def fixture_files():
     files = {name: (stat.S_IFREG | 0o755, b'fixture, not executable firmware') for name in checker.REQUIRED}
     files['etc/rc.d/S50uhttpd'] = (stat.S_IFLNK | 0o777, b'../init.d/uhttpd')
@@ -71,6 +77,27 @@ class InitramfsTests(unittest.TestCase):
             self.assertTrue(result['complete_cpio'])
             self.assertEqual(result['sha256'], hashlib.sha256(data).hexdigest())
             self.assertEqual(json.loads(record.read_text()), result)
+
+    def test_chinese_dictionary_and_default_language(self):
+        files = fixture_files()
+        files['usr/lib/lua/luci/i18n/base.zh-cn.lmo'] = stat.S_IFREG | 0o644, chinese_lmo()
+        files['etc/config/luci'] = stat.S_IFREG | 0o644, b"config core 'main'\n\toption lang 'auto'\n"
+        files['etc/uci-defaults/luci-i18n-base-zh-cn'] = stat.S_IFREG | 0o644, "uci set luci.languages.zh_cn='简体中文 (Simplified Chinese)'; uci commit luci\n".encode()
+        self.assertEqual(checker.verify_chinese(files)['language'], 'zh_cn')
+        for path in ('usr/lib/lua/luci/i18n/base.zh-cn.lmo', 'etc/config/luci'):
+            broken = dict(files); del broken[path]
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                checker.verify_chinese(broken)
+        files['etc/config/luci'] = stat.S_IFREG | 0o644, b"config core main\n option lang en\n"
+        with self.assertRaises(ValueError): checker.verify_chinese(files)
+
+    def test_nonempty_fake_chinese_dictionary_is_rejected(self):
+        files = fixture_files()
+        files['etc/config/luci'] = stat.S_IFREG | 0o644, b'config core main\n option lang auto\n'
+        files['etc/uci-defaults/luci-i18n-base-zh-cn'] = stat.S_IFREG | 0o644, "uci set luci.languages.zh_cn='简体中文 (Simplified Chinese)'; uci commit luci\n".encode()
+        files['usr/lib/lua/luci/i18n/base.zh-cn.lmo'] = stat.S_IFREG | 0o644, b'not a compiled dictionary'
+        with self.assertRaisesRegex(ValueError, 'dictionary'):
+            checker.verify_chinese(files)
 
     def test_kernel_generated_symlink_payload_may_include_nul(self):
         files = fixture_files()
@@ -141,4 +168,7 @@ class InitramfsTests(unittest.TestCase):
         body = next(s['run'] for s in steps if s.get('id') == 'stage')
         self.assertLess(body.index('/cache-scripts/check_initramfs.py'), body.index('scripts/release_images.py stage'))
         self.assertNotIn('scripts/official_initramfs.py', body)
-        self.assertIn('CONFIG_TARGET_ROOTFS_INITRAMFS=y', (ROOT / 'user/default/config.diff').read_text())
+        self.assertIn('CONFIG_TARGET_ROOTFS_INITRAMFS=y', (ROOT / 'user/ramboot/config.diff').read_text())
+        self.assertIn('CONFIG_TARGET_ROOTFS_INITRAMFS=n', (ROOT / 'user/default/config.diff').read_text())
+        ramboot = (ROOT / 'scripts/build_ramboot.sh').read_text()
+        self.assertIn('--source "$ram"', ramboot)

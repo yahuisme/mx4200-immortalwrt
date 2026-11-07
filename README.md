@@ -20,7 +20,7 @@
 | `sysupgrade.bin` | 系统升级；也用于 HomeWRK 启动临时系统后的首次安装 |
 | `initramfs-uImage.itb` | HomeWRK 从 USB 启动的临时系统，自带 LuCI |
 
-MX4300 / HomeWRK 发布组附带 HomeWRK 临时镜像，与正式固件使用同批官方 snapshot 源码构建，包含 LuCI 和本项目默认设置，管理地址同为 `192.168.10.1`；不是官方原版下载镜像。
+MX4300 / HomeWRK 发布组附带 HomeWRK 临时镜像，独立使用同版官方 snapshot 源码构建，仅添加中文 LuCI 及必需依赖，其余保留官方设置与默认配置，管理地址为 `192.168.1.1`。
 
 **首次刷机请参照 [Linksys 首次刷机教程](linksys-first-flash.md)：MX4200 / MX4300 使用原厂后台刷入，HomeWRK 使用 Windows＋TTL 启动临时系统后刷入。升级建议不保留配置。**
 

@@ -37,6 +37,13 @@ class CachePublicationIntegrationTests(unittest.TestCase):
             release.ReleaseTests().fixture(base)
             (base / "bin").symlink_to(base / "openwrt_bin")
             prepare(base)
+            # Main build produces eight flash images; RAM is supplied by its own step.
+            target = base / 'openwrt_bin/targets/qualcommax/ipq807x'
+            (target / release.INITRAMFS).unlink()
+            native = json.loads((target / 'profiles.json').read_text())
+            native['profiles']['linksys_homewrk']['images'] = [row for row in native['profiles']['linksys_homewrk']['images'] if row['name'] != release.INITRAMFS]
+            (target / 'profiles.json').write_text(json.dumps(native))
+            (base / 'build-record/ramboot.json').unlink()
             if fault == 'metadata':
                 (base / '.external-packages/provenance.json').unlink()
             if fault == 'validation':
@@ -92,6 +99,12 @@ docker_exec() {
     shift
     if [ "$1" = python3 ] && [ "$2" = /cache-scripts/build_record.py ]; then
         python3 scripts/build_record.py "$DK_OPENWRT" build-record
+    elif [ "$1" = bash ] && [ "$2" = /cache-scripts/build_ramboot.sh ]; then
+        # This replay models the RAM builder as a boundary; its actual shell and
+        # object isolation are exercised in test_ramboot_build, without make.
+        [ "$FAULT" != ramboot ] || return 37
+        command python3 -c 'from pathlib import Path; import json; p=Path("openwrt_bin/targets/qualcommax/ipq807x"); d=json.loads((p/"profiles.json").read_text()); n="immortalwrt-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb"; (p/n).write_bytes(b"fixture-not-firmware"); d["profiles"]["linksys_homewrk"]["images"].append(dict(name=n,type="kernel",filesystem="initramfs",size=(p/n).stat().st_size)); (p/"profiles.json").write_text(json.dumps(d))'
+        command python3 -c 'from pathlib import Path; import json; r=Path("build-record"); (r/"ramboot.json").write_text(json.dumps(dict(pristine=True,source_sha=(r/"source-sha.txt").read_text().strip(),revision=(r/"source-revision.txt").read_text().strip(),customization="Chinese LuCI only")))'
     elif [ "$1" = python3 ] && [ "$2" = /cache-scripts/check_initramfs.py ]; then
         shift 2; check_initramfs "$@"
     elif [ "$1" = python3 ] && [ "$2" = /cache-scripts/cache.py ]; then
@@ -221,10 +234,10 @@ export -f make docker_exec sudo python3 git
         self.assertEqual(len([c for c in inventory['calls'] if c[:2] == ['release', 'create']]), 2)
 
     def test_full_compile_stage_cache_publish_failure_matrix(self):
-        for fault in ('none', 'download', 'compile', 'validation', 'initramfs', 'cancel', 'package', 'save', 'readback', 'publish', 'metadata', 'upload', 'bootstrap_pack', 'bootstrap_save', 'bootstrap_readback'):
+        for fault in ('none', 'download', 'compile', 'ramboot', 'validation', 'initramfs', 'cancel', 'package', 'save', 'readback', 'publish', 'metadata', 'upload', 'bootstrap_pack', 'bootstrap_save', 'bootstrap_readback'):
             with self.subTest(fault=fault):
                 outcomes, executed, inventory, log = self.replay(fault)
-                published = fault not in ('download', 'compile', 'validation', 'initramfs', 'cancel', 'metadata', 'upload')
+                published = fault not in ('download', 'compile', 'ramboot', 'validation', 'initramfs', 'cancel', 'metadata', 'upload')
                 if fault == 'download':
                     self.assertEqual(outcomes['Download sources'], 'failure', log)
                     self.assertEqual(outcomes['Compile firmware'], 'skipped', log)
@@ -236,6 +249,11 @@ export -f make docker_exec sudo python3 git
                     self.assertEqual(outcomes['Upload build record'],'success',log)
                 self.assertEqual(outcomes['Publish firmware and prune releases'],
                                  'failure' if fault == 'publish' else 'success' if published else 'skipped', log)
+                if fault == 'ramboot':
+                    self.assertEqual(outcomes['Compile firmware'], 'success', log)
+                    self.assertEqual(outcomes['Build official HomeWRK RAM system'], 'failure', log)
+                    self.assertEqual(outcomes['Validate and stage firmware'], 'skipped', log)
+                    self.assertFalse(any(c[:2] == ['release', 'delete'] for c in inventory['calls']), log)
                 if fault == 'initramfs':
                     self.assertEqual(outcomes['Compile firmware'], 'success', log)
                     self.assertEqual(outcomes['Validate and stage firmware'], 'failure', log)

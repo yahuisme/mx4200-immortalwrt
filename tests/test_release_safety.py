@@ -16,13 +16,16 @@ check_initramfs() {
     command python3 - "$@" <<'PY'
 import hashlib,json,sys
 from pathlib import Path
-assert len(sys.argv) == 4 and sys.argv[2:] == ['--record', '/build-record/initramfs.json']
+assert sys.argv[2:] == ['--source', '/bld/ramboot', '--record', '/build-record/initramfs.json']
 image=Path(sys.argv[1])
 assert image.name == 'immortalwrt-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb'
 assert not image.is_symlink() and image.is_file() and image.stat().st_size
 Path('build-record/initramfs.json').write_text(json.dumps(dict(
     name=image.name, size=image.stat().st_size, sha256=hashlib.sha256(image.read_bytes()).hexdigest(),
-    complete_cpio=True, fixture_inspection=True)))
+    complete_cpio=True, fixture_inspection=True,
+    official_source=Path('build-record/source-sha.txt').read_text().strip(),
+    language='zh_cn', default_language='auto',
+    official_defaults={'etc/config/network': hashlib.sha256(b'official fixture defaults').hexdigest()})))
 PY
 }
 '''
@@ -31,7 +34,7 @@ PY
 class ReleaseTests(unittest.TestCase):
     def test_native_initramfs_inspection_precedes_staging(self):
         body=step('Validate and stage firmware')['run']
-        check='docker_exec DK python3 /cache-scripts/check_initramfs.py "$DK_BIN/targets/qualcommax/ipq807x/'+INITRAMFS+'" --record /build-record/initramfs.json'
+        check='docker_exec DK python3 /cache-scripts/check_initramfs.py "$DK_BIN/targets/qualcommax/ipq807x/'+INITRAMFS+'" --source /bld/ramboot --record /build-record/initramfs.json'
         self.assertIn(check, body)
         self.assertLess(body.index(check), body.index('python3 scripts/release_images.py stage'))
         self.assertNotIn('official_initramfs.py', body)
@@ -47,7 +50,10 @@ class ReleaseTests(unittest.TestCase):
         (base/'tmp/.packageinfo').write_text('')
         (base/'build-record').mkdir()
         (base/'build-record/source-ref.txt').write_text('master\n')
+        (base/'build-record/source-revision.txt').write_text('r123-abcdef\n')
         (base/'build-record/source-sha.txt').write_text('c'*40+'\n')
+        (base/'build-record/ramboot.json').write_text(json.dumps(dict(
+            pristine=True, source_sha='c'*40, revision='r123-abcdef', customization='Chinese LuCI only')))
         data={'target':'qualcommax/ipq807x','version_code':'r123-abcdef', 'profiles': {}}
         for device in ('mx4200v1','mx4200v2','mx4300','homewrk'):
             images = []
@@ -56,11 +62,11 @@ class ReleaseTests(unittest.TestCase):
                 image = output/f'immortalwrt-qualcommax-ipq807x-linksys_{device}-squashfs-{kind}.{suffix}'
                 image.write_bytes(b'fixture-not-firmware')
                 images.append(dict(name=image.name, type=kind, filesystem='squashfs', size=image.stat().st_size))
-            # Global native INITRAMFS also emits the other models' RAM images;
-            # all are in profiles.json, but only HomeWRK is a Release asset.
-            image=output/f'immortalwrt-qualcommax-ipq807x-linksys_{device}-initramfs-uImage.itb'
-            image.write_bytes(b'fixture-not-firmware')
-            images.append(dict(name=image.name, type='kernel', filesystem='initramfs', size=image.stat().st_size))
+            # The standalone official-default build adds only HomeWRK RAM metadata.
+            if device == 'homewrk':
+                image=output/INITRAMFS
+                image.write_bytes(b'fixture-not-firmware')
+                images.append(dict(name=image.name, type='kernel', filesystem='initramfs', size=image.stat().st_size))
             data['profiles']['linksys_'+device] = {'images': images}
         (output/'profiles.json').write_text(json.dumps(data))
         return output,data
@@ -157,6 +163,24 @@ docker_exec() {
                 result=self.stage(base)
                 self.assertNotEqual(result.returncode,0,result.stderr)
                 self.assertFalse((base/'firmware').exists())
+
+    def test_zero_or_mismatched_metadata_revision_never_gets_release_identity(self):
+        for case in ('zero', 'mismatched', 'missing-record'):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                base = Path(directory)
+                output, data = self.fixture(base)
+                if case == 'zero':
+                    data['version_code'] = 'r0-abcdef'
+                    (base / 'build-record/source-revision.txt').write_text('r0-abcdef\n')
+                elif case == 'mismatched':
+                    (base / 'build-record/source-revision.txt').write_text('r124-abcdef\n')
+                else:
+                    (base / 'build-record/source-revision.txt').unlink()
+                (output / 'profiles.json').write_text(json.dumps(data))
+                result = self.stage(base)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertFalse(list((base / 'firmware').glob('*/version.txt')))
+                self.assertFalse(list((base / 'firmware').glob('*/title.txt')))
 
     def test_own_main_freshness_before_create_and_prune(self):
         from test_dual_publish import replay, staged_fixture

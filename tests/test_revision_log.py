@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import unittest
 from test_cache_workflow import render, step
+from revision_fixture import history, commit, git, revision
 
 class RevisionLogTests(unittest.TestCase):
     def test_nested_prepare_logs_and_failures(self):
@@ -18,7 +19,9 @@ class RevisionLogTests(unittest.TestCase):
                 profile = base / 'profile'
                 (profile / 'tree').mkdir(parents=True)
                 (profile / 'files').mkdir()
-                (source / 'feeds/luci/.git').mkdir(parents=True)
+                history(source)
+                feed = base / 'official-feed'
+                history(feed)
                 (profile / 'settings.ini').write_text('REPO_URL=https://github.com/immortalwrt/immortalwrt\nREPO_REF=master\n')
                 (source / 'feeds.conf.default').write_text('# fixture\n')
                 (profile / 'config.diff').write_text('CONFIG_TEST=y\n')
@@ -26,12 +29,20 @@ class RevisionLogTests(unittest.TestCase):
                 feeds = source / 'scripts/feeds'
                 feeds.write_text('#!/bin/bash\nprintf "feeds %s\\n" "$*" >> "$LOG"\n'
                                  '[ "$1" != "$FAIL" ] || exit 19\n'
-                                 'if [ "$*" = "list -s" ]; then printf "luci src-git %s fixture-url\\n" "$FEED_SHA"; fi\n')
+                                 'if [ "$1" = update ]; then mkdir -p feeds; command git clone -q "$FEED_REMOTE" feeds/luci; fi\n')
                 feeds.chmod(0o755)
-                env = dict(os.environ, DK_OPENWRT=str(source), DK_BIN=str(base / 'bin'),
+                commit(source, 'prepared source fixture')
+                remote = base / 'remote'
+                source.rename(remote)
+                (profile / 'settings.ini').write_text(f'REPO_URL={remote}\nREPO_REF=master\n')
+                subprocess.run(['git', 'clone', '-q', str(remote), str(source)], check=True)
+                source_sha = git(source, 'rev-parse', 'HEAD')
+                feed_sha = git(feed, 'rev-parse', 'HEAD')
+                env = dict(os.environ, GIT_CONFIG_GLOBAL=str(base / 'gitconfig'),
+                           FEED_REMOTE=str(feed), DK_OPENWRT=str(source), DK_BIN=str(base / 'bin'),
                            DK_PROFILE=str(profile), GITHUB_OUTPUT=str(base / 'output'),
                            BUILDER_FINGERPRINT='fixture-builder', LOG=str(base / 'calls'), FAIL=phase,
-                           SOURCE_SHA='1' * 40, FEED_SHA='2' * 40)
+                           SOURCE_SHA=source_sha, FEED_SHA=feed_sha)
                 stub = '''
                 docker_exec() { shift; "$@"; }
                 git() {
@@ -40,13 +51,10 @@ class RevisionLogTests(unittest.TestCase):
                   if [ "$*" = 'rev-parse --verify HEAD' ]; then
                     [ "$FAIL" != git-access ] || return 19
                   fi
-                  if [ "$*" = 'rev-parse --verify HEAD' ]; then
-                    printf '%s\\n' "$SOURCE_SHA"
-                  fi
                   if [ "$1" = -C ]; then
                     [ "$FAIL" != feed-revision ] || return 19
-                    printf '%s\\n' "$FEED_SHA"
                   fi
+                  command git "$@"
                 }
                 mountpoint() { :; }
                 make() { [ "$1" != "$FAIL" ] || return 19; }
@@ -60,7 +68,7 @@ class RevisionLogTests(unittest.TestCase):
                 }
                 export -f git mountpoint make python3
                 '''
-                phase_block = block.replace('/build-record/source-ref.txt', str(base / 'build-record/source-ref.txt')).replace('/build-record/source-sha.txt', str(base / 'build-record/source-sha.txt'))
+                phase_block = block.replace('/build-record/', str(base / 'build-record') + '/')
                 result = subprocess.run(['bash', '-eo', 'pipefail', '-c', stub + phase_block],
                                         cwd=base, env=env, text=True, capture_output=True)
                 expected = 1 if phase in ('update', 'install') else (19 if phase else 0)
@@ -71,6 +79,8 @@ class RevisionLogTests(unittest.TestCase):
                     self.assertFalse((base / 'output').exists())
                 else:
                     self.assertIn(env['SOURCE_SHA'], result.stdout)
+                    self.assertEqual((base / 'build-record/source-revision.txt').read_text().strip(), revision(source))
+                    self.assertRegex(revision(source), r'^r[1-9][0-9]*-[0-9a-f]+$')
                     self.assertIn('Feed luci: ' + env['FEED_SHA'], result.stdout)
                     self.assertEqual((source / '.config').read_text(), 'CONFIG_TEST=y\nCONFIG_CCACHE_DIR="/ghcache"\n')
                     self.assertEqual((profile / 'config.diff').read_text(), 'CONFIG_TEST=y\n')

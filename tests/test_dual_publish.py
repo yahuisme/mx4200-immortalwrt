@@ -104,8 +104,15 @@ def staged_fixture(base):
     # Capture this before any negative mutation, so equal-size damage is visible.
     record = base/'build-record'
     record.mkdir()
+    (record/'source-sha.txt').write_text('c' * 40 + '\n')
+    (record/'source-revision.txt').write_text('r123-abcdef\n')
+    (record/'ramboot.json').write_text(json.dumps(dict(
+        pristine=True, source_sha='c' * 40, revision='r123-abcdef',
+        customization='Chinese LuCI only')))
     (record/'initramfs.json').write_text(json.dumps(dict(
         name=INITRAMFS, size=len(b'fixture image'), complete_cpio=True,
+        official_source='c' * 40, language='zh_cn', default_language='auto',
+        official_defaults={'etc/config/network': hashlib.sha256(b'official fixture defaults').hexdigest()},
         sha256=hashlib.sha256(b'fixture image').hexdigest())))
 
     return [rows]
@@ -155,6 +162,60 @@ class DualPublicationTests(unittest.TestCase):
                 result, calls = replay(base, pages)
                 self.assertNotEqual(result.returncode, 0, result.stderr)
                 self.assertFalse(any(a[0] == 'release' for a in calls))
+                self.assertNotIn('ModuleNotFoundError', result.stderr)
+
+    def test_real_checker_record_satisfies_publication_boundary(self):
+        from test_ramboot_defaults import source_fixture
+        from test_initramfs import checker, payload
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory); pages = staged_fixture(base)
+            source = base / 'official-source'
+            source.mkdir()
+            files = source_fixture(source)
+            image = base / 'firmware/mx4300-homewrk' / INITRAMFS
+            image.write_bytes(payload(files))
+            proof = checker.verify(image, base / 'build-record/initramfs.json', source)
+            self.assertEqual(proof['default_language'], 'auto')
+            self.assertEqual(proof['language'], 'zh_cn')
+            (base / 'build-record/source-sha.txt').write_text(proof['official_source'] + '\n')
+            ram = json.loads((base / 'build-record/ramboot.json').read_text())
+            ram['source_sha'] = proof['official_source']
+            (base / 'build-record/ramboot.json').write_text(json.dumps(ram))
+            result, calls = replay(base, pages)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(len([a for a in calls if a[:2] == ['release', 'create']]), 2)
+
+    def test_original_default_proof_failure_blocks_all_release_mutations(self):
+        for fault in ('missing-initramfs-source', 'wrong-initramfs-source', 'missing-language',
+                      'wrong-language', 'missing-defaults', 'empty-defaults',
+                      'malformed-defaults', 'missing-ramboot', 'malformed-ramboot',
+                      'dirty', 'truthy-pristine', 'missing-pristine', 'wrong-source',
+                      'wrong-revision', 'missing-source-record', 'missing-revision-record'):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as directory:
+                base = Path(directory); pages = staged_fixture(base)
+                record = base / 'build-record'
+                evidence = json.loads((record / 'initramfs.json').read_text())
+                ram = json.loads((record / 'ramboot.json').read_text())
+                if fault == 'missing-initramfs-source': evidence.pop('official_source')
+                if fault == 'wrong-initramfs-source': evidence['official_source'] = 'd' * 40
+                if fault == 'missing-language': evidence.pop('language')
+                if fault == 'wrong-language': evidence['language'] = 'auto'
+                if fault == 'missing-defaults': evidence.pop('official_defaults')
+                if fault == 'empty-defaults': evidence['official_defaults'] = {}
+                if fault == 'malformed-defaults': evidence['official_defaults'] = ['not-a-dict']
+                if fault == 'dirty': ram['pristine'] = False
+                if fault == 'truthy-pristine': ram['pristine'] = 'true'
+                if fault == 'missing-pristine': ram.pop('pristine')
+                if fault == 'wrong-source': ram['source_sha'] = 'd' * 40
+                if fault == 'wrong-revision': ram['revision'] = 'r124-abcdef'
+                (record / 'initramfs.json').write_text(json.dumps(evidence))
+                (record / 'ramboot.json').write_text('{' if fault == 'malformed-ramboot' else json.dumps(ram))
+                if fault == 'missing-ramboot': (record / 'ramboot.json').unlink()
+                if fault == 'missing-source-record': (record / 'source-sha.txt').unlink()
+                if fault == 'missing-revision-record': (record / 'source-revision.txt').unlink()
+                result, calls = replay(base, pages)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertFalse(any(call[0] == 'release' for call in calls), calls)
                 self.assertNotIn('ModuleNotFoundError', result.stderr)
 
     def test_unexpected_initramfs_rejected_before_any_mutation(self):

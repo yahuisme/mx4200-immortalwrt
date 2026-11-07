@@ -1,0 +1,7 @@
+# Official HomeWRK defaults; add only Chinese LuCI and its native dependencies.
+CONFIG_TARGET_qualcommax=y
+CONFIG_TARGET_qualcommax_ipq807x=y
+CONFIG_TARGET_qualcommax_ipq807x_DEVICE_linksys_homewrk=y
+CONFIG_TARGET_ROOTFS_INITRAMFS=y
+CONFIG_PACKAGE_luci=y
+CONFIG_LUCI_LANG_zh_Hans=y

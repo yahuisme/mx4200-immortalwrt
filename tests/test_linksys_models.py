@@ -24,7 +24,8 @@ class LinksysModelsTests(unittest.TestCase):
         for model in ('mx4200v1', 'mx4200v2', 'mx4300', 'homewrk'):
             self.assertIn('CONFIG_TARGET_DEVICE_qualcommax_ipq807x_DEVICE_linksys_' + model + '=y', config)
         self.assertIn('CONFIG_TARGET_PER_DEVICE_ROOTFS=y', config)
-        self.assertIn('CONFIG_TARGET_ROOTFS_INITRAMFS=y', config)
+        self.assertIn('CONFIG_TARGET_ROOTFS_INITRAMFS=n', config)
+        self.assertIn('CONFIG_TARGET_ROOTFS_INITRAMFS=y', (ROOT / 'user/ramboot/config.diff').read_text())
 
     def test_groups_are_disjoint_and_complete(self):
         profile = helper('build_profile').load(ROOT / 'user/default')
