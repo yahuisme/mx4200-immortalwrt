@@ -13,8 +13,8 @@ from pathlib import Path
 
 CONFIG = Path(__file__).resolve().parents[1] / "user/default/official-initramfs.json"
 VERSION = "25.12.2"
-NAME = f"immortalwrt-{VERSION}-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb"
-URL = f"https://downloads.immortalwrt.org/releases/{VERSION}/targets/qualcommax/ipq807x/{NAME}"
+NAME = "immortalwrt-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb"
+URL = f"https://downloads.immortalwrt.org/releases/{VERSION}/targets/qualcommax/ipq807x/immortalwrt-{VERSION}-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb"
 
 
 def _validate_config(config):

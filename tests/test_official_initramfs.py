@@ -21,8 +21,8 @@ def helper():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
-NAME = "immortalwrt-25.12.2-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb"
-URL = "https://downloads.immortalwrt.org/releases/25.12.2/targets/qualcommax/ipq807x/" + NAME
+NAME = "immortalwrt-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb"
+URL = "https://downloads.immortalwrt.org/releases/25.12.2/targets/qualcommax/ipq807x/immortalwrt-25.12.2-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb"
 PIN = {"group": "mx4300-homewrk", "version": "25.12.2", "url": URL, "name": NAME, "size": 17190648,
        "sha256": "35d0ed3e46b090dbb433a973b743cc02fb1b3e609be85ecbbe1d401596d2c929"}
 
