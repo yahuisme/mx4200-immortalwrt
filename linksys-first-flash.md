@@ -55,16 +55,18 @@ HomeWRK 临时镜像直接下载官方原版，不重新编译、不添加软件
 - Windows 电脑、网线、可清空的 U 盘。
 - **3.3V USB-TTL** 模块及其 Windows 驱动。
 - [PuTTY 中文版](https://github.com/larryli/putty)：连接串口，从项目 Releases 下载。
-- [HDD Raw Copy Tool](https://hddguru.com/software/HDD-Raw-Copy-Tool/)：制作启动 U 盘，下载官方便携版即可。
+- [Rufus](https://rufus.ie/zh/)：制作启动 U 盘，下载官方便携版即可。
 - HomeWRK 的 `initramfs-uImage.itb` 和 `squashfs-sysupgrade.bin`。
 
 ### 2. 制作启动 U 盘
 
 1. 在资源管理器中开启“文件扩展名”，将 HomeWRK 临时镜像重命名为 `initramfs.img`，不解压、不转换格式。
-2. 以管理员身份打开 HDD Raw Copy Tool，选择镜像文件作为来源，打开 `initramfs.img`。
-3. 目标选择 **U 盘**，核对型号和容量，开始写入并等待完成。
+2. 插入 U 盘，以管理员身份打开 Rufus，在“设备”中选择 **U 盘**，核对型号和容量。
+3. 按 **Alt＋M**，确认已启用“忽略启动标记”检查，让 Rufus 接受路由器的原始镜像。
+4. 点击“选择”，打开 `initramfs.img`，点击“开始”。若提示写入方式，选择 **DD 镜像模式**，不要选 ISO 模式。
+5. 确认清空 U 盘，等待写入完成。
 
-无需提前格式化 U 盘，也不用设置文件系统或分区表。
+无需提前格式化 U 盘，不要手动更改文件系统或分区表。
 
 **这会清空整个 U 盘，不能选电脑硬盘。不是把镜像复制进 U 盘；写完后 Windows 若提示格式化，点取消。**
 
