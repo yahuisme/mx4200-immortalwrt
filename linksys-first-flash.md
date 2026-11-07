@@ -21,12 +21,12 @@ MX4300 下载本机型的 `squashfs-factory.bin` 和 `squashfs-sysupgrade.bin`�
 
 HomeWRK 下载以下两个文件，均选择文件名含 `linksys_homewrk` 的镜像：
 
-- `initramfs-uImage.itb`：从 USB 启动临时系统，使用本发布组附带的官方 snapshot＋中文 LuCI 镜像。
+- `initramfs-uImage.itb`：从 USB 启动临时系统，使用本发布组附带的 ImmortalWrt 官方最新稳定 Release 原版镜像。
 - `squashfs-sysupgrade.bin`：在临时系统的 LuCI 后台安装正式固件。
 
 首次安装按本教程使用上述两个文件，无需下载或刷入 `factory.ubi`，也无需另去官方网站下载临时镜像。
 
-HomeWRK 临时镜像仅添加中文 LuCI 及必需依赖，其余保留官方设置与默认配置，管理地址为 `192.168.1.1`。
+HomeWRK 临时镜像直接下载官方原版，不重新编译、不添加软件、不修改默认配置，管理地址为 `192.168.1.1`。
 
 ## 二、MX4200 / MX4300：原厂后台刷入
 
@@ -114,7 +114,7 @@ usb start && usbboot 44000000 0 && bootm 44000000
 
 出现不兼容或校验错误就停止，不要强制刷入。这里不需要 WinSCP，也不需要命令行上传固件。
 
-本发布组的 HomeWRK 临时镜像独立构建，发布前检查中文 LuCI、固件升级页面、网页服务及官方默认配置。
+本发布组每次构建自动获取官方最新稳定 Release 的 HomeWRK 临时镜像，并核对官方公布的大小和 SHA-256，不固定版本。
 
 ## 四、刷完登录与以后升级
 

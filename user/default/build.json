@@ -47,5 +47,8 @@
         "immortalwrt-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb"
       ]
     }
-  }
+  },
+  "external_images": [
+    "immortalwrt-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb"
+  ]
 }

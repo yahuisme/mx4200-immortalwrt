@@ -25,7 +25,8 @@ class LinksysModelsTests(unittest.TestCase):
             self.assertIn('CONFIG_TARGET_DEVICE_qualcommax_ipq807x_DEVICE_linksys_' + model + '=y', config)
         self.assertIn('CONFIG_TARGET_PER_DEVICE_ROOTFS=y', config)
         self.assertIn('CONFIG_TARGET_ROOTFS_INITRAMFS=n', config)
-        self.assertIn('CONFIG_TARGET_ROOTFS_INITRAMFS=y', (ROOT / 'user/ramboot/config.diff').read_text())
+        self.assertFalse((ROOT / 'user/ramboot/config.diff').exists())
+        self.assertFalse((ROOT / 'scripts/build_ramboot.sh').exists())
 
     def test_groups_are_disjoint_and_complete(self):
         profile = helper('build_profile').load(ROOT / 'user/default')
@@ -39,6 +40,9 @@ class LinksysModelsTests(unittest.TestCase):
         self.assertEqual(set(names), set(profile['images']))
         self.assertIn('immortalwrt-qualcommax-ipq807x-linksys_homewrk-squashfs-factory.ubi', names)
         self.assertIn('immortalwrt-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb', names)
+        self.assertEqual(profile['external_images'],
+                         ['immortalwrt-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb'])
+        self.assertEqual(len(set(names) - set(profile['external_images'])), 8)
 
     def test_group_contract_rejects_overlap_omission_and_wrong_profile(self):
         module = helper('build_profile')
@@ -54,6 +58,16 @@ class LinksysModelsTests(unittest.TestCase):
                 (Path(tmp) / 'build.json').write_text(json.dumps(broken))
                 with self.subTest(fault=fault), self.assertRaises(ValueError): module.load(tmp)
 
+    def test_external_images_must_be_unique_known_group_members(self):
+        module = helper('build_profile')
+        data = module.load(ROOT / 'user/default')
+        for external in (['unexpected.itb'], data['external_images'] * 2, 'not-a-list'):
+            with self.subTest(external=external), tempfile.TemporaryDirectory() as tmp:
+                broken = copy.deepcopy(data)
+                broken['external_images'] = external
+                (Path(tmp) / 'build.json').write_text(json.dumps(broken))
+                with self.assertRaises(ValueError): module.load(tmp)
+
     def fixture(self, root):
         profile = helper('build_profile').load(ROOT / 'user/default')
         targets = root / 'targets'
@@ -64,13 +78,11 @@ class LinksysModelsTests(unittest.TestCase):
             for board in group['profiles']:
                 images = []
                 for name in group['images']:
-                    if '-' + board + '-' not in name:
+                    if '-' + board + '-' not in name or name in profile['external_images']:
                         continue
                     (directory / name).write_bytes(b'fixture-not-firmware')
-                    initramfs = '-initramfs-' in name
-                    images.append(dict(name=name, type='kernel' if initramfs else
-                                       'factory' if 'factory' in name else 'sysupgrade',
-                                       filesystem='initramfs' if initramfs else 'squashfs', size=20))
+                    images.append(dict(name=name, type='factory' if 'factory' in name else 'sysupgrade',
+                                       filesystem='squashfs', size=20))
                 if board != 'linksys_homewrk':
                     name = f'immortalwrt-qualcommax-ipq807x-{board}-initramfs-uImage.itb'
                     (directory / name).write_bytes(b'fixture-not-firmware')
@@ -80,7 +92,7 @@ class LinksysModelsTests(unittest.TestCase):
         (directory / 'profiles.json').write_text(json.dumps(data))
         return profile, targets, directory, data
 
-    def test_stage_splits_nine_and_ignores_other_native_initramfs_without_hashing(self):
+    def test_stage_splits_native_eight_and_ignores_auxiliary_initramfs_without_hashing(self):
         module = helper('release_images')
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -88,30 +100,20 @@ class LinksysModelsTests(unittest.TestCase):
             with patch('hashlib.file_digest', side_effect=AssertionError('staging must not hash')):
                 module.stage(targets, root / 'firmware')
             for key, group in profile['release_groups'].items():
-                self.assertEqual({p.name for p in (root / 'firmware' / key).iterdir()}, set(group['images']))
-            self.assertEqual([len(group['images']) for group in profile['release_groups'].values()], [4, 5])
+                self.assertEqual({p.name for p in (root / 'firmware' / key).iterdir()},
+                                 set(group['images']) - set(profile['external_images']))
+            self.assertEqual([len(list((root / 'firmware' / key).iterdir()))
+                              for key in profile['release_groups']], [4, 4])
 
     def test_missing_ubi_wrong_metadata_and_cross_target_reject_before_copy(self):
         module = helper('release_images')
         for fault in ('missing-ubi', 'wrong-size', 'wrong-device', 'extra-bin', 'extra-ubi', 'cross-target',
-                      'extra-itb', 'cross-target-itb', 'missing-initramfs', 'empty-initramfs',
-                      'symlink-initramfs', 'missing-initramfs-metadata', 'wrong-initramfs-type',
-                      'wrong-initramfs-filesystem', 'wrong-initramfs-size'):
+                      'extra-itb', 'cross-target-itb'):
             with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 profile, targets, directory, data = self.fixture(root)
                 image = directory / next(n for n in profile['images'] if n.endswith('.ubi'))
-                ram = directory / next(n for n in profile['images'] if '-initramfs-' in n)
-                metadata = data['profiles']['linksys_homewrk']['images']
-                ram_entry = next(entry for entry in metadata if entry['filesystem'] == 'initramfs')
-                if fault == 'missing-initramfs': ram.unlink()
-                if fault == 'empty-initramfs': ram.write_bytes(b'')
-                if fault == 'symlink-initramfs':
-                    ram.rename(directory / 'payload'); ram.symlink_to('payload')
-                if fault == 'missing-initramfs-metadata': metadata.remove(ram_entry)
-                if fault == 'wrong-initramfs-type': ram_entry['type'] = 'sysupgrade'
-                if fault == 'wrong-initramfs-filesystem': ram_entry['filesystem'] = 'squashfs'
-                if fault == 'wrong-initramfs-size': ram_entry['size'] += 1
+
                 if fault == 'missing-ubi': image.unlink()
                 if fault == 'wrong-size': data['profiles']['linksys_homewrk']['images'][0]['size'] += 1
                 if fault == 'wrong-device': data['profiles']['linksys_homewrk']['images'][0]['name'] = profile['images'][0]
@@ -134,9 +136,9 @@ class LinksysModelsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             profile, targets, directory, _ = self.fixture(Path(tmp))
             images = module.collect(targets, profile)
-            self.assertEqual(len(images), 9)
+            self.assertEqual(len(images), 8)
             self.assertTrue(any(row['name'].endswith('.ubi') for row in images))
-            self.assertEqual({row['name'] for row in images if '-initramfs-' in row['name']},
-                             {'immortalwrt-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb'})
+            self.assertEqual({row['name'] for row in images},
+                             set(profile['images']) - set(profile['external_images']))
             (directory / 'unexpected-factory.ubi').write_bytes(b'x')
             with self.assertRaises(ValueError): module.collect(targets, profile)

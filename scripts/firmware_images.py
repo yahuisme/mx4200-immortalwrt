@@ -5,7 +5,7 @@ from pathlib import Path
 
 def collect(targets, profile):
     directory = Path(targets) / profile["target"]
-    names = tuple(profile["images"])
+    names = tuple(name for name in profile["images"] if name not in profile.get("external_images", []))
     candidates = sorted(p for p in directory.iterdir()
                         if (('factory' in p.name or 'sysupgrade' in p.name)
                             and p.suffix in ('.bin', '.ubi'))

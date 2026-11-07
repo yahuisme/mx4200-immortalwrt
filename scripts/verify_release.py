@@ -25,6 +25,13 @@ def verify(tag, files, group=None):
             or any(p.is_symlink() or not p.is_file() or not p.stat().st_size
                    for p in expected.values())):
         raise ValueError('Expected complete nonempty firmware image set')
+    if group == 'mx4300-homewrk':
+        try:
+            from .official_initramfs import load_record, verify as verify_official
+        except ImportError:
+            from official_initramfs import load_record, verify as verify_official
+        official = load_record('build-record/official-initramfs.json')
+        verify_official(expected[official['name']], official)
     workflow_sha = os.environ.get('GITHUB_SHA', '')
     if not re.fullmatch(r'[0-9a-f]{40}', workflow_sha):
         raise ValueError('GITHUB_SHA must be an explicit full commit SHA')

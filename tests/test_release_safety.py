@@ -6,38 +6,48 @@ import subprocess
 import tempfile
 import unittest
 from test_cache_workflow import ROOT, step
-from test_dual_publish import INITRAMFS, profile_fixture
+from test_dual_publish import INITRAMFS, profile_fixture, official_record
 
-INITRAMFS_BOUNDARY = '''
-check_initramfs() {
-    [ "${FAULT:-}" != initramfs ] || return 31
-    # Only the Docker image inspector is stubbed; staging/config/metadata and
-    # later build-record digest/readback gates run their production code.
-    command python3 - "$@" <<'PY'
+OFFICIAL_DOWNLOAD_BOUNDARY = r'''
+# Replace only the downloader; publication verifies the real helper's record.
+python3() {
+    if [ "${1:-}" = scripts/official_initramfs.py ]; then
+        [ "${FAULT:-}" != official-download ] || return 31
+        command python3 - "$@" <<'PY'
 import hashlib,json,sys
 from pathlib import Path
-assert sys.argv[2:] == ['--source', '/bld/ramboot', '--record', '/build-record/initramfs.json']
-image=Path(sys.argv[1])
-assert image.name == 'immortalwrt-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb'
-assert not image.is_symlink() and image.is_file() and image.stat().st_size
-Path('build-record/initramfs.json').write_text(json.dumps(dict(
-    name=image.name, size=image.stat().st_size, sha256=hashlib.sha256(image.read_bytes()).hexdigest(),
-    complete_cpio=True, fixture_inspection=True,
-    official_source=Path('build-record/source-sha.txt').read_text().strip(),
-    language='zh_cn', default_language='auto',
-    official_defaults={'etc/config/network': hashlib.sha256(b'official fixture defaults').hexdigest()})))
+assert sys.argv[1:] == ['scripts/official_initramfs.py', 'firmware/mx4300-homewrk', '--record', 'build-record/official-initramfs.json']
+destination=Path(sys.argv[2]); assert destination.is_dir()
+assert len(list(Path('firmware/mx4200').glob('*.bin'))) == 4
+assert len([p for p in destination.iterdir() if p.suffix in ('.bin', '.ubi')]) == 4
+name='immortalwrt-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb'
+source=name.replace('immortalwrt-', 'immortalwrt-25.12.2-', 1)
+image=destination/name; image.write_bytes(b'fixture image')
+Path(sys.argv[4]).write_text(json.dumps(dict(
+    version='25.12.2', source_name=source, name=name, target='qualcommax/ipq807x',
+    url='https://downloads.immortalwrt.org/releases/25.12.2/targets/qualcommax/ipq807x/'+source,
+    group='mx4300-homewrk', size=image.stat().st_size,
+    sha256=hashlib.sha256(image.read_bytes()).hexdigest())))
+with Path('official-download-calls').open('a') as stream: stream.write('download\n')
 PY
+    else
+        command python3 "$@"
+    fi
 }
 '''
 
 
+
 class ReleaseTests(unittest.TestCase):
-    def test_native_initramfs_inspection_precedes_staging(self):
+    def test_official_download_follows_native_stage_and_no_ram_compilation(self):
         body=step('Validate and stage firmware')['run']
-        check='docker_exec DK python3 /cache-scripts/check_initramfs.py "$DK_BIN/targets/qualcommax/ipq807x/'+INITRAMFS+'" --source /bld/ramboot --record /build-record/initramfs.json'
-        self.assertIn(check, body)
-        self.assertLess(body.index(check), body.index('python3 scripts/release_images.py stage'))
-        self.assertNotIn('official_initramfs.py', body)
+        download='python3 scripts/official_initramfs.py firmware/mx4300-homewrk --record build-record/official-initramfs.json'
+        self.assertIn(download, body)
+        self.assertLess(body.index('python3 scripts/release_images.py stage'), body.index(download))
+        from test_cache_workflow import STEPS
+        workflow='\n'.join(item.get('run', '') for item in STEPS)
+        self.assertNotIn('build_ramboot.sh', workflow)
+        self.assertNotIn('check_initramfs.py', workflow)
 
     def fixture(self, base):
         profile_fixture(base)
@@ -52,8 +62,6 @@ class ReleaseTests(unittest.TestCase):
         (base/'build-record/source-ref.txt').write_text('master\n')
         (base/'build-record/source-revision.txt').write_text('r123-abcdef\n')
         (base/'build-record/source-sha.txt').write_text('c'*40+'\n')
-        (base/'build-record/ramboot.json').write_text(json.dumps(dict(
-            pristine=True, source_sha='c'*40, revision='r123-abcdef', customization='Chinese LuCI only')))
         data={'target':'qualcommax/ipq807x','version_code':'r123-abcdef', 'profiles': {}}
         for device in ('mx4200v1','mx4200v2','mx4300','homewrk'):
             images = []
@@ -62,29 +70,27 @@ class ReleaseTests(unittest.TestCase):
                 image = output/f'immortalwrt-qualcommax-ipq807x-linksys_{device}-squashfs-{kind}.{suffix}'
                 image.write_bytes(b'fixture-not-firmware')
                 images.append(dict(name=image.name, type=kind, filesystem='squashfs', size=image.stat().st_size))
-            # The standalone official-default build adds only HomeWRK RAM metadata.
-            if device == 'homewrk':
-                image=output/INITRAMFS
-                image.write_bytes(b'fixture-not-firmware')
-                images.append(dict(name=image.name, type='kernel', filesystem='initramfs', size=image.stat().st_size))
             data['profiles']['linksys_'+device] = {'images': images}
         (output/'profiles.json').write_text(json.dumps(data))
         return output,data
 
-    def stage(self,base):
-        prefix=INITRAMFS_BOUNDARY+'''
+    def stage(self,base,fault='none'):
+        prefix=OFFICIAL_DOWNLOAD_BOUNDARY+'''
 sudo() { "$@"; }
-docker_exec() {
-    shift
-    if [ "$1" = python3 ] && [ "$2" = /cache-scripts/check_initramfs.py ]; then
-        shift 2; check_initramfs "$@"
-    else
-        "$@"
-    fi
-}
+docker_exec() { shift; "$@"; }
 '''
         return subprocess.run(['bash','-eo','pipefail','-c',prefix+step('Validate and stage firmware')['run']],
-                              cwd=base,env=dict(os.environ,DK_OPENWRT=str(base),DK_BIN=str(base/'openwrt_bin')),text=True,capture_output=True)
+                              cwd=base,env=dict(os.environ,DK_OPENWRT=str(base),DK_BIN=str(base/'openwrt_bin'),FAULT=fault),text=True,capture_output=True)
+
+    def test_official_download_failure_blocks_stage_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp); self.fixture(base)
+            result = self.stage(base, 'official-download')
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertFalse((base/'build-record/official-initramfs.json').exists())
+            self.assertFalse((base/'firmware/mx4300-homewrk'/INITRAMFS).exists())
+            self.assertFalse(list((base/'firmware').glob('*/version.txt')))
+            self.assertFalse(list((base/'firmware').glob('*/title.txt')))
 
     def test_complete_stage_and_bad_image_configuration_matrix(self):
         cases=('valid','missing','empty','extra','wrong-device','wrong-prefix','symlink',
@@ -135,11 +141,15 @@ docker_exec() {
                     notes=(base/'firmware/mx4300-homewrk/release-notes.md').read_text()
                     self.assertIn('`factory.ubi`',notes)
                     self.assertIn('LuCI',notes)
-                    self.assertIn('官方 snapshot（master）',notes)
+                    self.assertIn('25.12.2',notes)
+                    self.assertIn(official_record()['url'],notes)
                     self.assertIn('c'*40,notes)
                     self.assertIn('initramfs-uImage.itb',notes)
-                    self.assertTrue((base/'build-record/initramfs.json').is_file())
+                    self.assertTrue((base/'build-record/official-initramfs.json').is_file())
                     self.assertTrue((base/'firmware/mx4300-homewrk'/INITRAMFS).is_file())
+                    self.assertEqual((base/'official-download-calls').read_text().splitlines(), ['download'])
+                    self.assertFalse((out/INITRAMFS).exists())
+                    self.assertEqual(json.loads((base/'build-record/official-initramfs.json').read_text()), official_record())
                     self.assertNotIn('`factory.ubi`',(base/'firmware/mx4200/release-notes.md').read_text())
                     self.assertNotIn('not found',result.stderr)
                 else:

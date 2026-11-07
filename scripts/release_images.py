@@ -35,7 +35,8 @@ def stage(targets, output, group=None):
     groups = contract['release_groups']
     if group is not None:
         groups = {group: groups[group]}
-    names = {name for item in groups.values() for name in item['images']}
+    external = set(contract.get('external_images', []))
+    names = {name for item in groups.values() for name in item['images']} - external
     boards = {board for item in groups.values() for board in item['profiles']}
     directory = targets / contract['target']
     selected = image_paths(targets, recursive=True, names=names)
@@ -67,9 +68,10 @@ def stage(targets, output, group=None):
         destination = output if group is not None else output / key
         if destination != output:
             destination.mkdir()
-        for name in item['images']:
+        native = [name for name in item['images'] if name not in external]
+        for name in native:
             shutil.copyfile(directory / name, destination / name)
-        validate_images(destination, item['images'])
+        validate_images(destination, native)
 
 
 if __name__ == '__main__':
