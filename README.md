@@ -16,8 +16,8 @@
 | 镜像 | 用途 |
 | --- | --- |
 | `factory.bin` | MX4200 / MX4300 从原厂固件刷入 |
-| `factory.ubi` | HomeWRK 初次安装的 UBI 镜像 |
-| `sysupgrade.bin` | 从已有 OpenWrt / ImmortalWrt 升级 |
+| `factory.ubi` | HomeWRK 命令行写入用，本教程无需使用 |
+| `sysupgrade.bin` | 系统升级；也用于 HomeWRK 启动临时系统后的首次安装 |
 
 **首次刷机请参照 [Linksys 首次刷机教程](linksys-first-flash.md)：MX4200 / MX4300 使用原厂后台刷入，HomeWRK 使用 Windows＋TTL 启动临时系统后刷入。升级建议不保留配置。**
 

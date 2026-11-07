@@ -19,11 +19,11 @@
 
 MX4300 下载本机型的 `squashfs-factory.bin` 和 `squashfs-sysupgrade.bin`；
 
-HomeWRK 下载 `squashfs-sysupgrade.bin`。
+HomeWRK 下载 `squashfs-sysupgrade.bin`。首次安装按本教程使用此文件，无需下载或刷入 `factory.ubi`。
 
 也可使用 [OpenWrt 官方固件](https://firmware-selector.openwrt.org/)或 [ImmortalWrt 官方固件](https://firmware-selector.immortalwrt.org/)，在选择器搜索自己的机型，并按下载页核对 SHA-256。
 
-**HomeWRK 额外准备一个官方临时镜像**：在官方选择器选择 HomeWRK 的稳定版，下载 `initramfs-uImage.itb`。本教程不使用 `factory.ubi`。
+**HomeWRK 额外准备一个官方临时镜像**：在官方选择器选择 HomeWRK 的稳定版，下载 `initramfs-uImage.itb`，用于从 USB 启动临时系统。
 
 ## 二、MX4200 / MX4300：原厂后台刷入
 
@@ -99,7 +99,7 @@ HomeWRK 下载 `squashfs-sysupgrade.bin`。
 usb start && usbboot 44000000 0 && bootm 44000000
 ```
 
-等待临时系统启动，TTL 操作到此结束。读取或启动失败时先停止，不继续刷写。
+临时系统运行在内存中，此时尚未将新系统写入闪存。启动完成后，TTL 操作到此结束，接下来在 LuCI 网页中完成安装。读取或启动失败时先停止，不继续刷写。
 
 ### 5. 在 LuCI 后台刷入正式固件
 
