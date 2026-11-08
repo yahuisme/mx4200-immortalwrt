@@ -120,6 +120,14 @@ def staged_fixture(base):
                    digest='sha256:' + hashlib.sha256(p.read_bytes()).hexdigest())
               for p in (base/'firmware').glob('*/*') if p.suffix in ('.bin', '.ubi')]
     (record/'build.json').write_text(json.dumps(dict(images=images)))
+    metadata = record/'targets/qualcommax/ipq807x/profiles.json'
+    metadata.parent.mkdir(parents=True)
+    metadata.write_text(json.dumps(dict(profiles={
+        board: dict(images=[dict(name=row['name'], size=row['size'],
+                                 sha256=row['digest'].removeprefix('sha256:'))
+                            for row in images if '-' + board + '-' in row['name']])
+        for group in profile['release_groups'].values() for board in group['profiles']
+    })))
 
     return [rows]
 
@@ -160,6 +168,44 @@ class DualPublicationTests(unittest.TestCase):
                 self.assertFalse(any(a[0] == 'release' for a in calls), calls)
                 if fault.endswith('same-size-corrupt'):
                     self.assertIn('Staged image differs from build record', result.stderr)
+
+    def test_native_metadata_failures_block_both_publications(self):
+        for fault in ('missing', 'malformed', 'missing-row', 'duplicate-row',
+                      'wrong-size', 'wrong-digest', 'missing-digest'):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
+                base = Path(tmp)
+                pages = staged_fixture(base)
+                path = base/'build-record/targets/qualcommax/ipq807x/profiles.json'
+                data = json.loads(path.read_text())
+                images = next(iter(data['profiles'].values()))['images']
+                if fault == 'missing-row': images.pop()
+                if fault == 'duplicate-row': images.append(dict(images[0]))
+                if fault == 'wrong-size': images[0]['size'] += 1
+                if fault == 'wrong-digest': images[0]['sha256'] = '0' * 64
+                if fault == 'missing-digest': images[0].pop('sha256')
+                path.write_text('{' if fault == 'malformed' else json.dumps(data))
+                if fault == 'missing': path.unlink()
+                result, calls = replay(base, pages)
+                self.assertNotEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(any(a[0] == 'release' for a in calls))
+
+    def test_native_metadata_digest_mismatch_blocks_both_publications(self):
+        for group in GROUPS:
+            with self.subTest(group=group), tempfile.TemporaryDirectory() as tmp:
+                base = Path(tmp)
+                pages = staged_fixture(base)
+                image = next((base/'firmware'/group).glob('*factory.*'))
+                image.write_bytes(b'x' * image.stat().st_size)
+                record = base/'build-record/build.json'
+                data = json.loads(record.read_text())
+                for row in data['images']:
+                    if row['name'] == image.name:
+                        row['digest'] = 'sha256:' + hashlib.sha256(image.read_bytes()).hexdigest()
+                record.write_text(json.dumps(data))
+                result, calls = replay(base, pages)
+                self.assertNotEqual(result.returncode, 0, result.stderr)
+                self.assertIn('Native image differs from profiles metadata', result.stderr)
+                self.assertFalse(any(a[0] == 'release' for a in calls))
 
     def test_official_attachment_failure_blocks_both_publications(self):
         for mode in ('missing', 'empty', 'same-size-corrupt', 'symlink', 'wrong-group'):

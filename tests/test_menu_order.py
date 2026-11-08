@@ -15,7 +15,7 @@ from installed_rootfs import roots
 ROOT = Path(__file__).resolve().parents[1]
 MENUS = ROOT / 'user/default/files/usr/share/luci/menu.d'
 FIXTURE = ROOT / 'tests/fixtures/services-menu-contract.json'
-FIXTURE_SHA256 = 'eec8eac2d5a209cdc3a35311d48b619f24a8b449c56a6d69e85ac08b3fd7569b'
+FIXTURE_SHA256 = '4813c2475501616f18978bf257263248277dbed0d569c0410560006ee8bbc1b1'
 PARENT = 'admin/services/homeproxy'
 TERMINAL = 'admin/services/ttyd'
 PROXY_MENU = 'luci-app-homeproxy.json'

@@ -1,4 +1,5 @@
 """Exercise the real nine-image stage and own-main publication gates."""
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -69,7 +70,9 @@ class ReleaseTests(unittest.TestCase):
                 suffix = 'ubi' if device == 'homewrk' and kind == 'factory' else 'bin'
                 image = output/f'immortalwrt-qualcommax-ipq807x-linksys_{device}-squashfs-{kind}.{suffix}'
                 image.write_bytes(b'fixture-not-firmware')
-                images.append(dict(name=image.name, type=kind, filesystem='squashfs', size=image.stat().st_size))
+                images.append(dict(name=image.name, type=kind, filesystem='squashfs',
+                                   size=image.stat().st_size,
+                                   sha256=hashlib.sha256(image.read_bytes()).hexdigest()))
             data['profiles']['linksys_'+device] = {'images': images}
         (output/'profiles.json').write_text(json.dumps(data))
         return output,data

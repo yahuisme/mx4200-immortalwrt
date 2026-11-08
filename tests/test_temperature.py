@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 @unittest.skipUnless(os.environ.get('MX4200_PRISTINE_SOURCE'),
                      'set MX4200_PRISTINE_SOURCE for real autocore reader')
 class TemperatureTests(unittest.TestCase):
-    def run_reader(self, samples, broken=(), patched=True):
+    def run_reader(self, samples, broken=(), patched=True, zones=()):
         source = Path(os.environ['MX4200_PRISTINE_SOURCE'])
         relative = 'package/emortal/autocore/files/tempinfo'
         with tempfile.TemporaryDirectory() as d:
@@ -26,6 +26,11 @@ class TemperatureTests(unittest.TestCase):
                 self.assertEqual(target.read_bytes(), before)
             ieee = root / 'ieee'
             thermal = root / 'thermal'
+            for index, (kind, value) in enumerate(zones):
+                zone = thermal / f'thermal_zone{index}'
+                zone.mkdir(parents=True)
+                (zone / 'type').write_text(kind + '\n')
+                (zone / 'temp').write_text(value)
             for phy, value in samples.items():
                 p = ieee / f'phy{phy}/hwmon{phy}/temp1_input'
                 p.parent.mkdir(parents=True, exist_ok=True)
@@ -58,6 +63,16 @@ class TemperatureTests(unittest.TestCase):
         self.assertEqual(self.run_reader({0: 'bad\n', 1: '', 2: '49000\n'}), 'WiFi: 49.0°C')
         self.assertEqual(self.run_reader({}, broken=(0, 1, 2)), 'No temperature info')
         self.assertEqual(self.run_reader({}), 'No temperature info')
+
+    def test_ipq807x_selects_cpu_or_cluster_not_first_zone(self):
+        zones = (('nss-top-thermal', '41000\n'), ('cpu0-thermal', '60000\n'),
+                 ('cluster-thermal', '65000\n'))
+        self.assertEqual(self.run_reader({}, zones=zones), 'CPU: 60.0°C')
+        self.assertEqual(self.run_reader({}, zones=tuple(reversed(zones))), 'CPU: 60.0°C')
+        self.assertEqual(self.run_reader({}, zones=(zones[0],)), 'No temperature info')
+        self.assertEqual(self.run_reader({}, zones=(zones[0], zones[2])), 'CPU: 65.0°C')
+        self.assertEqual(self.run_reader({}, zones=(('cpu0-thermal', 'bad\n'), zones[2])),
+                         'CPU: 65.0°C')
 
     def test_official_reader_reproduces_eio_suppression(self):
         self.assertEqual(self.run_reader({2: '51000\n'}, broken=(0, 1), patched=False),
