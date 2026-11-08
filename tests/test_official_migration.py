@@ -64,7 +64,7 @@ class OfficialMigrationTests(unittest.TestCase):
         self.assertNotIn('SOURCE_VERSION=', text)
         self.assertIn('VERSION="${DEVICE}-ImmortalWrt-r${WRT_REV}-${WRT_DATE/-/_}"', text)
         self.assertIn('DEVICE=MX4200', text)
-        self.assertIn('DEVICE=MX4300-HomeWRK', text)
+        self.assertIn('DEVICE=MX4300', text)
         self.assertIn('printf \'%s\\n\' "$VERSION" > "firmware/$GROUP/title.txt"', text)
         self.assertEqual(workflow['jobs']['build']['runs-on'], 'ubuntu-24.04-arm')
         self.assertNotIn('集成 NSS', (ROOT / '.github/workflows/MX4200.yml').read_text())

@@ -251,7 +251,7 @@ jobs:
               INSTALL="\`factory.bin\` 用于从原厂固件刷入，\`sysupgrade.bin\` 用于从已有 ImmortalWrt 升级。"
               ;;
             mx4300-homewrk)
-              DEVICE=MX4300-HomeWRK
+              DEVICE=MX4300
               MODELS='Linksys MX4300 / HomeWRK'
               INSTALL="MX4300：原厂 Web 刷入 \`factory.bin\`；HomeWRK：\`factory.ubi\` 用于命令行写入，或使用 USB 启动附带的官方 $OFFICIAL_VERSION 临时镜像，再通过 LuCI 刷入 \`sysupgrade.bin\`。临时镜像来源：$OFFICIAL_URL"
               ;;
@@ -415,7 +415,7 @@ jobs:
                     or 'sha256:' + row['sha256'] != accepted.get('digest')):
                 raise ValueError('Native image differs from profiles metadata: ' + row['name'])
         suffixes = []
-        for group, device in [('mx4200', 'MX4200'), ('mx4300-homewrk', 'MX4300-HomeWRK')]:
+        for group, device in [('mx4200', 'MX4200'), ('mx4300-homewrk', 'MX4300')]:
             directory = Path('firmware') / group
             expected = set(profile['release_groups'][group]['images'])
 
@@ -459,7 +459,7 @@ jobs:
           VERSION="$(cat "firmware/$GROUP/version.txt")"
           case "$GROUP" in
             mx4200) RELEASE_PATTERN="^(MX4200-ImmortalWrt-|MX4200_ImmortalWrt_)";;
-            mx4300-homewrk) RELEASE_PATTERN="^MX4300-HomeWRK-ImmortalWrt-";;
+            mx4300-homewrk) RELEASE_PATTERN="^MX4300-ImmortalWrt-";;
           esac
           # Independent prefixes prevent cross-pruning. Legacy MX4200 tags
           # belong only to MX4200; drafts/prereleases remain protected.

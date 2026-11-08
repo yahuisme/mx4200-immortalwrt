@@ -216,6 +216,6 @@ docker_exec() { shift; "$@"; }
                 self.assertEqual(len(tag_refs),2 if case in ('fresh','annotated','advance','recheck-error') else
                                  1 if case in ('tag-error','tag-ref-error') else 0)
                 self.assertEqual([a[2] for a in deletes],
-                                 ['MX4200-ImmortalWrt-old','MX4300-HomeWRK-ImmortalWrt-old']
+                                 ['MX4200-ImmortalWrt-old','MX4300-ImmortalWrt-old']
                                  if case in ('fresh','annotated') else [])
                 self.assertTrue(all('immortalwrt/immortalwrt' not in ' '.join(a) for a in calls))

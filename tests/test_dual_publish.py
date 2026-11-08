@@ -10,7 +10,7 @@ import unittest
 
 from test_cache_workflow import ROOT, step
 
-GROUPS = {'mx4200': 'MX4200', 'mx4300-homewrk': 'MX4300-HomeWRK'}
+GROUPS = {'mx4200': 'MX4200', 'mx4300-homewrk': 'MX4300'}
 INITRAMFS = 'immortalwrt-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb'
 STUB = r'''#!/usr/bin/env python3
 import hashlib, json, os, sys
@@ -27,11 +27,11 @@ if a[0] == 'api' and a[1].endswith('/git/ref/heads/main'):
     stale = mode == 'stale' or (count >= 4 and mode == 'advance') or (count >= 3 and mode == 'between-groups')
     print('b'*40 if stale else os.environ['GITHUB_SHA']); sys.exit(0)
 if a[:2] == ['release', 'create']:
-    second = a[2].startswith('MX4300-HomeWRK-')
+    second = a[2].startswith('MX4300-ImmortalWrt-')
     sys.exit(19 if mode == 'create-error' or (second and mode == 'second-create-error') else 0)
 if a[0] == 'api' and '/releases/tags/' in a[1]:
     tag = unquote(a[1].split('/releases/tags/')[1])
-    group = 'mx4300-homewrk' if tag.startswith('MX4300-HomeWRK-') else 'mx4200'
+    group = 'mx4300-homewrk' if tag.startswith('MX4300-ImmortalWrt-') else 'mx4200'
     if mode == 'verify-error' or (group == 'mx4300-homewrk' and mode == 'second-verify-error'): sys.exit(23)
     directory = root/'firmware'/group
     assets = [dict(id=i, name=p.name, size=p.stat().st_size, state='uploaded',
@@ -292,14 +292,14 @@ class DualPublicationTests(unittest.TestCase):
             self.assertEqual(len(reads), 2)
             self.assertTrue(all(index < first_delete for index in reads))
             self.assertEqual([a[2] for a in calls if a[:2] == ['release','delete']],
-                             ['MX4200-ImmortalWrt-old','MX4300-HomeWRK-ImmortalWrt-old'])
+                             ['MX4200-ImmortalWrt-old','MX4300-ImmortalWrt-old'])
 
     def test_group_retention_is_disjoint_across_paginated_inventory(self):
-        pages = [[row('MX4200-ImmortalWrt-old'), row('MX4300-HomeWRK-ImmortalWrt-old'),
+        pages = [[row('MX4200-ImmortalWrt-old'), row('MX4300-ImmortalWrt-old'),
                   row('MX4200_ImmortalWrt_legacy'), row('Other-keep'),
-                  row('MX4300-HomeWRK-ImmortalWrt-draft', draft=True)],
-                 [row('MX4200-ImmortalWrt-current'), row('MX4300-HomeWRK-ImmortalWrt-current'),
-                  row('MX4300-HomeWRK-ImmortalWrt-preview', prerelease=True)]]
+                  row('MX4300-ImmortalWrt-draft', draft=True)],
+                 [row('MX4200-ImmortalWrt-current'), row('MX4300-ImmortalWrt-current'),
+                  row('MX4300-ImmortalWrt-preview', prerelease=True)]]
         with tempfile.TemporaryDirectory() as tmp:
             base=Path(tmp); staged_fixture(base)
             result,calls=replay(base,pages)
@@ -310,7 +310,7 @@ class DualPublicationTests(unittest.TestCase):
             self.assertEqual([tag for i,tag in deletes if inventories[0]<i<inventories[1]],
                              ['MX4200-ImmortalWrt-old','MX4200_ImmortalWrt_legacy'])
             self.assertEqual([tag for i,tag in deletes if i>inventories[1]],
-                             ['MX4300-HomeWRK-ImmortalWrt-old'])
+                             ['MX4300-ImmortalWrt-old'])
 
     def test_missing_current_inventory_protects_only_its_own_group(self):
         for missing in GROUPS:

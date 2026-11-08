@@ -14,7 +14,7 @@ from test_record_collection import prepare
 READBACK = """
     from urllib.parse import unquote
     tag=unquote(a[1].split('/releases/tags/')[1])
-    group='mx4300-homewrk' if tag.startswith('MX4300-HomeWRK-') else 'mx4200'
+    group='mx4300-homewrk' if tag.startswith('MX4300-ImmortalWrt-') else 'mx4200'
     assets=[dict(name=p.name,size=p.stat().st_size,state='uploaded',digest='sha256:'+__import__('hashlib').sha256(p.read_bytes()).hexdigest()) for p in (Path('firmware')/group).iterdir() if p.suffix in ('.bin','.ubi','.itb')]
     print(json.dumps(dict(tag_name=tag,name=tag,draft=False,prerelease=False,assets=assets)))
 """

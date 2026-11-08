@@ -34,7 +34,7 @@
       ]
     },
     "mx4300-homewrk": {
-      "device": "MX4300-HomeWRK",
+      "device": "MX4300",
       "profiles": [
         "linksys_mx4300",
         "linksys_homewrk"
