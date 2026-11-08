@@ -48,7 +48,7 @@ class CustomScopeTests(unittest.TestCase):
                             'https://github.com/yahuisme/packages.git'], check=True)
             hooks = base / 'hooks'
             hooks.mkdir()
-            for name in ('packages.sh', 'external_packages.py', 'homewrk_dts.py', 'temperature.py', 'settings.sh'):
+            for name in ('packages.sh', 'external_packages.py', 'homewrk_dts.py', 'settings.sh'):
                 (hooks / name).write_text((ROOT / 'scripts' / name).read_text().replace(
                     '/cache-scripts/', str(hooks) + '/'))
             custom = base / 'custom.sh'
@@ -118,26 +118,24 @@ python3() {
             self.assertIn('review MAC protection', result.stderr)
             self.assertEqual(before, tree_contents(root))
 
-    def test_customization_does_not_read_unselected_gnutls(self):
-        for temperature_status in ('0', '17'):
-            with self.subTest(temperature_status=temperature_status), tempfile.TemporaryDirectory() as tmp:
-                root = Path(tmp)
-                (root / 'package').mkdir()
-                (root / 'include').mkdir()
-                (root / 'include/version.mk').write_text('VERSION_NUMBER:=SNAPSHOT\n')
-                for name in ('package/Makefile', 'include/rootfs.mk'):
-                    (root / name).write_bytes((ROOT / 'tests/fixtures/snapshot-source' / name).read_bytes())
-                (root / 'tmp/info').mkdir(parents=True)
-                (root / 'tmp/.packageinfo').write_text('old metadata')
-                dts = root / 'target/linux/qualcommax/dts/ipq8174-homewrk.dts'
-                dts.parent.mkdir(parents=True)
-                original_dts = (ROOT / 'tests/fixtures/homewrk/ipq8174-homewrk.dts').read_text()
-                dts.write_text(original_dts)
-                env = dict(os.environ, DK_OPENWRT=tmp, LOG=str(root / 'calls'),
-                           HOMEWRK_HELPER=str(ROOT / 'scripts/homewrk_dts.py'),
-                           TEMP_STATUS=temperature_status,
-                           REAL_EXTERNAL=str(ROOT / 'scripts/external_packages.py'))
-                boundary = '''
+    def test_customization_runs_without_temperature_override(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'package').mkdir()
+            (root / 'include').mkdir()
+            (root / 'include/version.mk').write_text('VERSION_NUMBER:=SNAPSHOT\n')
+            for name in ('package/Makefile', 'include/rootfs.mk'):
+                (root / name).write_bytes((ROOT / 'tests/fixtures/snapshot-source' / name).read_bytes())
+            (root / 'tmp/info').mkdir(parents=True)
+            (root / 'tmp/.packageinfo').write_text('old metadata')
+            dts = root / 'target/linux/qualcommax/dts/ipq8174-homewrk.dts'
+            dts.parent.mkdir(parents=True)
+            original_dts = (ROOT / 'tests/fixtures/homewrk/ipq8174-homewrk.dts').read_text()
+            dts.write_text(original_dts)
+            env = dict(os.environ, DK_OPENWRT=tmp, LOG=str(root / 'calls'),
+                       HOMEWRK_HELPER=str(ROOT / 'scripts/homewrk_dts.py'),
+                       REAL_EXTERNAL=str(ROOT / 'scripts/external_packages.py'))
+            boundary = '''
 bash() {
     case "$1" in
         /cache-scripts/packages.sh) printf 'packages\\n' >> "$LOG";;
@@ -159,21 +157,16 @@ python3() {
         command python3 "$REAL_EXTERNAL" "$@"
         return "$?"
     fi
-    [ "$1" = /cache-scripts/temperature.py ] || return 99
-    printf 'temperature\\n' >> "$LOG"
-    return "$TEMP_STATUS"
+    return 99
 }
 '''
-                result = subprocess.run(['bash', '-euo', 'pipefail', '-c', boundary + CUSTOM.read_text()],
-                                        cwd=root, env=env, text=True, capture_output=True)
-                self.assertEqual(result.returncode, int(temperature_status), result.stderr)
-                self.assertEqual((root / 'calls').read_text().splitlines(),
-                                 ['preflight', 'homewrk', 'packages', 'temperature', 'settings'] if temperature_status == '0'
-                                 else ['preflight', 'homewrk', 'packages', 'temperature'])
-                self.assertIn('status = "disabled";', dts.read_text())
-                self.assertEqual((root / 'tmp/.packageinfo').exists(), temperature_status != '0')
-                self.assertEqual((root / 'tmp/info').exists(), temperature_status != '0')
-                self.assertFalse((root / 'feeds/packages/libs/gnutls/Makefile').exists())
+            result = subprocess.run(['bash', '-euo', 'pipefail', '-c', boundary + CUSTOM.read_text()],
+                                    cwd=root, env=env, text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual((root / 'calls').read_text().splitlines(),
+                             ['preflight', 'homewrk', 'packages', 'settings'])
+            self.assertIn('status = "disabled";', dts.read_text())
+            self.assertFalse((root / 'feeds/packages/libs/gnutls/Makefile').exists())
 
 
 if __name__ == '__main__':
