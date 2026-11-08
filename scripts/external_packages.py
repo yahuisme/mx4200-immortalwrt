@@ -193,7 +193,8 @@ def verify_root(root, provenance):
                  'usr/lib/lua/luci/i18n/homeproxy.zh-cn.lmo'):
         if not (root / name).is_file() or not (root / name).stat().st_size:
             raise ValueError('Missing HomeProxy runtime file: ' + name)
-    if not os.access(root / 'usr/bin/sing-box', os.X_OK):
+    core = root / 'usr/bin/sing-box'
+    if not core.is_file() or not core.stat().st_size or not os.access(core, os.X_OK):
         raise ValueError('Missing executable sing-box core')
     for name in ('luci-app-cpufreq', 'luci-i18n-cpufreq-zh-cn'):
         if not installed.get(name):

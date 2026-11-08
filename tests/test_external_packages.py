@@ -436,13 +436,25 @@ class ExternalPackageTests(unittest.TestCase):
                             module.verify_root(root, provenance)
                         path.write_bytes(saved)
             core_bytes = core.read_bytes()
-            for state in ('nonexecutable', 'missing'):
+            for state in ('nonexecutable', 'missing', 'empty', 'directory'):
                 with self.subTest(core=state):
-                    core.chmod(0o644) if state == 'nonexecutable' else core.unlink()
-                    with self.assertRaisesRegex(ValueError, 'Missing executable sing-box core'):
-                        module.verify_root(root, provenance)
-                    core.write_bytes(core_bytes)
-                    core.chmod(0o755)
+                    if state == 'nonexecutable':
+                        core.chmod(0o644)
+                    elif state == 'missing':
+                        core.unlink()
+                    elif state == 'empty':
+                        core.write_bytes(b'')
+                    else:
+                        core.unlink()
+                        core.mkdir()
+                    try:
+                        with self.assertRaisesRegex(ValueError, 'Missing executable sing-box core'):
+                            module.verify_root(root, provenance)
+                    finally:
+                        if core.is_dir():
+                            core.rmdir()
+                        core.write_bytes(core_bytes)
+                        core.chmod(0o755)
             package = packages[0]
             installed[package['name']] = 'wrong-version'
             write_installed()

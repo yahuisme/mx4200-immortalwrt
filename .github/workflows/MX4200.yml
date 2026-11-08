@@ -388,12 +388,21 @@ jobs:
         # Validate BOTH local groups before any Release mutation. Metadata stays
         # in Actions artifacts; verify the original official attachment separately.
         python3 - <<'PY'
+        import hashlib
         import json
         from pathlib import Path
         from scripts.official_initramfs import load_record, verify
         profile = json.loads(Path('user/default/build.json').read_text())
         official = load_record('build-record/official-initramfs.json')
         verify(Path('firmware') / official['group'] / official['name'], official)
+        # Bind staged native bytes to the collector before either publication.
+        native = set(profile['images']) - set(profile.get('external_images', []))
+        entries = json.loads(Path('build-record/build.json').read_text())['images']
+        if (not isinstance(entries, list) or len(entries) != len(native)
+                or any(not isinstance(row, dict) for row in entries)
+                or {row.get('name') for row in entries} != native):
+            raise ValueError('Invalid native build-record image inventory')
+        recorded = {row['name']: row for row in entries}
         suffixes = []
         for group, device in [('mx4200', 'MX4200'), ('mx4300-homewrk', 'MX4300-HomeWRK')]:
             directory = Path('firmware') / group
@@ -403,6 +412,13 @@ jobs:
             if (len(images) != len(expected) or {p.name for p in images} != expected
                     or any(p.is_symlink() or not p.is_file() or not p.stat().st_size for p in images)):
                 raise ValueError('Invalid staged release images: ' + group)
+            for image in images:
+                if image.name in recorded:
+                    row = recorded[image.name]
+                    with image.open('rb') as stream:
+                        digest = 'sha256:' + hashlib.file_digest(stream, 'sha256').hexdigest()
+                    if type(row.get('size')) is not int or row['size'] != image.stat().st_size or row.get('digest') != digest:
+                        raise ValueError('Staged image differs from build record: ' + image.name)
             tag = (directory / 'version.txt').read_text().strip()
             if (not tag.startswith(device + '-ImmortalWrt-')
                     or (directory / 'title.txt').read_text().strip() != tag

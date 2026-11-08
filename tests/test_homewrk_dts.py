@@ -94,6 +94,33 @@ class HomewrkDtsTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(path.read_text(), changed)
 
+    def test_factory_mac_mapping_drift_fails_before_writes(self):
+        changes = (
+            ('compatible = "mac-base";', 'compatible = "invalid";'),
+            ('#nvmem-cell-cells = <1>;', '#nvmem-cell-cells = <0>;'),
+            ('compatible = "ascii-eq-delim-env";', 'compatible = "invalid";'),
+            ('label = "devinfo";', 'label = "invalid";'),
+            ('nvmem-cells = <&mac_address 0>;', 'nvmem-cells = <&mac_address 1>;'),
+            ('nvmem-cells = <&mac_address 1>;', 'nvmem-cells = <&mac_address 0>;'),
+            ('nvmem-cell-names = "mac-address";', 'nvmem-cell-names = "invalid";'),
+            ('label = "lan3";', 'label = "invalid";'),
+        )
+        for guarded in (False, True):
+            for old, new in changes:
+                with self.subTest(guarded=guarded, change=old), tempfile.TemporaryDirectory() as tmp:
+                    path = Path(tmp) / DTS
+                    path.parent.mkdir(parents=True)
+                    path.write_text(FIXTURE.read_text())
+                    if guarded:
+                        command('python3', str(HELPER), tmp)
+                    original = path.read_text()
+                    self.assertIn(old, original)
+                    changed = original.replace(old, new, 1)
+                    path.write_text(changed)
+                    result = command('python3', str(HELPER), tmp, check=False)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(path.read_text(), changed)
+
     def test_mac_reference_survives_bootloader_fixup(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
