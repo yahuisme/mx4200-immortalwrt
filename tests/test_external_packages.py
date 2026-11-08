@@ -109,6 +109,34 @@ class ExternalPackageTests(unittest.TestCase):
                 self.assertEqual(before, {str(p.relative_to(root)): p.read_bytes() if p.is_file() else None
                                           for p in root.rglob('*')})
 
+    def test_prepare_rejects_changed_assembly_before_any_writes(self):
+        source = fixture(self, 'MX_APK_SOURCE_FIXTURE')
+        boundaries = (
+            ('include/rootfs.mk', 'apk = \\\n'),
+            ('include/rootfs.mk', '\t--keys-dir $(if $(APK_KEYS),$(APK_KEYS),$(TOPDIR)) \\\n'),
+            ('package/Makefile', '$(curdir)/install: $(TMP_DIR)/.build $(curdir)/merge $(curdir)/merge-index\n'),
+            ('package/Makefile', '\t\t$(INCLUDE_DIR)/rootfs.mk $(TOPDIR)/package/Makefile; \\\n'),
+            ('package/Makefile', '\t\t$$(cat $(TMP_DIR)/apk_install_list)\n'),
+            ('include/rootfs.mk', '\t$(call mklibs,$(1))\n'),
+        )
+        for relative, boundary in boundaries:
+            with self.subTest(boundary=boundary), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                for name in ('package/Makefile', 'include/rootfs.mk', 'include/image.mk', 'include/version.mk'):
+                    path = root / name
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(source / name, path)
+                path = root / relative
+                self.assertEqual(path.read_text().count(boundary), 1)
+                path.write_text(path.read_text().replace(boundary, '# unsupported boundary\n', 1))
+                (root / '.external-packages.mk').write_text('existing inputs\n')
+                before = {p.relative_to(root): p.read_bytes() if p.is_file() else None
+                          for p in root.rglob('*')}
+                with self.assertRaisesRegex(ValueError, 'Unsupported upstream assembly boundary'):
+                    helper().prepare(root)
+                self.assertEqual(before, {p.relative_to(root): p.read_bytes() if p.is_file() else None
+                                          for p in root.rglob('*')})
+
     def test_supported_versions_prepare_idempotently_without_defconfig(self):
         source = fixture(self, 'MX_APK_SOURCE_FIXTURE')
         for version in ('VERSION_NUMBER:=SNAPSHOT\n', (source / 'include/version.mk').read_text()):

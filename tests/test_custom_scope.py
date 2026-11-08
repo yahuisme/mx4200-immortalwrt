@@ -29,6 +29,7 @@ class CustomScopeTests(unittest.TestCase):
             ('unsupported', 'VERSION_NUMBER:=26.01.0\n', ''),
             ('malformed', 'VERSION_NUMBER:=SNAPSHOTgarbage\n', ''),
             ('override', 'VERSION_NUMBER:=SNAPSHOT\n', 'CONFIG_VERSION_NUMBER="26.01.0"\n'),
+            ('assembly', 'VERSION_NUMBER:=SNAPSHOT\n', ''),
         )
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -47,7 +48,7 @@ class CustomScopeTests(unittest.TestCase):
                             'https://github.com/yahuisme/packages.git'], check=True)
             hooks = base / 'hooks'
             hooks.mkdir()
-            for name in ('packages.sh', 'external_packages.py', 'temperature.py', 'settings.sh'):
+            for name in ('packages.sh', 'external_packages.py', 'homewrk_dts.py', 'temperature.py', 'settings.sh'):
                 (hooks / name).write_text((ROOT / 'scripts' / name).read_text().replace(
                     '/cache-scripts/', str(hooks) + '/'))
             custom = base / 'custom.sh'
@@ -58,6 +59,16 @@ class CustomScopeTests(unittest.TestCase):
                     for name in ('include', 'scripts', 'package', 'feeds/luci', 'feeds/packages',
                                  'tmp/info/empty', '.external-packages/empty'):
                         (root / name).mkdir(parents=True, exist_ok=True)
+                    if label == 'assembly':
+                        import shutil
+                        source = ROOT / 'tests/fixtures/snapshot-source'
+                        for name in ('package/Makefile', 'include/rootfs.mk'):
+                            shutil.copyfile(source / name, root / name)
+                        dts = root / 'target/linux/qualcommax/dts/ipq8174-homewrk.dts'
+                        dts.parent.mkdir(parents=True)
+                        dts.write_bytes((ROOT / 'tests/fixtures/homewrk/ipq8174-homewrk.dts').read_bytes())
+                        package = root / 'package/Makefile'
+                        package.write_text(package.read_text().replace('$(curdir)/install:', 'changed/install:', 1))
                     (root / 'include/version.mk').write_text(version)
                     (root / '.config').write_text(override)
                     (root / 'scripts/projectsmirrors.json').write_text(
@@ -76,7 +87,8 @@ class CustomScopeTests(unittest.TestCase):
                                             GIT_CONFIG_GLOBAL=str(config), GIT_CONFIG_NOSYSTEM='1',
                                             TMPDIR=tmp))
                     self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-                    self.assertIn('require reviewed ImmortalWrt snapshot', result.stderr)
+                    self.assertIn('Unsupported upstream assembly boundary' if label == 'assembly'
+                                  else 'require reviewed ImmortalWrt snapshot', result.stderr)
                     self.assertEqual(before, tree_contents(base),
                                      'custom must reject before changing any fixture file/directory')
 
@@ -113,6 +125,8 @@ python3() {
                 (root / 'package').mkdir()
                 (root / 'include').mkdir()
                 (root / 'include/version.mk').write_text('VERSION_NUMBER:=SNAPSHOT\n')
+                for name in ('package/Makefile', 'include/rootfs.mk'):
+                    (root / name).write_bytes((ROOT / 'tests/fixtures/snapshot-source' / name).read_bytes())
                 (root / 'tmp/info').mkdir(parents=True)
                 (root / 'tmp/.packageinfo').write_text('old metadata')
                 dts = root / 'target/linux/qualcommax/dts/ipq8174-homewrk.dts'

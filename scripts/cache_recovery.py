@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Disposable cache restore boundary; core build and cleanup errors stay fatal."""
 import argparse
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -63,6 +64,10 @@ def restore(kind, root, archive, expected, restored, outcome):
                                 or not list(root.glob('build_dir/toolchain-*'))
                                 or not list(root.glob('staging_dir/toolchain-*'))):
                             raise ValueError('incomplete toolchain artifact set')
+                        binary = root / 'staging_dir/host/bin/ccache'
+                        if (binary.is_symlink() or not binary.is_file() or not binary.stat().st_size
+                                or not os.access(binary, os.X_OK)):
+                            raise ValueError('missing nonempty executable host ccache')
                     else:
                         bootstrap.restore(root, archive, expected)
             else:

@@ -31,6 +31,13 @@ def replace_once(path, old, new):
     path.write_text(text.replace(old, new, 1))
 
 
+def validate_boundary(path, old, new):
+    """Check every mutation boundary before the first generated-file write."""
+    text = path.read_text()
+    if new not in text and text.count(old) != 1:
+        raise ValueError(f'Unsupported upstream assembly boundary: {path}')
+
+
 def put(root, name, text):
     path = root / name
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -56,38 +63,53 @@ def reviewed_version(root):
         raise ValueError('External APK feeds require reviewed ImmortalWrt snapshot')
 
 
+def assembly_boundaries(root):
+    rootfs = root / 'include/rootfs.mk'
+    package_makefile = root / 'package/Makefile'
+    return (
+        (rootfs, 'apk = \\\n', 'include $(TOPDIR)/.external-packages.mk\n\napk = \\\n'),
+        (rootfs,
+         '\t--keys-dir $(if $(APK_KEYS),$(APK_KEYS),$(TOPDIR)) \\\n',
+         '\t--keys-dir $(TOPDIR)/.external-packages/keys \\\n'
+         '\t--no-network $(MX_EXTERNAL_REPOSITORIES) \\\n'),
+        (package_makefile,
+         '$(curdir)/install: $(TMP_DIR)/.build $(curdir)/merge $(curdir)/merge-index\n',
+         '.PHONY: mx-external-packages\n'
+         'mx-external-packages: $(TMP_DIR)/.build $(curdir)/merge $(curdir)/merge-index\n'
+         '\tpython3 /cache-scripts/external_packages.py snapshot $(TOPDIR) $(STAGING_DIR_HOST)/bin/apk\n\n'
+         '$(curdir)/install: $(TMP_DIR)/.build $(curdir)/merge $(curdir)/merge-index mx-external-packages\n'),
+        (package_makefile,
+         '\t\t$(INCLUDE_DIR)/rootfs.mk $(TOPDIR)/package/Makefile; \\\n',
+         '\t\t$(INCLUDE_DIR)/rootfs.mk $(TOPDIR)/package/Makefile $(TOPDIR)/.external-packages/provenance.json; \\\n'),
+        (package_makefile,
+         '\t\t$$(cat $(TMP_DIR)/apk_install_list)\n',
+         '\t\t$$(cat $(TMP_DIR)/apk_install_list) $(MX_EXTERNAL_PACKAGES)\n'),
+        (rootfs,
+         '\t$(call mklibs,$(1))\n',
+         '\t$(call mklibs,$(1))\n'
+         '\tpython3 /cache-scripts/external_packages.py verify-root $(1) $(TOPDIR)/.external-packages/provenance.json\n'),
+    )
+
+
+def preflight(root):
+    root = Path(root).resolve()
+    reviewed_version(root)
+    for path, old, new in assembly_boundaries(root):
+        validate_boundary(path, old, new)
+
+
 def prepare(root):
     root = Path(root).resolve()
-    reviewed_version(root)  # Reject incompatible sources before writing any files.
+    preflight(root)
     packages = ' '.join(f'{p}@{tag}' for tag, repo in REPOSITORIES.items() for p in repo['packages'])
     repositories = ' '.join('--repository-config "@' + tag + ' file://$(TOPDIR)/.external-packages/' +
                             tag + '/packages.adb"' for tag in REPOSITORIES)
     put(root, '.external-packages.mk', 'MX_EXTERNAL_PACKAGES:=' + packages + '\n' +
         'MX_EXTERNAL_REPOSITORIES:=' + repositories + '\n')
-    # Both package/install and per-device add/del call this shared helper.
-    replace_once(root / 'include/rootfs.mk', 'apk = \\\n',
-                 'include $(TOPDIR)/.external-packages.mk\n\napk = \\\n')
-    replace_once(root / 'include/rootfs.mk',
-                 '\t--keys-dir $(if $(APK_KEYS),$(APK_KEYS),$(TOPDIR)) \\\n',
-                 '\t--keys-dir $(TOPDIR)/.external-packages/keys \\\n'
-                 '\t--no-network $(MX_EXTERNAL_REPOSITORIES) \\\n')
-    # A prerequisite runs before make expands install's immediate cache-key eval.
-    replace_once(root / 'package/Makefile',
-                 '$(curdir)/install: $(TMP_DIR)/.build $(curdir)/merge $(curdir)/merge-index\n',
-                 '.PHONY: mx-external-packages\n'
-                 'mx-external-packages: $(TMP_DIR)/.build $(curdir)/merge $(curdir)/merge-index\n'
-                 '\tpython3 /cache-scripts/external_packages.py snapshot $(TOPDIR) $(STAGING_DIR_HOST)/bin/apk\n\n'
-                 '$(curdir)/install: $(TMP_DIR)/.build $(curdir)/merge $(curdir)/merge-index mx-external-packages\n')
-    replace_once(root / 'package/Makefile',
-                 '\t\t$(INCLUDE_DIR)/rootfs.mk $(TOPDIR)/package/Makefile; \\\n',
-                 '\t\t$(INCLUDE_DIR)/rootfs.mk $(TOPDIR)/package/Makefile $(TOPDIR)/.external-packages/provenance.json; \\\n')
-    replace_once(root / 'package/Makefile',
-                 '\t\t$$(cat $(TMP_DIR)/apk_install_list)\n',
-                 '\t\t$$(cat $(TMP_DIR)/apk_install_list) $(MX_EXTERNAL_PACKAGES)\n')
-    replace_once(root / 'include/rootfs.mk',
-                 '\t$(call mklibs,$(1))\n',
-                 '\t$(call mklibs,$(1))\n'
-                 '\tpython3 /cache-scripts/external_packages.py verify-root $(1) $(TOPDIR)/.external-packages/provenance.json\n')
+    # Shared offline APK helper covers common and per-device rootfs; refresh the
+    # snapshot prerequisite before make expands the common install cache key.
+    for path, old, new in assembly_boundaries(root):
+        replace_once(path, old, new)
     # Runtime entries are editable by LuCI and contain no builder paths.
     put(root, 'files/etc/apk/repositories.d/customfeeds.list', ''.join(
         f'@{tag} {repo["url"]}/packages.adb\n' for tag, repo in REPOSITORIES.items()))
@@ -223,7 +245,7 @@ def verify_root(root, provenance):
 
 if __name__ == '__main__':
     if sys.argv[1] == 'preflight':
-        reviewed_version(Path(sys.argv[2]).resolve())
+        preflight(sys.argv[2])
     elif sys.argv[1] == 'prepare':
         prepare(sys.argv[2])
     elif sys.argv[1] == 'snapshot':

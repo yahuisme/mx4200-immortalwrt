@@ -82,6 +82,32 @@ class RecoveryTests(unittest.TestCase):
                 self.assertIn('hit=false\n', result.stdout)
                 self.assertFalse((self.root / 'staging_dir/host').exists())
 
+    def test_exact_empty_executable_ccache_is_cold(self):
+        for kind in ('toolchain', 'bootstrap'):
+            with self.subTest(kind=kind):
+                archive = self.archive / (kind + '.tar.gz')
+                with tarfile.open(archive, 'w:gz') as tf:
+                    roots = ['build_dir/host', 'staging_dir/host']
+                    if kind == 'toolchain':
+                        roots += ['build_dir/toolchain-test', 'staging_dir/toolchain-test']
+                    for name in roots:
+                        entry = tarfile.TarInfo(name)
+                        entry.type = tarfile.DIRTYPE
+                        tf.addfile(entry)
+                    for tool in ('ccache', 'cmake'):
+                        tf.addfile(tarfile.TarInfo('build_dir/host/' + tool + '-1/.built'))
+                        tf.addfile(tarfile.TarInfo('staging_dir/host/stamp/.' + tool + '_installed'))
+                    entry = tarfile.TarInfo('staging_dir/host/bin/ccache')
+                    entry.mode = 0o755
+                    tf.addfile(entry)
+                (self.archive / 'key').write_text('matched\n')
+                result = self.cli(kind)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, 'hit=false\nmatched-key=\npoisoned=true\n')
+                self.assertIn('ccache', result.stderr)
+                self.assertFalse((self.root / 'staging_dir/host').exists())
+                self.assertEqual(list(self.archive.iterdir()), [])
+
     def fake_gh(self, entries, failure=''):
         import json
         bindir = self.base / 'bin'

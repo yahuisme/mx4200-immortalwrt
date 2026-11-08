@@ -316,6 +316,17 @@ class BootstrapTests(unittest.TestCase):
             m.pack(self.root, self.cache, 'tb-one')
         self.assertFalse((self.cache / 'bootstrap.tar.gz').exists())
 
+    def test_empty_executable_ccache_cannot_seed(self):
+        m = self.module()
+        self.artifacts()
+        binary = self.root / 'staging_dir/host/bin/ccache'
+        binary.write_bytes(b'')
+        self.assertTrue(os.access(binary, os.X_OK))
+        with self.assertRaisesRegex(ValueError, 'ccache'):
+            m.pack(self.root, self.cache, 'tb-one')
+        self.assertFalse((self.cache / 'bootstrap.tar.gz').exists())
+        self.assertFalse((self.cache / 'key').exists())
+
     def test_archive_rejects_traversal_target_and_special_entries(self):
         m = self.module()
         self.cache.mkdir()
