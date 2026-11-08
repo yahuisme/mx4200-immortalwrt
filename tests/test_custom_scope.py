@@ -26,9 +26,9 @@ class CustomScopeTests(unittest.TestCase):
         # Execute the complete production custom/packages scripts, with only the
         # container mount path relocated. Local real Git objects avoid network.
         cases = (
-            ('unsupported', 'VERSION_NUMBER:=26.01.0\n', ''),
+            ('unsupported', 'VERSION_NUMBER:=SNAPSHOT\n', ''),
             ('malformed', 'VERSION_NUMBER:=SNAPSHOTgarbage\n', ''),
-            ('override', 'VERSION_NUMBER:=SNAPSHOT\n', 'CONFIG_VERSION_NUMBER="26.01.0"\n'),
+            ('override', 'VERSION_NUMBER:=25.12.2\n', 'CONFIG_VERSION_NUMBER="26.01.0"\n'),
         )
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -76,7 +76,7 @@ class CustomScopeTests(unittest.TestCase):
                                             GIT_CONFIG_GLOBAL=str(config), GIT_CONFIG_NOSYSTEM='1',
                                             TMPDIR=tmp))
                     self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-                    self.assertIn('require reviewed ImmortalWrt snapshot', result.stderr)
+                    self.assertIn('require numeric ImmortalWrt stable', result.stderr)
                     self.assertEqual(before, tree_contents(base),
                                      'custom must reject before changing any fixture file/directory')
 
@@ -112,7 +112,12 @@ python3() {
                 root = Path(tmp)
                 (root / 'package').mkdir()
                 (root / 'include').mkdir()
-                (root / 'include/version.mk').write_text('VERSION_NUMBER:=SNAPSHOT\n')
+                (root / 'include/version.mk').write_text('VERSION_NUMBER:=25.12.2\n')
+                from test_external_packages import fixture
+                import shutil
+                assembly = fixture(self, 'MX_APK_SOURCE_FIXTURE')
+                for name in ('include/rootfs.mk', 'include/image.mk', 'package/Makefile'):
+                    shutil.copyfile(assembly / name, root / name)
                 (root / 'tmp/info').mkdir(parents=True)
                 (root / 'tmp/.packageinfo').write_text('old metadata')
                 dts = root / 'target/linux/qualcommax/dts/ipq8174-homewrk.dts'

@@ -1,6 +1,6 @@
 # MX4200 ImmortalWrt
 
-基于 [ImmortalWrt 官方最新 snapshot 源码](https://github.com/immortalwrt/immortalwrt/tree/master)，适用于 Linksys MX4200v1 / MX4200v2。
+基于 [ImmortalWrt 官方最新稳定 Release 源码](https://github.com/immortalwrt/immortalwrt/releases)，适用于 Linksys MX4200v1 / MX4200v2。
 
 2026.11.05：新增 Linksys MX4300 / HomeWRK 机型固件。
 
@@ -64,4 +64,4 @@ Aurora 主题及配置插件从官方签名 APK 软件源预装，并保留公�
 
 每日自动构建，计划时间为香港时间 12:00；也可手动运行 [Actions](https://github.com/yahuisme/mx4200-immortalwrt/actions/workflows/MX4200.yml)。
 
-正式固件每次构建拉取官方 `master` 最新源码，固件版本显示沿用官方。使用 Ubuntu 24.04 ARM64 runner 与 Debian ARM64 Docker 环境，一次构建四个机型，发布两组 Release。提供对应机型的 factory 与 sysupgrade 镜像，MX4300 / HomeWRK 组另附官方最新稳定 Release 的 HomeWRK 原版临时镜像，每组独立保留最近一版。
+正式固件每次构建自动选择官方最新稳定 Release 源码，不固定版本，固件版本显示沿用官方。使用 Ubuntu 24.04 ARM64 runner 与 Debian ARM64 Docker 环境，一次构建四个机型，发布两组 Release。提供对应机型的 factory 与 sysupgrade 镜像，MX4300 / HomeWRK 组另附官方最新稳定 Release 的 HomeWRK 原版临时镜像，每组独立保留最近一版。

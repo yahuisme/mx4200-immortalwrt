@@ -139,8 +139,8 @@ def verify(path, record):
     return record
 
 
-def download(destination, record_path):
-    """Stage unchanged bytes under the versionless name and atomically save proof."""
+def download(destination, record_path, record=None):
+    """Stage unchanged bytes using one build-wide resolved version."""
     destination, record_path = Path(destination), Path(record_path)
     image_path = destination / NAME
     if (record_path.resolve() == image_path.resolve()
@@ -150,7 +150,7 @@ def download(destination, record_path):
     for path in (image_path, record_path):
         if path.is_symlink() or (path.exists() and not path.is_file()):
             raise ValueError('Official output must be a regular non-symlink file')
-    record = _validate_record(resolve())
+    record = _validate_record(resolve() if record is None else record)
     destination.mkdir(parents=True, exist_ok=True)
     record_path.parent.mkdir(parents=True, exist_ok=True)
     image_temp = record_temp = None
@@ -196,10 +196,12 @@ def main():
                         help='download directory (or original binary with --verify)')
     parser.add_argument('--record', required=True, type=Path)
     parser.add_argument('--verify', action='store_true', help='offline verification only')
+    parser.add_argument('--resolved', type=Path, help='reuse the build-wide official release record')
     args = parser.parse_args()
     try:
         result = (verify(args.destination, load_record(args.record)) if args.verify
-                  else download(args.destination, args.record))
+                  else download(args.destination, args.record,
+                                load_record(args.resolved) if args.resolved else None))
     except (OSError, ValueError) as error:
         parser.exit(1, f'official initramfs: {error}\n')
     print(json.dumps(result, sort_keys=True))
