@@ -16,7 +16,7 @@
 ### MX4200 / MX4300
 
 - MX4200v1 / v2：进入 **MX4200** 发布组，区分硬件版本。
-- MX4300：进入 **MX4300-HomeWRK** 发布组。
+- MX4300：进入 **MX4300** 发布组。
 
 各下载两个文件：
 
@@ -25,7 +25,7 @@
 
 ### HomeWRK
 
-进入 **MX4300-HomeWRK** 发布组，下载文件名含 `linksys_homewrk` 的两个文件：
+进入 **MX4300** 发布组，下载文件名含 `linksys_homewrk` 的两个文件：
 
 - `initramfs-uImage.itb`：USB 启动临时系统，自带 LuCI，管理地址 `192.168.1.1`。
 - `squashfs-sysupgrade.bin`：安装正式固件。

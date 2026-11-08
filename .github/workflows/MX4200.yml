@@ -232,7 +232,6 @@ jobs:
         python3 scripts/release_images.py stage openwrt_bin/targets firmware
         python3 scripts/official_initramfs.py firmware/mx4300-homewrk --record build-record/official-initramfs.json
         OFFICIAL_VERSION=$(jq -er .version build-record/official-initramfs.json)
-        OFFICIAL_URL=$(jq -er .url build-record/official-initramfs.json)
         WRT_DATE="$(TZ=Asia/Hong_Kong date +'%y.%m.%d-%H.%M.%S')"
         WRT_REV=$(jq -er '.version_code | capture("^r(?<revision>[0-9]+)-[0-9a-f]+$").revision' openwrt_bin/targets/qualcommax/ipq807x/profiles.json)
         [[ "$WRT_REV" =~ ^[1-9][0-9]*$ ]]
@@ -253,7 +252,7 @@ jobs:
             mx4300-homewrk)
               DEVICE=MX4300
               MODELS='Linksys MX4300 / HomeWRK'
-              INSTALL="MX4300：原厂 Web 刷入 \`factory.bin\`；HomeWRK：\`factory.ubi\` 用于命令行写入，或使用 USB 启动附带的官方 $OFFICIAL_VERSION 临时镜像，再通过 LuCI 刷入 \`sysupgrade.bin\`。临时镜像来源：$OFFICIAL_URL"
+              INSTALL="MX4300：原厂 Web 刷入 \`factory.bin\`；HomeWRK：USB 启动附带的官方 $OFFICIAL_VERSION 临时镜像，再通过 LuCI 刷入 \`sysupgrade.bin\`。"
               ;;
           esac
           VERSION="${DEVICE}-ImmortalWrt-r${WRT_REV}-${WRT_DATE/-/_}"
@@ -459,10 +458,10 @@ jobs:
           VERSION="$(cat "firmware/$GROUP/version.txt")"
           case "$GROUP" in
             mx4200) RELEASE_PATTERN="^(MX4200-ImmortalWrt-|MX4200_ImmortalWrt_)";;
-            mx4300-homewrk) RELEASE_PATTERN="^MX4300-ImmortalWrt-";;
+            mx4300-homewrk) RELEASE_PATTERN="^MX4300(-HomeWRK)?-ImmortalWrt-";;
           esac
-          # Independent prefixes prevent cross-pruning. Legacy MX4200 tags
-          # belong only to MX4200; drafts/prereleases remain protected.
+          # Include legacy names only within their own group;
+          # drafts/prereleases remain protected.
           if releases=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100") &&
             old_tags=$(jq -er --arg current "$VERSION" --arg pattern "$RELEASE_PATTERN" '
               flatten | map(select(.draft == false and .prerelease == false and

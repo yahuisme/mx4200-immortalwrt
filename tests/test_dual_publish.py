@@ -296,7 +296,10 @@ class DualPublicationTests(unittest.TestCase):
 
     def test_group_retention_is_disjoint_across_paginated_inventory(self):
         pages = [[row('MX4200-ImmortalWrt-old'), row('MX4300-ImmortalWrt-old'),
+                  row('MX4300-HomeWRK-ImmortalWrt-old'),
                   row('MX4200_ImmortalWrt_legacy'), row('Other-keep'),
+                  row('MX4300-HomeWRK-ImmortalWrt-draft', draft=True),
+                  row('MX4300-HomeWRK-ImmortalWrt-preview', prerelease=True),
                   row('MX4300-ImmortalWrt-draft', draft=True)],
                  [row('MX4200-ImmortalWrt-current'), row('MX4300-ImmortalWrt-current'),
                   row('MX4300-ImmortalWrt-preview', prerelease=True)]]
@@ -310,7 +313,7 @@ class DualPublicationTests(unittest.TestCase):
             self.assertEqual([tag for i,tag in deletes if inventories[0]<i<inventories[1]],
                              ['MX4200-ImmortalWrt-old','MX4200_ImmortalWrt_legacy'])
             self.assertEqual([tag for i,tag in deletes if i>inventories[1]],
-                             ['MX4300-ImmortalWrt-old'])
+                             ['MX4300-ImmortalWrt-old','MX4300-HomeWRK-ImmortalWrt-old'])
 
     def test_missing_current_inventory_protects_only_its_own_group(self):
         for missing in GROUPS:
