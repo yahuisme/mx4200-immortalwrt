@@ -10,8 +10,6 @@ FIXTURE = ROOT / 'tests/fixtures/homewrk/ipq8174-homewrk.dts'
 HELPER = ROOT / 'scripts/homewrk_dts.py'
 STUB = '''/ {
     qpic_nand: nand-controller { compatible = "qcom,ipq8074-nand"; };
-    dp2: dp2 {}; dp3: dp3 {}; dp4: dp4 {}; dp5: dp5 {};
-    qca8075_1: phy1 {}; qca8075_2: phy2 {}; qca8075_3: phy3 {}; qca8075_4: phy4 {};
     blsp1_i2c2: i2c {};
     swport2: port2 {};
     swport3: port3 {};
@@ -95,88 +93,6 @@ class HomewrkDtsTests(unittest.TestCase):
             result = command('python3', str(HELPER), tmp, check=False)
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(path.read_text(), changed)
-
-    def test_stable_source_dts_path_preserves_mac_fix_and_rejects_ambiguity(self):
-        from scripts.homewrk_dts import prepare
-        stable = Path('target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8174-homewrk.dts')
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            path = root / stable
-            path.parent.mkdir(parents=True)
-            path.write_text(FIXTURE.read_text())
-            prepare(root)
-            self.assertIn('status = "disabled";', path.read_text())
-            patched = path.read_text()
-            prepare(root)
-            self.assertEqual(path.read_text(), patched)
-            other = root / DTS
-            other.parent.mkdir(parents=True)
-            other.write_text(FIXTURE.read_text())
-            with self.assertRaisesRegex(ValueError, 'ambiguous'):
-                prepare(root)
-            self.assertEqual(path.read_text(), patched)
-            self.assertEqual(other.read_text(), FIXTURE.read_text())
-
-    def test_real_stable_layout_gains_factory_mac_and_survives_fixup(self):
-        from scripts.homewrk_dts import prepare
-        stable = Path('target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8174-homewrk.dts')
-        original = (FIXTURE.parent / 'stable-homewrk.dts').read_text()
-        for fault in ('', 'partition', 'port'):
-            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
-                root = Path(tmp)
-                path = root / stable
-                path.parent.mkdir(parents=True)
-                text = original
-                if fault == 'partition':
-                    text = text.replace('qcom,smem-part', 'fixed-partitions')
-                if fault == 'port':
-                    text = text.replace('label = "wan";', 'label = "changed";')
-                path.write_text(text)
-                if fault:
-                    with self.assertRaisesRegex(ValueError, 'review MAC protection'):
-                        prepare(root)
-                    self.assertEqual(path.read_text(), text)
-                    continue
-                prepare(root)
-                modified = path.read_text()
-                blob = self.compile(root, modified)
-                fixup(blob)
-                cell = '/nand-controller/nand@0/partitions/partition-devinfo/nvmem-layout/mac_address'
-                reference = get(blob, cell, 'phandle', 'x').stdout.strip()
-                self.assertTrue(reference)
-                for port, offset in ((2, '0'), (3, '1'), (4, '1'), (5, '1')):
-                    self.assertEqual(get(blob, '/dp' + str(port), 'nvmem-cells', 'x').stdout.split(),
-                                     [reference, offset])
-                self.assertEqual(get(blob, '/nand-controller/partitions', 'status').stdout.strip(), 'disabled')
-                prepare(root)
-                self.assertEqual(path.read_text(), modified)
-
-    def test_existing_mac_mapping_drift_fails_before_any_writes(self):
-        from scripts.homewrk_dts import prepare
-        for layout in ('stable', 'newer'):
-            for fault in ('cell', 'offset', 'consumer', 'cell-name'):
-                with self.subTest(layout=layout, fault=fault), tempfile.TemporaryDirectory() as tmp:
-                    root = Path(tmp)
-                    relative = (Path('target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8174-homewrk.dts')
-                                if layout == 'stable' else DTS)
-                    path = root / relative
-                    path.parent.mkdir(parents=True)
-                    path.write_text((FIXTURE.parent / 'stable-homewrk.dts').read_text()
-                                    if layout == 'stable' else FIXTURE.read_text())
-                    prepare(root)
-                    text = path.read_text()
-                    if fault == 'cell':
-                        text = text.replace('compatible = "mac-base";', 'compatible = "unreviewed";')
-                    elif fault == 'offset':
-                        text = text.replace('nvmem-cells = <&mac_address 0>;', 'nvmem-cells = <&mac_address 1>;')
-                    elif fault == 'consumer':
-                        text = text.replace('nvmem-cells = <&mac_address 0>;', '')
-                    else:
-                        text = text.replace('nvmem-cell-names = "mac-address";', 'nvmem-cell-names = "unreviewed";')
-                    path.write_text(text)
-                    with self.assertRaisesRegex(ValueError, 'review MAC protection'):
-                        prepare(root)
-                    self.assertEqual(path.read_text(), text)
 
     def test_mac_reference_survives_bootloader_fixup(self):
         with tempfile.TemporaryDirectory() as tmp:

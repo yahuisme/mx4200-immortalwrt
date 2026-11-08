@@ -103,15 +103,13 @@ class SettingsScriptTests(unittest.TestCase):
                     path = Path(d, relative)
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_text(text)
-            dts = DTS if Path(d, DTS).exists() else (
-                'target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8174-mx4200v2.dts')
-            dts_before = Path(d, dts).read_bytes()
+            dts_before = Path(d, DTS).read_bytes()
             platform_before = {p.relative_to(d): p.read_bytes()
                                for top in ('target', 'package/kernel')
                                for p in Path(d, top).rglob('*') if p.is_file()}
             platform_expected = dict(platform_before)
-            platform_expected[Path(dts.replace('v2.dts', 'v1.dts'))] = platform_before[Path(dts.replace('v2.dts', 'v1.dts'))]
-            platform_expected[Path(dts)] = dts_before
+            platform_expected[Path(DTS.replace('v2.dts', 'v1.dts'))] = platform_before[Path(DTS.replace('v2.dts', 'v1.dts'))]
+            platform_expected[Path(DTS)] = dts_before
             before = {p: Path(d, p).read_text() for p in (
                 "package/base-files/files/etc/openwrt_release",
                 "package/base-files/files/usr/lib/os-release",
@@ -187,23 +185,9 @@ class SettingsScriptTests(unittest.TestCase):
         epoch = subprocess.check_output(['./scripts/get_source_date_epoch.sh'],
                                         cwd=source, text=True).strip()
         self.assertRegex(revision, r'^r[0-9]+-[0-9a-f]{7,40}$')
-        # Stable rendering keeps the release-provided version/revision/date.
+        # Snapshot rendering uses the checked-out source identity, not a stable tag.
         self.assertRegex(epoch, r'^[0-9]+$')
-        candidates = (
-            source / 'target/linux/qualcommax/files/arch/arm64/boot/dts/qcom',
-            source / 'target/linux/qualcommax/dts',
-        )
-        for model, display in (('mx4200v1', 'Linksys MX4200v1'), ('mx4200v2', 'Linksys MX4200v2'),
-                               ('mx4300', 'Linksys MX4300'), ('homewrk', 'Linksys HomeWRK')):
-            dts_files = [directory / ('ipq8174-' + model + '.dts') for directory in candidates]
-            matches = [path for path in dts_files if path.is_file()]
-            self.assertEqual(len(matches), 1, model)
-            self.assertIn('model = "' + display + '";', matches[0].read_text())
-        version_text = (source / 'include/version.mk').read_text()
-        match = re.search(r'^VERSION_NUMBER:=\$\(if \$\(VERSION_NUMBER\),\$\(VERSION_NUMBER\),([0-9]+\.[0-9]+\.[0-9]+)\)$', version_text, re.M)
-        self.assertIsNotNone(match)
-        assert match is not None
-        version = match[1]
+        version = 'SNAPSHOT'
         # Execute the actual upstream VERSION_SED_SCRIPT, without any build targets.
         harness = '''empty:=
 space:=$(empty) $(empty)
@@ -238,7 +222,7 @@ render:
         self.assertIn('BUILD_ID="' + revision + '"', rendered['usr/lib/os-release'])
         self.assertIn('OPENWRT_BUILD_DATE="' + epoch + '"', rendered['usr/lib/os-release'])
         self.assertIn('VERSION="' + version + '"', rendered['usr/lib/os-release'])
-        self.assertIn('VERSION_ID="' + version + '"', rendered['usr/lib/os-release'])
+        self.assertIn('VERSION_ID="snapshot"', rendered['usr/lib/os-release'])
         self.assertIn(' ImmortalWrt ' + version + ', ' + revision, rendered['etc/banner'])
         self.assertNotIn('CONFIG_VERSIONOPT=y', (source / '.config').read_text())
 

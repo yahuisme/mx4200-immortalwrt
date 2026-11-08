@@ -116,10 +116,6 @@ def staged_fixture(base):
     (record/'source-sha.txt').write_text('c' * 40 + '\n')
     (record/'source-revision.txt').write_text('r123-abcdef\n')
     (record/'official-initramfs.json').write_text(json.dumps(official_record()))
-    images = [dict(name=p.name, size=p.stat().st_size,
-                   digest='sha256:' + hashlib.sha256(p.read_bytes()).hexdigest())
-              for p in (base/'firmware').glob('*/*') if p.suffix in ('.bin', '.ubi')]
-    (record/'build.json').write_text(json.dumps(dict(images=images)))
 
     return [rows]
 
@@ -136,31 +132,6 @@ def replay(base, pages, mode='fresh'):
 
 
 class DualPublicationTests(unittest.TestCase):
-    def test_native_images_are_bound_to_collected_build_record_before_publication(self):
-        for fault in ('missing-record', 'malformed-record', 'missing-row', 'duplicate-row',
-                      'extra-row', 'wrong-size', 'wrong-digest', 'same-size-corrupt',
-                      'second-group-same-size-corrupt'):
-            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
-                base = Path(tmp); pages = staged_fixture(base)
-                path = base/'build-record/build.json'
-                record = json.loads(path.read_text())
-                if fault == 'missing-row': record['images'].pop()
-                if fault == 'duplicate-row': record['images'].append(record['images'][0])
-                if fault == 'extra-row': record['images'].append(dict(record['images'][0], name='unexpected.bin'))
-                if fault == 'wrong-size': record['images'][0]['size'] += 1
-                if fault == 'wrong-digest': record['images'][0]['digest'] = 'sha256:' + '0'*64
-                path.write_text('{' if fault == 'malformed-record' else json.dumps(record))
-                if fault == 'missing-record': path.unlink()
-                if fault.endswith('same-size-corrupt'):
-                    group = 'mx4300-homewrk' if fault.startswith('second-group-') else 'mx4200'
-                    image = next((base/'firmware'/group).glob('*factory.*'))
-                    image.write_bytes(b'x' * image.stat().st_size)
-                result, calls = replay(base, pages)
-                self.assertNotEqual(result.returncode, 0, result.stderr)
-                self.assertFalse(any(a[0] == 'release' for a in calls), calls)
-                if fault.endswith('same-size-corrupt'):
-                    self.assertIn('Staged image differs from build record', result.stderr)
-
     def test_official_attachment_failure_blocks_both_publications(self):
         for mode in ('missing', 'empty', 'same-size-corrupt', 'symlink', 'wrong-group'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:

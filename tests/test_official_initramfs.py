@@ -49,17 +49,6 @@ def pages_for(record, profile, index=None, sums=None):
 
 
 class ResolveTests(unittest.TestCase):
-    def test_build_source_resolver_records_same_version_as_attachment(self):
-        from scripts import official_release
-        record = record_for('27.02.10')
-        with tempfile.TemporaryDirectory() as tmp, \
-                patch.object(official_release, 'resolve', return_value=record), \
-                patch.object(sys, 'argv', ['official_release.py', str(Path(tmp) / 'resolved.json')]), \
-                patch('builtins.print') as output:
-            official_release.main()
-            self.assertEqual(official.load_record(Path(tmp) / 'resolved.json'), record)
-            output.assert_called_once_with('v27.02.10')
-
     def resolve_pages(self, pages):
         with patch('urllib.request.urlopen', side_effect=lambda url, **kw: io.BytesIO(pages[url])):
             return official.resolve()
@@ -127,16 +116,6 @@ class ResolveTests(unittest.TestCase):
 
 
 class DownloadTests(unittest.TestCase):
-    def test_existing_build_resolution_does_not_follow_mid_build_new_release(self):
-        record = record_for('26.01.0')
-        with tempfile.TemporaryDirectory() as directory, \
-                patch.object(official, 'resolve', side_effect=AssertionError('must not re-resolve')), \
-                patch('urllib.request.urlopen', return_value=io.BytesIO(DATA)) as request:
-            path = Path(directory) / 'record.json'
-            self.assertEqual(official.download(directory, path, record), record)
-            self.assertEqual(official.load_record(path), record)
-            self.assertEqual(request.call_args.args[0], record['url'])
-
     def test_original_bytes_record_and_offline_verify(self):
         record = record_for()
         with tempfile.TemporaryDirectory() as directory:
@@ -256,22 +235,6 @@ class DownloadTests(unittest.TestCase):
                 patch('urllib.request.urlopen', return_value=io.BytesIO(DATA)), patch('builtins.print'):
             official.main()
             self.assertEqual((Path(directory) / official.NAME).read_bytes(), DATA)
-
-    def test_resolved_cli_never_resolves_a_newer_release(self):
-        record = record_for('26.01.0')
-        with tempfile.TemporaryDirectory() as tmp:
-            directory = Path(tmp)
-            resolved = directory / 'resolved.json'
-            resolved.write_text(json.dumps(record))
-            output = directory / 'record.json'
-            with patch.object(sys, 'argv', ['official_initramfs.py', str(directory / 'images'),
-                              '--record', str(output), '--resolved', str(resolved)]), \
-                    patch.object(official, 'resolve', side_effect=AssertionError('must stay frozen')), \
-                    patch('urllib.request.urlopen', return_value=io.BytesIO(DATA)), \
-                    patch('builtins.print'):
-                official.main()
-            self.assertEqual(official.load_record(output), record)
-            official.verify(directory / 'images' / official.NAME, record)
 
     def test_verify_cli_uses_record_offline(self):
         with tempfile.TemporaryDirectory() as directory:

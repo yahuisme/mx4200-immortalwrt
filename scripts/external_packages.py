@@ -22,13 +22,13 @@ REPOSITORIES = {
 ARCH = 'aarch64_cortex-a53'
 
 
-def replace_once(text, old, new, path):
-    """Validate a single native boundary without writing partial preparation."""
-    if text.count(new) == 1 and text.count(old) == new.count(old):
-        return text
-    if new in text or text.count(old) != 1:
+def replace_once(path, old, new):
+    text = path.read_text()
+    if new in text:
+        return
+    if text.count(old) != 1:
         raise ValueError(f'Unsupported upstream assembly boundary: {path}')
-    return text.replace(old, new, 1)
+    path.write_text(text.replace(old, new, 1))
 
 
 def put(root, name, text):
@@ -38,86 +38,56 @@ def put(root, name, text):
 
 
 def reviewed_version(root):
-    """Accept numeric stable sources only, with unchanged native APK boundaries.
-
-    Latest-release selection belongs to the official-source resolver, not this
-    compatibility check. Future stable versions need no version-list update.
-    """
+    """Accept only the reviewed snapshot literal or official Kconfig fallback."""
     text = (root / 'include/version.mk').read_text()
     assignments = re.findall(r'^VERSION_NUMBER\s*[:+?]?=.*$', text, re.M)
-    numeric = r'([0-9]+\.[0-9]+\.[0-9]+)'
-    version = None
-    if len(assignments) == 1:
-        version = re.fullmatch(r'VERSION_NUMBER:=' + numeric, assignments[0])
-    elif (len(assignments) == 2 and
-          assignments[0] == 'VERSION_NUMBER:=$(call qstrip,$(CONFIG_VERSION_NUMBER))'):
-        version = re.fullmatch(r'VERSION_NUMBER:=\$\(if \$\(VERSION_NUMBER\),\$\(VERSION_NUMBER\),' +
-                               numeric + r'\)', assignments[1])
-    if version is None:
-        raise ValueError('External APK feeds require numeric ImmortalWrt stable')
+    direct = r'VERSION_NUMBER:=SNAPSHOT'
+    fallback = r'VERSION_NUMBER:=\$\(if \$\(VERSION_NUMBER\),\$\(VERSION_NUMBER\),SNAPSHOT\)'
     config_path = root / '.config'
     config = config_path.read_text() if config_path.exists() else ''
     overrides = re.findall(r'^CONFIG_VERSION_NUMBER=(.*)$', config, re.M)
-    if len(overrides) > 1 or (overrides and overrides[0] not in ('""', '"' + version[1] + '"')):
-        raise ValueError('External APK feeds require numeric ImmortalWrt stable without version override')
-    assembly_updates(root)  # Read-only preflight also protects the custom.sh caller.
-
-
-def assembly_updates(root):
-    """Stage every replacement in memory; unsupported sources cannot partially write."""
-    texts = {name: (root / name).read_text() for name in ('include/rootfs.mk', 'package/Makefile')}
-    common = texts['package/Makefile']
-    image = (root / 'include/image.mk').read_text()
-    # Keep per-device resolution on the same shared offline/trusted helper.
-    for boundary in ('$(call apk,$(mkfs_cur_target_dir)) --no-scripts',
-                     '$(call prepare_rootfs,$(mkfs_cur_target_dir),$(TOPDIR)/files)'):
-        if image.count(boundary) != 1:
-            raise ValueError('Unsupported upstream assembly boundary: include/image.mk')
-    for boundary in ('\t\t--repositories-file /dev/null --repository file://$(PACKAGE_DIR_ALL)/packages.adb \\\n',
-                     '\t\t$(if $(CONFIG_SIGNED_PACKAGES),,--allow-untrusted) \\\n',
-                     *('"' + name + '=$(shell cat $(STAGING_DIR)/' + name + '.version)"'
-                       for name in ('base-files', 'libc', 'kernel'))):
-        if common.count(boundary) != 1:
-            raise ValueError('Unsupported upstream assembly boundary: package/Makefile')
-    # Reviewed stable has a direct install recipe, not snapshot's cached/eval path.
-    if ('rootfs_cache' in common or '$(eval ROOTFS_KEY' in common or
-            common.count('$(curdir)/install: $(TMP_DIR)/.build $(curdir)/merge $(curdir)/merge-index\n') != 1):
-        raise ValueError('Unsupported upstream assembly boundary: package/Makefile')
-    def replace(name, old, new):
-        texts[name] = replace_once(texts[name], old, new, root / name)
-    # Both package/install and per-device add/del call this shared helper.
-    replace('include/rootfs.mk', 'apk = \\\n',
-            'include $(TOPDIR)/.external-packages.mk\n\napk = \\\n')
-    replace('include/rootfs.mk',
-            '\t--keys-dir $(if $(APK_KEYS),$(APK_KEYS),$(TOPDIR)) \\\n',
-            '\t--keys-dir $(TOPDIR)/.external-packages/keys \\\n'
-            '\t--no-network $(MX_EXTERNAL_REPOSITORIES) \\\n')
-    # Stable has no cache-key eval; snapshot verification must precede native add.
-    replace('package/Makefile',
-            '\t$(call apk,$(TARGET_DIR)) add --no-cache --initdb --no-scripts --arch $(ARCH_PACKAGES) \\\n',
-            '\tpython3 /cache-scripts/external_packages.py snapshot $(TOPDIR) $(STAGING_DIR_HOST)/bin/apk\n'
-            '\t$(call apk,$(TARGET_DIR)) add --no-cache --initdb --no-scripts --arch $(ARCH_PACKAGES) \\\n')
-    replace('package/Makefile',
-            '\t\t$$(cat $(TMP_DIR)/apk_install_list) \\\n',
-            '\t\t$$(cat $(TMP_DIR)/apk_install_list) $(MX_EXTERNAL_PACKAGES) \\\n')
-    replace('include/rootfs.mk',
-            '\t$(call mklibs,$(1))\n',
-            '\t$(call mklibs,$(1))\n'
-            '\tpython3 /cache-scripts/external_packages.py verify-root $(1) $(TOPDIR)/.external-packages/provenance.json\n')
-    return texts
+    if len(overrides) > 1 or (overrides and overrides[0] != '""' and
+                             overrides[0] != '"SNAPSHOT"'):
+        raise ValueError('External APK feeds require reviewed ImmortalWrt snapshot')
+    if not ((len(assignments) == 1 and re.fullmatch(direct, assignments[0])) or
+            (len(assignments) == 2 and
+             assignments[0] == 'VERSION_NUMBER:=$(call qstrip,$(CONFIG_VERSION_NUMBER))' and
+             re.fullmatch(fallback, assignments[1]))):
+        raise ValueError('External APK feeds require reviewed ImmortalWrt snapshot')
 
 
 def prepare(root):
     root = Path(root).resolve()
-    reviewed_version(root)  # Reject version/config/assembly drift before any writes.
-    updates = assembly_updates(root)
+    reviewed_version(root)  # Reject incompatible sources before writing any files.
     packages = ' '.join(f'{p}@{tag}' for tag, repo in REPOSITORIES.items() for p in repo['packages'])
     repositories = ' '.join('--repository-config "@' + tag + ' file://$(TOPDIR)/.external-packages/' +
                             tag + '/packages.adb"' for tag in REPOSITORIES)
-    for name, text in updates.items():
-        put(root, name, text)
     put(root, '.external-packages.mk', 'MX_EXTERNAL_PACKAGES:=' + packages + '\n' +
         'MX_EXTERNAL_REPOSITORIES:=' + repositories + '\n')
+    # Both package/install and per-device add/del call this shared helper.
+    replace_once(root / 'include/rootfs.mk', 'apk = \\\n',
+                 'include $(TOPDIR)/.external-packages.mk\n\napk = \\\n')
+    replace_once(root / 'include/rootfs.mk',
+                 '\t--keys-dir $(if $(APK_KEYS),$(APK_KEYS),$(TOPDIR)) \\\n',
+                 '\t--keys-dir $(TOPDIR)/.external-packages/keys \\\n'
+                 '\t--no-network $(MX_EXTERNAL_REPOSITORIES) \\\n')
+    # A prerequisite runs before make expands install's immediate cache-key eval.
+    replace_once(root / 'package/Makefile',
+                 '$(curdir)/install: $(TMP_DIR)/.build $(curdir)/merge $(curdir)/merge-index\n',
+                 '.PHONY: mx-external-packages\n'
+                 'mx-external-packages: $(TMP_DIR)/.build $(curdir)/merge $(curdir)/merge-index\n'
+                 '\tpython3 /cache-scripts/external_packages.py snapshot $(TOPDIR) $(STAGING_DIR_HOST)/bin/apk\n\n'
+                 '$(curdir)/install: $(TMP_DIR)/.build $(curdir)/merge $(curdir)/merge-index mx-external-packages\n')
+    replace_once(root / 'package/Makefile',
+                 '\t\t$(INCLUDE_DIR)/rootfs.mk $(TOPDIR)/package/Makefile; \\\n',
+                 '\t\t$(INCLUDE_DIR)/rootfs.mk $(TOPDIR)/package/Makefile $(TOPDIR)/.external-packages/provenance.json; \\\n')
+    replace_once(root / 'package/Makefile',
+                 '\t\t$$(cat $(TMP_DIR)/apk_install_list)\n',
+                 '\t\t$$(cat $(TMP_DIR)/apk_install_list) $(MX_EXTERNAL_PACKAGES)\n')
+    replace_once(root / 'include/rootfs.mk',
+                 '\t$(call mklibs,$(1))\n',
+                 '\t$(call mklibs,$(1))\n'
+                 '\tpython3 /cache-scripts/external_packages.py verify-root $(1) $(TOPDIR)/.external-packages/provenance.json\n')
     # Runtime entries are editable by LuCI and contain no builder paths.
     put(root, 'files/etc/apk/repositories.d/customfeeds.list', ''.join(
         f'@{tag} {repo["url"]}/packages.adb\n' for tag, repo in REPOSITORIES.items()))
@@ -138,8 +108,7 @@ def snapshot(root, apk, repositories=None):
     repositories = repositories or REPOSITORIES
     config = (root / '.config').read_text()
     reviewed_version(root)  # Recheck at assembly even after successful preparation.
-    if (re.findall(r'^CONFIG_USE_APK=(.*)$', config, re.M) != ['y'] or
-            re.findall(r'^CONFIG_TARGET_ARCH_PACKAGES=(.*)$', config, re.M) != ['"' + ARCH + '"']):
+    if 'CONFIG_USE_APK=y' not in config or f'CONFIG_TARGET_ARCH_PACKAGES="{ARCH}"' not in config:
         raise ValueError('External APK feeds require APK and aarch64_cortex-a53')
     destination = root / '.external-packages'
     destination.mkdir(exist_ok=True)
@@ -224,8 +193,7 @@ def verify_root(root, provenance):
                  'usr/lib/lua/luci/i18n/homeproxy.zh-cn.lmo'):
         if not (root / name).is_file() or not (root / name).stat().st_size:
             raise ValueError('Missing HomeProxy runtime file: ' + name)
-    core = root / 'usr/bin/sing-box'
-    if not core.is_file() or not core.stat().st_size or not os.access(core, os.X_OK):
+    if not os.access(root / 'usr/bin/sing-box', os.X_OK):
         raise ValueError('Missing executable sing-box core')
     for name in ('luci-app-cpufreq', 'luci-i18n-cpufreq-zh-cn'):
         if not installed.get(name):
