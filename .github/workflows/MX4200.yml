@@ -232,7 +232,6 @@ jobs:
         python3 scripts/release_images.py stage openwrt_bin/targets firmware
         python3 scripts/official_initramfs.py firmware/mx4300-homewrk --record build-record/official-initramfs.json
         OFFICIAL_VERSION=$(jq -er .version build-record/official-initramfs.json)
-        OFFICIAL_URL=$(jq -er .url build-record/official-initramfs.json)
         WRT_DATE="$(TZ=Asia/Hong_Kong date +'%y.%m.%d-%H.%M.%S')"
         WRT_REV=$(jq -er '.version_code | capture("^r(?<revision>[0-9]+)-[0-9a-f]+$").revision' openwrt_bin/targets/qualcommax/ipq807x/profiles.json)
         [[ "$WRT_REV" =~ ^[1-9][0-9]*$ ]]
@@ -253,7 +252,7 @@ jobs:
             mx4300-homewrk)
               DEVICE=MX4300-HomeWRK
               MODELS='Linksys MX4300 / HomeWRK'
-              INSTALL="MX4300 使用 \`factory.bin\` 从原厂 Web 刷入；HomeWRK 使用附带的[官方 ImmortalWrt $OFFICIAL_VERSION 原版临时镜像]($OFFICIAL_URL) \`initramfs-uImage.itb\` 从 USB 启动，打开 http://192.168.1.1 再通过 LuCI 刷入 \`sysupgrade.bin\`，无需 \`factory.ubi\`。临时系统直接下载最新正式 Release，保持官方原版字节和默认配置，已校验 SHA-256。"
+              INSTALL="MX4300：原厂 Web 刷入 \`factory.bin\`；HomeWRK：USB 启动附带的官方 $OFFICIAL_VERSION 临时镜像，再通过 LuCI 刷入 \`sysupgrade.bin\`。"
               ;;
           esac
           VERSION="${DEVICE}-ImmortalWrt-r${WRT_REV}-${WRT_DATE/-/_}"
