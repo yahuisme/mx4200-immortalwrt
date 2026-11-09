@@ -75,7 +75,9 @@ class OfficialMigrationTests(unittest.TestCase):
         self.assertIn('printf \'%s\\n\' "$VERSION" > "firmware/$GROUP/title.txt"', text)
         self.assertEqual(workflow['jobs']['build']['runs-on'], 'ubuntu-24.04-arm')
         triggers = workflow.get('on', workflow.get(True))
-        self.assertEqual(triggers['schedule'], [{'cron': '0 4 * * *'}])
+        self.assertEqual(triggers['schedule'], [
+            {'cron': '0 0 1-31/3 * *', 'timezone': 'Asia/Hong_Kong'},
+        ])
         self.assertIn('workflow_dispatch', triggers)
         self.assertNotIn('集成 NSS', (ROOT / '.github/workflows/MX4200.yml').read_text())
 
