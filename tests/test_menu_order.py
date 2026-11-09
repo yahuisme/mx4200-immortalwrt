@@ -3,19 +3,32 @@
 The digest-locked fixture contains complete package-source menu files at exact
 Git revisions, not firmware overlays. See installed_rootfs for opt-in single
 or four-device extracted root checks, including all actual menu siblings.
+Installed checks also require MX_MENU_RECORD=<matching build-record/build.json>;
+the full recorded LuCI SHA selects a reviewed baseline, cross-checked against
+the installed luci-base version. No expected bytes come from installed menus.
 """
 import copy
 import hashlib
 import json
+import os
+import re
+import tempfile
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 from installed_rootfs import roots
 
 ROOT = Path(__file__).resolve().parents[1]
 MENUS = ROOT / 'user/default/files/usr/share/luci/menu.d'
-FIXTURE = ROOT / 'tests/fixtures/services-menu-contract.json'
-FIXTURE_SHA256 = '4813c2475501616f18978bf257263248277dbed0d569c0410560006ee8bbc1b1'
+STABLE_LUCI = 'd6167ea0645cbd1327708d85f94824f42d0eb872'
+SNAPSHOT_LUCI = '319f7c96e3530246cf91cfdd9bacb3fa44dc3a4e'
+BASELINES = {
+    STABLE_LUCI: ('services-menu-contract.json',
+                  '1265f37428e8d8c100d57322f5b8199d67f7e2f1855f6275183d11e19f462e40'),
+    SNAPSHOT_LUCI: ('services-menu-snapshot-contract.json',
+                    '2a59c315906ce42ab9c8ac9563e20dd514999e99107cc6d372eac60362d6599d'),
+}
 PARENT = 'admin/services/homeproxy'
 TERMINAL = 'admin/services/ttyd'
 PROXY_MENU = 'luci-app-homeproxy.json'
@@ -26,22 +39,51 @@ def menu_files(directory):
     return {p.name: json.loads(p.read_text()) for p in sorted(directory.glob('*.json'))}
 
 
+def source_menus(revision):
+    assert revision in BASELINES, f'Unreviewed LuCI revision: {revision!r}; refresh from exact source'
+    filename, digest = BASELINES[revision]
+    fixture = ROOT / 'tests/fixtures' / filename
+    assert hashlib.sha256(fixture.read_bytes()).hexdigest() == digest, (
+        'Refresh from exact package-source revisions, never the overlay or installed menus')
+    data = json.loads(fixture.read_text())
+    assert data['luci_revision'] == revision
+    rows = dict(data['menus'])
+    rows['luci-app-aurora.json'] = json.loads(
+        (ROOT / 'tests/fixtures/aurora-menu-contract.json').read_text())
+    source = {}
+    for name, row in rows.items():
+        assert re.fullmatch(r'[0-9a-f]{40}', row['revision'])
+        if row['repository'] == 'https://github.com/immortalwrt/luci':
+            assert row['revision'] == revision, f'Mixed LuCI source: {name}'
+        assert hashlib.sha256(row['text'].encode()).hexdigest() == row['sha256']
+        assert row['path'].endswith('/usr/share/luci/menu.d/' + name)
+        source[name] = json.loads(row['text'])
+    return source
+
+
+def installed_source(root, record=None):
+    if record is None:
+        path = os.environ.get('MX_MENU_RECORD')
+        assert path, 'set MX_MENU_RECORD to the matching build-record/build.json'
+        record = json.loads(Path(path).read_text())
+    luci = [row for row in record.get('feeds', []) if row.get('name') == 'feed/luci']
+    assert len(luci) == 1, 'build record must identify exactly one feed/luci'
+    assert luci[0].get('url') in ('https://github.com/immortalwrt/luci',
+                                  'https://github.com/immortalwrt/luci.git'), 'Nonofficial LuCI source'
+    revision = luci[0].get('sha')
+    source = source_menus(revision)
+    # Package identity is only a cross-check, never a source of expected menu bytes.
+    packages = (root / 'lib/apk/db/installed').read_text().split('\n\n')
+    versions = [line[2:] for block in packages if 'P:luci-base' in block.splitlines()
+                for line in block.splitlines() if line.startswith('V:')]
+    assert len(versions) == 1 and re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+~' + revision[:7], versions[0]), (
+        'installed luci-base revision does not match recorded LuCI revision')
+    return source
+
+
 class MenuOrderTests(unittest.TestCase):
     def setUp(self):
-        self.assertEqual(hashlib.sha256(FIXTURE.read_bytes()).hexdigest(), FIXTURE_SHA256,
-                         'Refresh from exact package-source revisions, never the overlay')
-        self.fixture = json.loads(FIXTURE.read_text())
-        self.source = {}
-        for name, row in self.fixture['menus'].items():
-            self.assertRegex(row['revision'], r'^[0-9a-f]{40}$')
-            self.assertEqual(hashlib.sha256(row['text'].encode()).hexdigest(), row['sha256'])
-            self.assertTrue(row['path'].endswith('/usr/share/luci/menu.d/' + name))
-            self.source[name] = json.loads(row['text'])
-        for app in ('aurora', 'cpufreq'):
-            row = json.loads((ROOT / f'tests/fixtures/{app}-menu-contract.json').read_text())
-            self.assertRegex(row['revision'], r'^[0-9a-f]{40}$')
-            self.assertEqual(hashlib.sha256(row['text'].encode()).hexdigest(), row['sha256'])
-            self.source[f'luci-app-{app}.json'] = json.loads(row['text'])
+        self.source = source_menus(STABLE_LUCI)
         self.overlay = menu_files(MENUS)
         # Advanced Reboot's order is installed by its own package, not shared files/.
         self.overlay.update(menu_files(ROOT / 'user/default/menus'))
@@ -125,6 +167,85 @@ class MenuOrderTests(unittest.TestCase):
         if device == 'homewrk':
             self.assertFalse(any('advanced-reboot' in path for path in merged))
         self.assertEqual(system[i:], tail)
+
+    def test_stable_baseline_has_only_official_stable_routes(self):
+        # Stable LuCI d6167ea has none of the three later snapshot routes.
+        self.assertNotIn('admin/network/switch-vlan', self.source['luci-mod-network.json'])
+        self.assertNotIn('admin/system/admin/pwpolicy', self.source['luci-mod-system.json'])
+        self.assertNotIn('admin/system/plugins', self.source['luci-mod-system.json'])
+
+    def test_exact_luci_revision_selects_complete_baseline(self):
+        self.assertTrue(callable(globals().get('source_menus')),
+                        'source-bound menu baseline selector is missing')
+        stable = source_menus('d6167ea0645cbd1327708d85f94824f42d0eb872')
+        snapshot = source_menus('319f7c96e3530246cf91cfdd9bacb3fa44dc3a4e')
+        for name, route in (('luci-mod-network.json', 'admin/network/switch-vlan'),
+                            ('luci-mod-system.json', 'admin/system/admin/pwpolicy'),
+                            ('luci-mod-system.json', 'admin/system/plugins')):
+            with self.subTest(route=route):
+                self.assertNotIn(route, stable[name])
+                self.assertIn(route, snapshot[name])
+        for revision in ('stable', 'snapshot', 'd6167ea', 'D6167EA0645CBD1327708D85F94824F42D0EB872',
+                         '0' * 40, None):
+            with self.subTest(revision=revision), self.assertRaises(AssertionError):
+                source_menus(revision)
+
+    def test_installed_baseline_requires_matching_recorded_luci_source(self):
+        self.assertTrue(callable(globals().get('installed_source')),
+                        'installed source identity binding is missing')
+        for revision in (STABLE_LUCI, SNAPSHOT_LUCI):
+            record = {'feeds': [{'name': 'feed/luci',
+                                 'url': 'https://github.com/immortalwrt/luci.git',
+                                 'sha': revision}]}
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                database = root / 'lib/apk/db/installed'
+                database.parent.mkdir(parents=True)
+                database.write_text('P:luci-base\nV:26.309.25350~' + revision[:7] + '\n\n')
+                self.assertEqual(installed_source(root, record), source_menus(revision))
+                record_path = root / 'build.json'
+                record_path.write_text(json.dumps(record))
+                with patch.dict(os.environ, {'MX_MENU_RECORD': str(record_path)}):
+                    self.assertEqual(installed_source(root), source_menus(revision))
+                with patch.dict(os.environ, {'MX_MENU_RECORD': ''}):
+                    with self.assertRaisesRegex(AssertionError, 'MX_MENU_RECORD'):
+                        installed_source(root)
+                for invalid in ({'feeds': []}, {'feeds': record['feeds'] * 2},
+                                {'feeds': [dict(record['feeds'][0], sha='0' * 40)]},
+                                {'feeds': [dict(record['feeds'][0], sha=revision[:7])]},
+                                {'feeds': [dict(record['feeds'][0], url='https://example.org/luci.git')]}):
+                    with self.subTest(revision=revision, record=invalid), self.assertRaises(AssertionError):
+                        installed_source(root, invalid)
+                database.write_text('P:luci-base\nV:26.309.25350~0000000\n\n')
+                with self.assertRaisesRegex(AssertionError, 'luci-base.*revision'):
+                    installed_source(root, record)
+                database.write_text('P:other\nV:1\n\n')
+                with self.assertRaisesRegex(AssertionError, 'luci-base'):
+                    installed_source(root, record)
+
+    def test_stable_and_snapshot_contracts_keep_all_source_checks(self):
+        stable = source_menus(STABLE_LUCI)
+        snapshot = source_menus(SNAPSHOT_LUCI)
+        for revision, baseline in ((STABLE_LUCI, stable), (SNAPSHOT_LUCI, snapshot)):
+            with self.subTest(revision=revision):
+                self.source = baseline
+                self.assert_contract(self.overlay, baseline)
+                self.assertEqual(baseline[PROXY_MENU], stable[PROXY_MENU])
+                # Complete-object equality retains order/action/ACL/UCI metadata
+                # in both lanes, not just presence/absence of the three routes.
+                for field, value in (('order', -1), ('action', {'type': 'firstchild'}),
+                                     ('depends', {'acl': ['wrong']}),
+                                     ('depends', {'uci': {'wireless': False}})):
+                    changed = copy.deepcopy(baseline)
+                    changed['luci-mod-network.json']['admin/network/wireless'][field] = value
+                    with self.subTest(field=field, value=value), self.assertRaises(AssertionError):
+                        self.assert_contract(self.overlay, changed)
+                other = snapshot if revision == STABLE_LUCI else stable
+                for name in ('luci-mod-network.json', 'luci-mod-system.json'):
+                    changed = copy.deepcopy(baseline)
+                    changed[name] = other[name]
+                    with self.subTest(cross_lane=name), self.assertRaises(AssertionError):
+                        self.assert_contract(self.overlay, changed)
 
     def test_complete_source_menus_and_actual_sibling_adjacency(self):
         expected = {'luci-app-homeproxy.json', 'luci-app-ttyd.json', 'luci-app-wol.json',
@@ -232,6 +353,7 @@ class MenuOrderTests(unittest.TestCase):
             self.skipTest('set MX_ROOTFS_BASE or MX_MENU_ROOT + MX_MENU_DEVICE')
         for device, root in selected:
             with self.subTest(device=device):
+                self.source = installed_source(root)
                 directory = root / 'usr/share/luci/menu.d'
                 self.assertTrue(directory.is_dir())
                 self.assert_contract(self.overlay, menu_files(directory), device, installed_root=True)
@@ -249,7 +371,11 @@ class MenuOrderTests(unittest.TestCase):
         if not selected:
             self.skipTest('set MX_ROOTFS_BASE or MX_MENU_ROOT + MX_MENU_DEVICE')
         for device, root in selected:
+            self.source = installed_source(root)
             installed = menu_files(root / 'usr/share/luci/menu.d')
+            # Prove the positive before negatives, so a wrong baseline cannot
+            # make every mutation trivially "pass" by rejecting the original.
+            self.assert_contract(self.overlay, installed, device, installed_root=True)
             mutations = []
             changed = copy.deepcopy(installed)
             # A valid upstream order must still fail for a final root; recipe

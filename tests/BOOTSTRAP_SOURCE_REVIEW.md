@@ -178,3 +178,47 @@ and MX4200 parsing use retained final configs. All checks are source/make-parse,
 key and native archive fixture evidence. No compiler, configuration generator,
 real bootstrap stamp reuse, firmware build, hardware or speed acceptance is
 claimed. Rolling unknown inventories continue to bind to TC_KEY until reviewed.
+
+## Prepared-source test usage (current and historical inventories)
+
+The historical review above is not an authorization for a new post-custom
+inventory. The opt-in entry points now take an explicit expected contract:
+
+- `BOOTSTRAP_SOURCE` selects the private source for the real CLI mutation and
+  source/config/environment boundary matrix.
+- `MX_PREPARED_SOURCE` selects the private source for the additional MX
+  post-custom inventory/key control.
+- `BOOTSTRAP_EXPECT_CONTRACT` applies to both paths. Its default is
+  `reviewed-independent`: inventory membership in production `REVIEWED` and
+  identical keys across two TC keys are both mandatory. For a current stable or
+  other unreviewed prepared inventory, explicitly use `full-toolchain-bound`:
+  the inventory must **not** be reviewed, both key generations must succeed,
+  and changing only TC_KEY must change the bootstrap key. Unknown expectation
+  values fail; the suite never infers or silently downgrades the expectation.
+
+For the current unreviewed stable post-custom source:
+
+```sh
+env -u LD_LIBRARY_PATH PYTHONPATH=tests \
+  BOOTSTRAP_SOURCE=/absolute/private/stable-post-custom \
+  MX_PREPARED_SOURCE=/absolute/private/stable-post-custom \
+  BOOTSTRAP_EXPECT_CONTRACT=full-toolchain-bound \
+  python3 -m unittest test_bootstrap_cache -v
+```
+
+For an exact historically reviewed snapshot post-custom source, use the same
+command with `BOOTSTRAP_EXPECT_CONTRACT=reviewed-independent`. Do not add a
+production lock or change the expected contract just to accept source drift.
+If the two source variables name different trees, both must satisfy the same
+explicit expectation, or run them separately.
+
+Present framework inputs retain content/mode/present-to-missing mutations;
+absent optional fixed inputs such as stable's `include/site/cache` receive a
+missing-to-present mutation followed by restoration to absence. The generated
+external make fragment also supports an absent baseline; its linked/directory
+negative controls remain mandatory. Required producer files are not made
+optional. Every mutation must change the key and stay full-TC-bound; builder,
+config, environment, external-path and Rust/all-host controls still execute in
+both contracts. Tests do not run make, conf/defconfig or a compiler. A retained
+source-only config fixture proves only these key boundaries, not a newly
+resolved final configuration, real bootstrap reuse, firmware or hardware.

@@ -15,6 +15,24 @@ import shutil
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/bootstrap_cache.py'
 
 
+def assert_prepared_contract(test, module, root):
+    # Explicit expectation, never infer acceptance from the implementation.
+    expected = os.environ.get('BOOTSTRAP_EXPECT_CONTRACT', 'reviewed-independent')
+    test.assertIn(expected, ('reviewed-independent', 'full-toolchain-bound'))
+    digest = module.inventory(root)
+    a = module.key(root, 'builder', 'tc-one')
+    b = module.key(root, 'builder', 'tc-two')
+    test.assertRegex(a, r'^[0-9a-f]{64}$')
+    test.assertRegex(b, r'^[0-9a-f]{64}$')
+    if expected == 'reviewed-independent':
+        test.assertIn(digest, module.REVIEWED)
+        test.assertEqual(a, b)
+    else:
+        test.assertNotIn(digest, module.REVIEWED)
+        test.assertNotEqual(a, b)
+    return expected
+
+
 class BootstrapTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -45,12 +63,29 @@ class BootstrapTests(unittest.TestCase):
 
     @unittest.skipUnless(os.environ.get('MX_PREPARED_SOURCE'),
                          'set MX_PREPARED_SOURCE to exact post-custom MX source')
-    def test_actual_mx_post_custom_contract_reuses_across_toolchain_keys(self):
+    def test_actual_mx_post_custom_matches_expected_contract(self):
         m = self.module()
         root = Path(os.environ['MX_PREPARED_SOURCE'])
-        self.assertIn(m.inventory(root), m.REVIEWED)
-        a = m.key(root, 'artifact-builder', 'tc-one')
-        self.assertEqual(a, m.key(root, 'artifact-builder', 'tc-two'))
+        assert_prepared_contract(self, m, root)
+
+    def test_prepared_expectation_never_infers_or_relaxes_review(self):
+        m = self.module()
+        digest = m.inventory(self.root)
+        with patch.dict(os.environ, {'BOOTSTRAP_EXPECT_CONTRACT': 'full-toolchain-bound'}):
+            assert_prepared_contract(self, m, self.root)
+        # Default remains the strict historical reviewed-independent contract.
+        with patch.dict(os.environ):
+            os.environ.pop('BOOTSTRAP_EXPECT_CONTRACT', None)
+            with self.assertRaises(AssertionError):
+                assert_prepared_contract(self, m, self.root)
+            setattr(m, 'REVIEWED', {digest})
+            assert_prepared_contract(self, m, self.root)
+        with patch.dict(os.environ, {'BOOTSTRAP_EXPECT_CONTRACT': 'full-toolchain-bound'}):
+            with self.assertRaises(AssertionError):
+                assert_prepared_contract(self, m, self.root)
+        with patch.dict(os.environ, {'BOOTSTRAP_EXPECT_CONTRACT': 'auto'}):
+            with self.assertRaises(AssertionError):
+                assert_prepared_contract(self, m, self.root)
 
     def test_reviewed_inventory_has_independent_key(self):
         m = self.module()
@@ -561,15 +596,13 @@ class BootstrapTests(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get('BOOTSTRAP_SOURCE'), 'requires customized source')
 class PreparedBootstrapTests(unittest.TestCase):
-    def test_current_customized_inventory_supports_independent_reuse(self):
+    def test_current_customized_inventory_matches_expected_contract(self):
         spec = importlib.util.spec_from_file_location('prepared_bootstrap', SCRIPT)
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         root = Path(os.environ['BOOTSTRAP_SOURCE'])
-        self.assertIn(module.inventory(root), module.REVIEWED)
-        self.assertEqual(module.key(root, 'builder', 'tc-one'),
-                         module.key(root, 'builder', 'tc-two'))
+        assert_prepared_contract(self, module, root)
 
     def test_real_cli_lock_mutations_and_safe_fallbacks(self):
         spec = importlib.util.spec_from_file_location('prepared_bootstrap_cli', SCRIPT)
@@ -587,7 +620,7 @@ class PreparedBootstrapTests(unittest.TestCase):
                 if src.is_file():
                     dst.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(src, dst)
-            self.assertIn(module.inventory(root), module.REVIEWED)
+            expected = assert_prepared_contract(self, module, root)
 
             def cli(tc='tc-one', builder='builder', updates=None, fails=None):
                 env = dict(os.environ)
@@ -605,8 +638,11 @@ class PreparedBootstrapTests(unittest.TestCase):
                 return result
 
             baseline = cli().stdout
-            self.assertEqual(baseline, cli('tc-two').stdout)
-            self.assertIn('reviewed-independent', cli().stderr)
+            if expected == 'reviewed-independent':
+                self.assertEqual(baseline, cli('tc-two').stdout)
+            else:
+                self.assertNotEqual(baseline, cli('tc-two').stdout)
+            self.assertIn(expected, cli().stderr)
             self.assertNotEqual(baseline, cli(builder='different').stdout)
             self.assertNotEqual(baseline, cli(updates={'LANG': 'changed'}).stdout)
             cli(updates={'CONFIGURE_CACHE_DIR': '/unlocked'},
@@ -631,32 +667,43 @@ class PreparedBootstrapTests(unittest.TestCase):
                          'include/site/cache', 'include/rootfs.mk', 'package/Makefile',
                          '.external-packages.mk'):
                 p = root / name
-                original, mode = p.read_bytes(), p.stat().st_mode & 0o777
-                for mutation in ('content', 'mode', 'missing'):
+                if name not in (*module.FIXED_INPUTS, '.external-packages.mk'):
+                    self.assertTrue(p.is_file(), f'missing required producer input: {name}')
+                original = p.read_bytes() if p.exists() else None
+                mode = p.stat().st_mode & 0o777 if original is not None else 0o644
+                # Fixed inputs also lock absence (e.g. stable has no site/cache).
+                mutations = ('content', 'mode', 'missing') if original is not None else ('present',)
+                for mutation in mutations:
                     with self.subTest(input=name, mutation=mutation):
                         try:
-                            if mutation == 'content':
-                                p.write_bytes(original + b'\n# unknown source\n')
+                            if mutation in ('content', 'present'):
+                                p.parent.mkdir(parents=True, exist_ok=True)
+                                p.write_bytes((original or b'') + b'\n# unknown source\n')
                             elif mutation == 'mode':
                                 p.chmod(mode ^ 0o100)
                             else:
                                 p.unlink()
                             bound()
                         finally:
-                            p.write_bytes(original)
-                            p.chmod(mode)
+                            if original is None:
+                                p.unlink()
+                            else:
+                                p.write_bytes(original)
+                                p.chmod(mode)
                 self.assertEqual(baseline, cli().stdout)
             p = root / '.external-packages.mk'
-            original = p.read_bytes()
-            p.unlink()
+            original = p.read_bytes() if p.exists() else None
+            mode = p.stat().st_mode & 0o777 if original is not None else 0o644
+            p.unlink(missing_ok=True)
             p.symlink_to(root / 'tools/Makefile')
             cli(fails='nonregular external make input')
             p.unlink()
             p.mkdir()
             cli(fails='nonregular external make input')
             p.rmdir()
-            p.write_bytes(original)
-            p.chmod(0o644)
+            if original is not None:
+                p.write_bytes(original)
+                p.chmod(mode)
             cfg = root / '.config'
             original, mode = cfg.read_bytes(), cfg.stat().st_mode & 0o777
 
@@ -729,16 +776,17 @@ class PreparedBootstrapTests(unittest.TestCase):
                 if src.is_file():
                     dst.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(src, dst)
-            self.assertIn(module.inventory(root), module.REVIEWED)
+            assert_prepared_contract(self, module, root)
             baseline = module.key(root, 'builder', 'tc-one')
-            self.assertEqual(baseline, module.key(root, 'builder', 'tc-two'))
+            baseline_other_tc = module.key(root, 'builder', 'tc-two')
             # These later world/runtime inputs do not produce the early snapshot.
             for name in ('target/linux/bootstrap-test.patch', 'files/etc/bootstrap-test',
                          '.external-packages/eamonxg/packages.adb'):
                 p = root / name
                 p.parent.mkdir(parents=True, exist_ok=True)
                 p.write_text('# not an early host producer\n')
-                self.assertEqual(baseline, module.key(root, 'builder', 'tc-two'))
+                self.assertEqual(baseline, module.key(root, 'builder', 'tc-one'))
+                self.assertEqual(baseline_other_tc, module.key(root, 'builder', 'tc-two'))
             for name in ('tools/ccache/Makefile', 'scripts/download.pl', 'include/rootfs.mk',
                          '.external-packages.mk'):
                 p = root / name
