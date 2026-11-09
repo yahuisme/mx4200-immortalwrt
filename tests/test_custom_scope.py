@@ -26,10 +26,10 @@ class CustomScopeTests(unittest.TestCase):
         # Execute the complete production custom/packages scripts, with only the
         # container mount path relocated. Local real Git objects avoid network.
         cases = (
-            ('unsupported', 'VERSION_NUMBER:=26.01.0\n', ''),
+            ('unsupported', 'VERSION_NUMBER:=SNAPSHOT\n', ''),
             ('malformed', 'VERSION_NUMBER:=SNAPSHOTgarbage\n', ''),
-            ('override', 'VERSION_NUMBER:=SNAPSHOT\n', 'CONFIG_VERSION_NUMBER="26.01.0"\n'),
-            ('assembly', 'VERSION_NUMBER:=SNAPSHOT\n', ''),
+            ('override', 'VERSION_NUMBER:=25.12.2\n', 'CONFIG_VERSION_NUMBER="26.01.0"\n'),
+            ('assembly', 'VERSION_NUMBER:=25.12.2\n', ''),
         )
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -61,8 +61,8 @@ class CustomScopeTests(unittest.TestCase):
                         (root / name).mkdir(parents=True, exist_ok=True)
                     if label == 'assembly':
                         import shutil
-                        source = ROOT / 'tests/fixtures/snapshot-source'
-                        for name in ('package/Makefile', 'include/rootfs.mk'):
+                        source = ROOT / 'tests/fixtures/stable-apk-source'
+                        for name in ('package/Makefile', 'include/rootfs.mk', 'include/image.mk'):
                             shutil.copyfile(source / name, root / name)
                         dts = root / 'target/linux/qualcommax/dts/ipq8174-homewrk.dts'
                         dts.parent.mkdir(parents=True)
@@ -88,7 +88,7 @@ class CustomScopeTests(unittest.TestCase):
                                             TMPDIR=tmp))
                     self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
                     self.assertIn('Unsupported upstream assembly boundary' if label == 'assembly'
-                                  else 'require reviewed ImmortalWrt snapshot', result.stderr)
+                                  else 'require numeric ImmortalWrt stable', result.stderr)
                     self.assertEqual(before, tree_contents(base),
                                      'custom must reject before changing any fixture file/directory')
 
@@ -123,9 +123,10 @@ python3() {
             root = Path(tmp)
             (root / 'package').mkdir()
             (root / 'include').mkdir()
-            (root / 'include/version.mk').write_text('VERSION_NUMBER:=SNAPSHOT\n')
-            for name in ('package/Makefile', 'include/rootfs.mk'):
-                (root / name).write_bytes((ROOT / 'tests/fixtures/snapshot-source' / name).read_bytes())
+            (root / 'include/version.mk').write_bytes(
+                (ROOT / 'tests/fixtures/stable-apk-source/include/version.mk').read_bytes())
+            for name in ('package/Makefile', 'include/rootfs.mk', 'include/image.mk'):
+                (root / name).write_bytes((ROOT / 'tests/fixtures/stable-apk-source' / name).read_bytes())
             (root / 'tmp/info').mkdir(parents=True)
             (root / 'tmp/.packageinfo').write_text('old metadata')
             dts = root / 'target/linux/qualcommax/dts/ipq8174-homewrk.dts'

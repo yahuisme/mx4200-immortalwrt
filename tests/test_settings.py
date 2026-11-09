@@ -1,7 +1,7 @@
-"""Regression checks for settings and official snapshot version rendering.
+"""Regression checks for settings and official stable version rendering.
 
-SETTINGS_PRISTINE_SOURCE supplies pristine snapshot files plus LuCI.
-MX_VERSION_SOURCE supplies a snapshot Git tree and requested .config for version
+SETTINGS_PRISTINE_SOURCE supplies pristine stable files plus pinned LuCI.
+MX_VERSION_SOURCE supplies a stable Git tree and requested .config for version
 rendering only; MX4200_PREPARED_SOURCE remains a final defconfig/package fixture.
 The render harness runs no firmware build targets or compilation.
 """
@@ -59,7 +59,7 @@ class SettingsScriptTests(unittest.TestCase):
         self.assert_wireless_zero_match_rejected('encryption', 'psk2+ccmp')
 
     def test_complete_settings_preserves_official_version_templates(self):
-        # Set SETTINGS_PRISTINE_SOURCE to pristine real snapshot files for integration
+        # Set SETTINGS_PRISTINE_SOURCE to pristine real stable files for integration
         # coverage; the default fixture keeps the same full-script contract.
         import shutil
 
@@ -103,13 +103,17 @@ class SettingsScriptTests(unittest.TestCase):
                     path = Path(d, relative)
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_text(text)
-            dts_before = Path(d, DTS).read_bytes()
+            candidates = (DTS, 'target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8174-mx4200v2.dts')
+            matches = [name for name in candidates if Path(d, name).is_file()]
+            self.assertEqual(len(matches), 1, 'missing or ambiguous MX4200v2 DTS')
+            dts = matches[0]
+            dts_before = Path(d, dts).read_bytes()
             platform_before = {p.relative_to(d): p.read_bytes()
                                for top in ('target', 'package/kernel')
                                for p in Path(d, top).rglob('*') if p.is_file()}
             platform_expected = dict(platform_before)
-            platform_expected[Path(DTS.replace('v2.dts', 'v1.dts'))] = platform_before[Path(DTS.replace('v2.dts', 'v1.dts'))]
-            platform_expected[Path(DTS)] = dts_before
+            platform_expected[Path(dts.replace('v2.dts', 'v1.dts'))] = platform_before[Path(dts.replace('v2.dts', 'v1.dts'))]
+            platform_expected[Path(dts)] = dts_before
             before = {p: Path(d, p).read_text() for p in (
                 "package/base-files/files/etc/openwrt_release",
                 "package/base-files/files/usr/lib/os-release",
@@ -185,9 +189,27 @@ class SettingsScriptTests(unittest.TestCase):
         epoch = subprocess.check_output(['./scripts/get_source_date_epoch.sh'],
                                         cwd=source, text=True).strip()
         self.assertRegex(revision, r'^r[0-9]+-[0-9a-f]{7,40}$')
-        # Snapshot rendering uses the checked-out source identity, not a stable tag.
+        # Stable release metadata wins over tag HEAD SHA/commit date.
+        self.assertEqual(revision, subprocess.check_output(
+            ['git', 'show', 'HEAD:version'], cwd=source, text=True).strip())
+        self.assertEqual(epoch, subprocess.check_output(
+            ['git', 'show', 'HEAD:version.date'], cwd=source, text=True).strip())
         self.assertRegex(epoch, r'^[0-9]+$')
-        version = 'SNAPSHOT'
+        candidates = (
+            source / 'target/linux/qualcommax/files/arch/arm64/boot/dts/qcom',
+            source / 'target/linux/qualcommax/dts',
+        )
+        for model, display in (('mx4200v1', 'Linksys MX4200v1'), ('mx4200v2', 'Linksys MX4200v2'),
+                               ('mx4300', 'Linksys MX4300'), ('homewrk', 'Linksys HomeWRK')):
+            dts_files = [directory / ('ipq8174-' + model + '.dts') for directory in candidates]
+            matches = [path for path in dts_files if path.is_file()]
+            self.assertEqual(len(matches), 1, model)
+            self.assertIn('model = "' + display + '";', matches[0].read_text())
+        version_text = (source / 'include/version.mk').read_text()
+        match = re.search(r'^VERSION_NUMBER:=\$\(if \$\(VERSION_NUMBER\),\$\(VERSION_NUMBER\),([0-9]+\.[0-9]+\.[0-9]+)\)$', version_text, re.M)
+        self.assertIsNotNone(match)
+        assert match is not None
+        version = match[1]
         # Execute the actual upstream VERSION_SED_SCRIPT, without any build targets.
         harness = '''empty:=
 space:=$(empty) $(empty)
@@ -222,9 +244,42 @@ render:
         self.assertIn('BUILD_ID="' + revision + '"', rendered['usr/lib/os-release'])
         self.assertIn('OPENWRT_BUILD_DATE="' + epoch + '"', rendered['usr/lib/os-release'])
         self.assertIn('VERSION="' + version + '"', rendered['usr/lib/os-release'])
-        self.assertIn('VERSION_ID="snapshot"', rendered['usr/lib/os-release'])
+        self.assertIn('VERSION_ID="' + version + '"', rendered['usr/lib/os-release'])
         self.assertIn(' ImmortalWrt ' + version + ', ' + revision, rendered['etc/banner'])
         self.assertNotIn('CONFIG_VERSIONOPT=y', (source / '.config').read_text())
+        # Exercise the pinned official overview renderer too, not just templates.
+        # Board/LuCI RPC inputs are private fixtures; this is not router evidence.
+        overview = source / ('feeds/luci/modules/luci-mod-status/htdocs/'
+                             'luci-static/resources/view/status/include/10_system.js')
+        if os.environ.get('SETTINGS_PRISTINE_SOURCE'):
+            self.assertTrue(overview.is_file(), 'pinned LuCI overview source required')
+            node = r'''
+const fs = require('fs');
+const payload = JSON.parse(fs.readFileSync(0, 'utf8'));
+function E(tag, attrs, children) {
+    return { tag, children: children || [], appendChild(row) { this.children.push(row); } };
+}
+// Execute only the exact pinned upstream JS; payload stays JSON, never code.
+const component = new Function('baseclass', 'rpc', 'uci', 'L', '_', 'E',
+    fs.readFileSync(process.argv[1], 'utf8'))(
+    { extend: x => x }, { declare: () => () => {} }, { get: () => null },
+    { isObject: x => x !== null && typeof x === 'object' }, x => x, E);
+const rows = component.render([
+    { hostname: 'fixture', model: payload.model, release: { description: payload.description } },
+    {}, { cpubench: '' }, {}, {}, {},
+    { branch: 'LuCI stable fixture', revision: 'git-fixture' }, 0
+]).children;
+console.log(JSON.stringify(Object.fromEntries(rows.map(row =>
+    [row.children[0].children[0], row.children[1].children[0]]))));
+'''
+            for model in ('Linksys MX4200v1', 'Linksys MX4200v2', 'Linksys MX4300', 'Linksys HomeWRK'):
+                result = subprocess.run(['node', '-e', node, str(overview)],
+                                        input=json.dumps({'model': model, 'description': display}),
+                                        text=True, capture_output=True, check=True)
+                fields = json.loads(result.stdout)
+                self.assertEqual(fields['Model'], model)
+                self.assertEqual(fields['Firmware Version'],
+                                 display + ' / LuCI stable fixture git-fixture')
 
     def test_missing_fixture_fails(self):
         with tempfile.TemporaryDirectory() as d:

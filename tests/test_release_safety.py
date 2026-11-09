@@ -17,7 +17,8 @@ python3() {
         command python3 - "$@" <<'PY'
 import hashlib,json,sys
 from pathlib import Path
-assert sys.argv[1:] == ['scripts/official_initramfs.py', 'firmware/mx4300-homewrk', '--record', 'build-record/official-initramfs.json']
+assert sys.argv[1:] == ['scripts/official_initramfs.py', 'firmware/mx4300-homewrk', '--record', 'build-record/official-initramfs.json', '--resolved', 'build-record/official-release.json']
+assert json.loads(Path(sys.argv[6]).read_text())['version'] == '25.12.2'
 destination=Path(sys.argv[2]); assert destination.is_dir()
 assert len(list(Path('firmware/mx4200').glob('*.bin'))) == 4
 assert len([p for p in destination.iterdir() if p.suffix in ('.bin', '.ubi')]) == 4
@@ -60,10 +61,12 @@ class ReleaseTests(unittest.TestCase):
         (base/'tmp').mkdir()
         (base/'tmp/.packageinfo').write_text('')
         (base/'build-record').mkdir()
-        (base/'build-record/source-ref.txt').write_text('master\n')
+        (base/'build-record/source-ref.txt').write_text('refs/tags/v25.12.2\n')
+        (base/'build-record/source-tag.txt').write_text('v25.12.2\n')
+        (base/'build-record/official-release.json').write_text(json.dumps(official_record()))
         (base/'build-record/source-revision.txt').write_text('r123-abcdef\n')
         (base/'build-record/source-sha.txt').write_text('c'*40+'\n')
-        data={'target':'qualcommax/ipq807x','version_code':'r123-abcdef', 'profiles': {}}
+        data={'target':'qualcommax/ipq807x','version_number':'25.12.2','version_code':'r123-abcdef', 'profiles': {}}
         for device in ('mx4200v1','mx4200v2','mx4300','homewrk'):
             images = []
             for kind in ('factory','sysupgrade'):
@@ -132,13 +135,13 @@ docker_exec() { shift; "$@"; }
                                          set(profile['release_groups'][group]['images']))
                         tag=(directory/'version.txt').read_text().strip()
                         title=(directory/'title.txt').read_text().strip()
-                        self.assertRegex(tag,rf'^{device}-ImmortalWrt-r123-\d\d\.\d\d\.\d\d_\d\d\.\d\d\.\d\d$')
+                        self.assertRegex(tag,rf'^{device}-ImmortalWrt-25\.12\.2-r123-\d\d\.\d\d\.\d\d_\d\d\.\d\d\.\d\d$')
                         self.assertNotIn('snapshot', title.lower())
                         self.assertEqual(title,tag)
                         suffixes.append(tag.removeprefix(device+'-ImmortalWrt-'))
                         notes=(directory/'release-notes.md').read_text()
                         for text in ('`factory.bin`','`sysupgrade.bin`','构建时间：',
-                                     '[ImmortalWrt master](https://github.com/immortalwrt/immortalwrt)',
+                                     '[ImmortalWrt 25.12.2](https://github.com/immortalwrt/immortalwrt/tree/v25.12.2)',
                                      '请选择对应机型镜像，不可混刷。','[默认设置与使用说明]'):
                             self.assertIn(text,notes)
                         for text in ('UBI2','首次刷机教程','linksys-first-flash.md',
@@ -180,6 +183,22 @@ docker_exec() { shift; "$@"; }
                 result=self.stage(base)
                 self.assertNotEqual(result.returncode,0,result.stderr)
                 self.assertFalse((base/'firmware').exists())
+
+    def test_stable_source_and_attachment_version_mismatch_block_identity(self):
+        for fault in ('profile-version', 'attachment-version', 'source-ref'):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
+                base = Path(tmp)
+                output, data = self.fixture(base)
+                if fault == 'profile-version':
+                    data['version_number'] = '26.01.0'
+                    (output / 'profiles.json').write_text(json.dumps(data))
+                elif fault == 'attachment-version':
+                    (base / 'build-record/source-tag.txt').write_text('v26.01.0\n')
+                else:
+                    (base / 'build-record/source-ref.txt').write_text('refs/heads/master\n')
+                result = self.stage(base)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertFalse(list((base / 'firmware').glob('*/version.txt')))
 
     def test_zero_or_mismatched_metadata_revision_never_gets_release_identity(self):
         for case in ('zero', 'mismatched', 'missing-record'):

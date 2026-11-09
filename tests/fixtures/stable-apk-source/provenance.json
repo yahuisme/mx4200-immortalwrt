@@ -1,0 +1,27 @@
+{
+  "repository": "https://github.com/immortalwrt/immortalwrt",
+  "tag": "v25.12.2",
+  "commit": "4fc16f2985a358bd43bb522e43f05395fcbd6ed5",
+  "files": [
+    {
+      "path": "include/rootfs.mk",
+      "url": "https://raw.githubusercontent.com/immortalwrt/immortalwrt/4fc16f2985a358bd43bb522e43f05395fcbd6ed5/include/rootfs.mk",
+      "sha256": "502ee81027a310f84345471c27c2c6d3ee212456bda6da5e1e7410f8c24d669d"
+    },
+    {
+      "path": "include/image.mk",
+      "url": "https://raw.githubusercontent.com/immortalwrt/immortalwrt/4fc16f2985a358bd43bb522e43f05395fcbd6ed5/include/image.mk",
+      "sha256": "675d6ac0c8d31549d78ff94ea80b602ae9ac6e206936c67fbc93ca854154313d"
+    },
+    {
+      "path": "include/version.mk",
+      "url": "https://raw.githubusercontent.com/immortalwrt/immortalwrt/4fc16f2985a358bd43bb522e43f05395fcbd6ed5/include/version.mk",
+      "sha256": "e6b16dd7121540e2e64b7ae162db9672645c01ae99fa3ba47a9ba3e13da627d0"
+    },
+    {
+      "path": "package/Makefile",
+      "url": "https://raw.githubusercontent.com/immortalwrt/immortalwrt/4fc16f2985a358bd43bb522e43f05395fcbd6ed5/package/Makefile",
+      "sha256": "9af7561b7794755b1d6178c178a99ea3607cc48eb6d3cb1f9d0d3349549c8cd8"
+    }
+  ]
+}

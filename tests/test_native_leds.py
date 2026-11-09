@@ -49,7 +49,17 @@ def official_hashes(root):
         raise AssertionError('MX_OFFICIAL_SOURCE must identify the official ImmortalWrt origin')
     sha = git('rev-parse', '--verify', 'HEAD').decode().strip()
     revision = re.search(r"^DISTRIB_REVISION='(r[0-9]+-([0-9a-f]{7,40}))'$", release, re.M)
-    if not revision or not sha.startswith(revision[2]):
+    stable = re.search(r"^DISTRIB_RELEASE='([0-9]+\.[0-9]+\.[0-9]+)'$", release, re.M)
+    if stable:
+        native_revision = git('show', 'HEAD:version').decode().strip()
+        version_mk = git('show', 'HEAD:include/version.mk').decode()
+        native_version = re.search(
+            r'^VERSION_NUMBER:=\$\(if \$\(VERSION_NUMBER\),\$\(VERSION_NUMBER\),([0-9]+\.[0-9]+\.[0-9]+)\)$',
+            version_mk, re.M)
+        if (not revision or revision[1] != native_revision or not native_version or
+                stable[1] != native_version[1]):
+            raise AssertionError('installed stable version/revision does not match MX_OFFICIAL_SOURCE HEAD')
+    elif not revision or not sha.startswith(revision[2]):
         raise AssertionError('installed root revision does not match MX_OFFICIAL_SOURCE HEAD')
     result = {}
     for name in NATIVE_LED_SHA256:
@@ -115,6 +125,77 @@ class NativeLEDContractTests(unittest.TestCase):
             with patch.dict(os.environ, MX_OFFICIAL_SOURCE=''):
                 with self.assertRaisesRegex(AssertionError, 'fallback covers only 25.12.2'):
                     official_hashes(root)
+
+    def test_stable_expected_hashes_use_release_version_not_tag_sha(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            source, root = Path(tmp) / 'source', Path(tmp) / 'root'
+            source.mkdir()
+            (root / 'etc').mkdir(parents=True)
+            def git(*args):
+                return subprocess.check_output(['git', '-C', str(source), *args],
+                                               stderr=subprocess.DEVNULL, text=True).strip()
+            git('init', '-q')
+            git('remote', 'add', 'origin', 'https://github.com/immortalwrt/immortalwrt.git')
+            for name in NATIVE_LED_SHA256:
+                path = source / ('target/linux/qualcommax/ipq807x/base-files/etc/board.d/01_leds'
+                                 if name == 'etc/board.d/01_leds' else 'package/base-files/files/' + name)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('stable source object: ' + name)
+            (source / 'version').write_text('r123-abcdef0123\n')
+            (source / 'include').mkdir()
+            (source / 'include/version.mk').write_text(
+                'VERSION_NUMBER:=$(call qstrip,$(CONFIG_VERSION_NUMBER))\n'
+                'VERSION_NUMBER:=$(if $(VERSION_NUMBER),$(VERSION_NUMBER),26.01.0)\n')
+            git('add', '.')
+            git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                'commit', '-qm', 'release tag object; not firmware')
+            release = root / 'etc/openwrt_release'
+            valid = "DISTRIB_RELEASE='26.01.0'\nDISTRIB_REVISION='r123-abcdef0123'\n"
+            release.write_text(valid)
+            with patch.dict(os.environ, MX_OFFICIAL_SOURCE=str(source)):
+                expected = official_hashes(root)
+                self.assertEqual(expected['etc/diag.sh'],
+                                 hashlib.sha256(b'stable source object: etc/diag.sh').hexdigest())
+                self.assertFalse(git('rev-parse', 'HEAD').startswith('abcdef0123'))
+                (source / 'version').write_text('r999-0000000000\n')
+                (source / 'include/version.mk').write_text('VERSION_NUMBER:=99.99.99\n')
+                (source / 'package/base-files/files/etc/diag.sh').write_text('dirty LED policy')
+                self.assertEqual(expected, official_hashes(root), 'ignore dirty native version and LED files')
+                for broken in (valid.replace('26.01.0', '26.01.1'),
+                               valid.replace('r123-abcdef0123', 'r999-0000000000')):
+                    release.write_text(broken)
+                    with self.assertRaisesRegex(AssertionError, 'does not match'):
+                        official_hashes(root)
+
+    @unittest.skipUnless(os.environ.get('MX_OFFICIAL_SOURCE'),
+                         'set MX_OFFICIAL_SOURCE for real stable Git-object evidence')
+    def test_real_stable_source_native_led_evidence(self):
+        source = os.environ['MX_OFFICIAL_SOURCE']
+        def git(*args):
+            return subprocess.check_output(['git', '-C', source, *args], text=True).strip()
+        version_mk = git('show', 'HEAD:include/version.mk')
+        match = re.search(
+            r'^VERSION_NUMBER:=\$\(if \$\(VERSION_NUMBER\),\$\(VERSION_NUMBER\),([0-9]+\.[0-9]+\.[0-9]+)\)$',
+            version_mk, re.M)
+        if not match:
+            self.skipTest('real source is not a numeric stable release')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'etc').mkdir()
+            (root / 'etc/openwrt_release').write_text(
+                f"DISTRIB_RELEASE='{match[1]}'\nDISTRIB_REVISION='{git('show', 'HEAD:version')}'\n")
+            expected = official_hashes(root)
+            self.assertEqual(set(expected), set(NATIVE_LED_SHA256))
+            if match[1] == '25.12.2':
+                self.assertEqual(expected, NATIVE_LED_SHA256)
+            for name in expected:
+                path = ('target/linux/qualcommax/ipq807x/base-files/etc/board.d/01_leds'
+                        if name == 'etc/board.d/01_leds' else 'package/base-files/files/' + name)
+                raw = subprocess.check_output(['git', '-C', source, 'show', 'HEAD:' + path])
+                self.assert_native_led_file(name, raw, expected)
+                with self.assertRaises(AssertionError):
+                    self.assert_native_led_file(name, raw + b'\ncustom LED policy\n', expected)
 
     def test_actual_installed_native_leds(self):
         selected = roots()

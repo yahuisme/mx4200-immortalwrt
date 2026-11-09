@@ -73,27 +73,24 @@ jobs:
         docker_exec DK bash -e -c '
           . $DK_PROFILE/settings.ini
           [[ $REPO_URL && $REPO_REF ]] || { echo "::error::Missing REPO_URL or REPO_REF"; exit 1; }
-          [[ $REPO_REF = master ]] || { echo "::error::REPO_REF must be master"; exit 1; }
+          [[ $REPO_REF = latest-release ]] || { echo "::error::REPO_REF must be latest-release"; exit 1; }
           umask 022
           git config --global tar.umask 0022
           mkdir -p $DK_OPENWRT
           cd $DK_OPENWRT
           if [ ! -d .git ]; then git init; fi
           git remote set-url origin $REPO_URL 2>&- || git remote add origin $REPO_URL
-          SOURCE_REF="refs/heads/$REPO_REF"
+          SOURCE_TAG=$(python3 /cache-scripts/official_release.py /build-record/official-release.json)
+          [[ "$SOURCE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::No stable release tag found"; exit 1; }
+          SOURCE_REF="refs/tags/$SOURCE_TAG"
           echo "SOURCE_REF=$SOURCE_REF"
-          # Official getver counts history and needs a tracking branch.
-          if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
-            git fetch --unshallow origin "$SOURCE_REF:refs/remotes/origin/master"
-          else
-            git fetch origin "$SOURCE_REF:refs/remotes/origin/master"
-          fi
-          git checkout -f -B master refs/remotes/origin/master
-          git branch --set-upstream-to=origin/master master
-          git reset --hard refs/remotes/origin/master
+          git fetch --depth=1 origin "$SOURCE_REF"
+          git checkout -f --detach FETCH_HEAD
+          git reset --hard FETCH_HEAD
           SOURCE_SHA=$(git rev-parse --verify HEAD)
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          printf "%s\n" "$REPO_REF" > /build-record/source-ref.txt
+          printf "%s\n" "$SOURCE_TAG" > /build-record/source-tag.txt
+          printf "%s\n" "$SOURCE_REF" > /build-record/source-ref.txt
           printf "%s\n" "$SOURCE_SHA" > /build-record/source-sha.txt
           # Remove ALL builder-preseeded patches, feeds, overlays and ABI files.
           git clean -ffdx
@@ -230,14 +227,19 @@ jobs:
         docker_exec DK cat "$DK_OPENWRT/tmp/.packageinfo" > final.packageinfo
         python3 scripts/check_defaults.py final.config final.packageinfo user/default/config.diff
         python3 scripts/release_images.py stage openwrt_bin/targets firmware
-        python3 scripts/official_initramfs.py firmware/mx4300-homewrk --record build-record/official-initramfs.json
+        python3 scripts/official_initramfs.py firmware/mx4300-homewrk --record build-record/official-initramfs.json --resolved build-record/official-release.json
         OFFICIAL_VERSION=$(jq -er .version build-record/official-initramfs.json)
         WRT_DATE="$(TZ=Asia/Hong_Kong date +'%y.%m.%d-%H.%M.%S')"
         WRT_REV=$(jq -er '.version_code | capture("^r(?<revision>[0-9]+)-[0-9a-f]+$").revision' openwrt_bin/targets/qualcommax/ipq807x/profiles.json)
         [[ "$WRT_REV" =~ ^[1-9][0-9]*$ ]]
         [[ "$(jq -er .version_code openwrt_bin/targets/qualcommax/ipq807x/profiles.json)" = "$(cat build-record/source-revision.txt)" ]]
+        SOURCE_TAG="$(cat build-record/source-tag.txt)"
+        [[ "$SOURCE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+        SOURCE_VERSION="${SOURCE_TAG#v}"
+        [[ "$SOURCE_VERSION" = "$OFFICIAL_VERSION" ]]
+        [[ "$(jq -er .version_number openwrt_bin/targets/qualcommax/ipq807x/profiles.json)" = "$SOURCE_VERSION" ]]
         SOURCE_REF="$(cat build-record/source-ref.txt)"
-        [[ "$SOURCE_REF" = master ]]
+        [[ "$SOURCE_REF" = "refs/tags/$SOURCE_TAG" ]]
         SOURCE_SHA="$(cat build-record/source-sha.txt)"
         [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
         BUILD_TIME="$(TZ=Asia/Hong_Kong date '+%Y-%m-%d %H:%M:%S %Z')"
@@ -254,14 +256,14 @@ jobs:
               INSTALL="MX4300 用 \`factory.bin\` 原厂刷入；HomeWRK 用官方 $OFFICIAL_VERSION 临时镜像启动，再经 LuCI 刷入 \`sysupgrade.bin\`。"
               ;;
           esac
-          VERSION="${DEVICE}-ImmortalWrt-r${WRT_REV}-${WRT_DATE/-/_}"
+          VERSION="${DEVICE}-ImmortalWrt-${SOURCE_VERSION}-r${WRT_REV}-${WRT_DATE/-/_}"
           printf '%s\n' "$VERSION" > "firmware/$GROUP/version.txt"
           printf '%s\n' "$VERSION" > "firmware/$GROUP/title.txt"
           RELEASE_NOTES="firmware/$GROUP/release-notes.md"
           cat > "$RELEASE_NOTES" <<EOF
         ## $MODELS ImmortalWrt
 
-        - 源码：[ImmortalWrt master](https://github.com/immortalwrt/immortalwrt)
+        - 源码：[ImmortalWrt $SOURCE_VERSION](https://github.com/immortalwrt/immortalwrt/tree/$SOURCE_TAG)
         - 构建时间：$BUILD_TIME
         - 镜像：$INSTALL
         - 请选择对应机型镜像，不可混刷。

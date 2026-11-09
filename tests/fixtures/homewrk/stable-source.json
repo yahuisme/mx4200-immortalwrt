@@ -1,0 +1,7 @@
+{
+  "origin": "https://github.com/immortalwrt/immortalwrt.git",
+  "tag": "v25.12.2",
+  "commit": "4fc16f2985a358bd43bb522e43f05395fcbd6ed5",
+  "path": "target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8174-homewrk.dts",
+  "sha256": "88d680d52971f118332c4daf9cac2094a553a2dc3339cf5e4b62ab77b02d325b"
+}
