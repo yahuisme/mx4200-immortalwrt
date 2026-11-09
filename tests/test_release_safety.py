@@ -137,18 +137,21 @@ docker_exec() { shift; "$@"; }
                         self.assertEqual(title,tag)
                         suffixes.append(tag.removeprefix(device+'-ImmortalWrt-'))
                         notes=(directory/'release-notes.md').read_text()
-                        for text in ('`factory.bin`','`sysupgrade.bin`','构建时间：','HomeProxy','不可混刷'):
+                        for text in ('`factory.bin`','`sysupgrade.bin`','构建时间：',
+                                     '[ImmortalWrt master](https://github.com/immortalwrt/immortalwrt)',
+                                     '请选择对应机型镜像，不可混刷。','[默认设置与使用说明]'):
                             self.assertIn(text,notes)
-                        self.assertNotIn('UBI2',notes)
+                        for text in ('UBI2','首次刷机教程','linksys-first-flash.md',
+                                     '- 机型：','- 定制：','官方 snapshot','c'*40):
+                            self.assertNotIn(text,notes)
+                        self.assertEqual(sum(line.startswith('- ') for line in notes.splitlines()),4)
                     self.assertEqual(suffixes[0],suffixes[1])
                     notes=(base/'firmware/mx4300-homewrk/release-notes.md').read_text()
                     self.assertNotIn('`factory.ubi`',notes)
                     self.assertIn('LuCI',notes)
                     self.assertIn('25.12.2',notes)
                     self.assertNotIn(official_record()['url'],notes)
-                    self.assertIn('c'*40,notes)
                     self.assertNotIn('initramfs-uImage.itb',notes)
-                    self.assertIn('[首次刷机教程]',notes)
                     self.assertTrue((base/'build-record/official-initramfs.json').is_file())
                     self.assertTrue((base/'firmware/mx4300-homewrk'/INITRAMFS).is_file())
                     self.assertEqual((base/'official-download-calls').read_text().splitlines(), ['download'])

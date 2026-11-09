@@ -240,19 +240,18 @@ jobs:
         [[ "$SOURCE_REF" = master ]]
         SOURCE_SHA="$(cat build-record/source-sha.txt)"
         [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
-        SOURCE_URL="https://github.com/immortalwrt/immortalwrt/tree/$SOURCE_SHA"
         BUILD_TIME="$(TZ=Asia/Hong_Kong date '+%Y-%m-%d %H:%M:%S %Z')"
         for GROUP in mx4200 mx4300-homewrk; do
           case "$GROUP" in
             mx4200)
               DEVICE=MX4200
               MODELS='Linksys MX4200v1 / MX4200v2'
-              INSTALL="\`factory.bin\` 用于从原厂固件刷入，\`sysupgrade.bin\` 用于从已有 ImmortalWrt 升级。"
+              INSTALL="\`factory.bin\` 原厂刷入，\`sysupgrade.bin\` 固件升级。"
               ;;
             mx4300-homewrk)
               DEVICE=MX4300
               MODELS='Linksys MX4300 / HomeWRK'
-              INSTALL="MX4300：原厂 Web 刷入 \`factory.bin\`；HomeWRK：USB 启动附带的官方 $OFFICIAL_VERSION 临时镜像，再通过 LuCI 刷入 \`sysupgrade.bin\`。"
+              INSTALL="MX4300 用 \`factory.bin\` 原厂刷入；HomeWRK 用官方 $OFFICIAL_VERSION 临时镜像启动，再经 LuCI 刷入 \`sysupgrade.bin\`。"
               ;;
           esac
           VERSION="${DEVICE}-ImmortalWrt-r${WRT_REV}-${WRT_DATE/-/_}"
@@ -260,16 +259,14 @@ jobs:
           printf '%s\n' "$VERSION" > "firmware/$GROUP/title.txt"
           RELEASE_NOTES="firmware/$GROUP/release-notes.md"
           cat > "$RELEASE_NOTES" <<EOF
-        ## $MODELS ImmortalWrt 固件
+        ## $MODELS ImmortalWrt
 
-        - 源码：官方 snapshot（$SOURCE_REF），[$SOURCE_SHA]($SOURCE_URL)
+        - 源码：[ImmortalWrt master](https://github.com/immortalwrt/immortalwrt)
         - 构建时间：$BUILD_TIME
-        - 机型：$MODELS，请选择对应硬件型号的镜像，不可混刷。
         - 镜像：$INSTALL
-        - 定制：中文 LuCI、Aurora、HomeProxy 及既定网络与无线设置。
+        - 请选择对应机型镜像，不可混刷。
 
         [默认设置与使用说明](https://github.com/yahuisme/mx4200-immortalwrt#默认设置)
-        [首次刷机教程](https://github.com/yahuisme/mx4200-immortalwrt/blob/main/linksys-first-flash.md)
         EOF
         done
 
