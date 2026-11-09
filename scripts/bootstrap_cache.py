@@ -26,6 +26,7 @@ EPOCH = 946684800
 # Unknown inventories bind safely to the full TC_KEY; see the source review.
 REVIEWED = {
     '5e09e8d00cbee466260d9391bab5d5f38a41ed7a439e553a9ee49a517deb435f',
+    'f9f1cf3f890f21211a0cf1a0dfee0f8ba15cc252788d31c86e887e0bd6090db0',
     'a6008400054b94165035f5a07888725ef3505818f63f5ad07db380214de04f4e',
 }
 FIXED_INPUTS = ('Makefile', 'rules.mk', 'package/Makefile', 'target/Makefile',
@@ -45,9 +46,23 @@ OVERRIDES = ('MAKEFLAGS', 'MFLAGS', 'MAKEOVERRIDES', 'MAKEFILES', 'CC', 'CXX', '
              'TOPDIR', 'INCLUDE_DIR', 'BUILD_DIR_HOST', 'STAGING_DIR_HOST',
              'STAGING_DIR', 'BUILD_DIR', 'HOSTCC', 'HOSTCXX', 'HOST_CFLAGS',
              'HOST_CXXFLAGS', 'HOST_LDFLAGS', 'CONFIG_SITE', 'CONFIG_SITE_BASE',
-             'CONFIGURE_CACHE_DIR', 'BASH_ENV', 'ENV')
-# These tools can parse include/rust-*.mk outside the early C/C++ input lock.
-# GNU make's ifdef/$(if ...) treats explicit n as nonempty, not disabled.
+             'CONFIGURE_CACHE_DIR', 'CONFIGURE_PATH', 'BASH_ENV', 'ENV',
+             'PATCH_DIR', 'UNPACK_CMD',
+             'DECOMPRESS_CMD', 'PKG_CAT', 'DL_SUBDIR', 'QUILT', 'YEAR_2038',
+             'CPU_TYPE', 'CPU_SUBTYPE', 'DUMP', 'DUMP_TARGET_DB', 'CHECK',
+             'FIXUP', 'CHECK_ALL', 'NO_DEPS', 'NO_RECONFIGURE',
+             'FORCE_HOST_INSTALL', 'FORCE', 'SDK', 'IB', 'STAMP_PREPARED',
+             'STAMP_BUILT', 'BUILD_TOOLCHAIN', 'BUILD_ISL', 'BUILD_B43_TOOLS',
+             'BUILD_BZIP2_TOOLS', 'BUILD_LZ4_TOOLS', 'BUILD_LZO_TOOLS',
+             'NO_TRACE_MAKE', 'ORIG_PATH', 'MAKE', 'SUBMAKE', 'OPENWRT_BUILD',
+             'OPENWRT_VERBOSE', 'DEBUG', 'DEBUG_SCOPE_DIR', 'SUBDIR_MAKE_DEBUG',
+             'IGNORE_ERRORS', 'QUILT_PATCHES', 'QUILT_PATCH_OPTS',
+             'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_GLOBAL',
+             'GIT_CONFIG_SYSTEM', 'GIT_CONFIG_NOSYSTEM', 'GIT_EXEC_PATH',
+             'GIT_TEMPLATE_DIR', 'GIT_WORK_TREE', 'GIT_DIR', 'GIT_INDEX_FILE')
+OVERRIDE_PREFIXES = ('CONFIG_', 'HOST_', 'PKG_', 'CMAKE_', 'MESON_', 'ac_cv_',
+                     'gl_cv_', 'am_cv_', 'Hooks/', 'Host/', 'Build/', 'Download/',
+                     'DownloadMethod/', 'tools/', 'tools-', 'buildtypes-', '__')
 BOUND_SELECTORS = ('BUILD_ALL_HOST_TOOLS', 'USE_RUST_TOOLCHAIN', 'USE_RUST_BUILD',
                    'USE_RUST_PREBUILT', 'USE_RUST_HOST', 'BUILD_BINDGEN',
                    'USE_CBINDGEN', 'USE_CORROSION', 'RUST_SCCACHE')
@@ -128,7 +143,8 @@ def configuration(root):
 def key(root, builder, tc_key):
     if not builder or not tc_key:
         raise ValueError('builder and full toolchain key required')
-    if any(os.environ.get(name) for name in OVERRIDES):
+    if any(value and (name in OVERRIDES or name.startswith(OVERRIDE_PREFIXES))
+           for name, value in os.environ.items()):
         raise ValueError('environment overrides are outside the bootstrap input lock')
     if any((root / name).exists() or (root / name).is_symlink() for name in ESCAPES):
         raise ValueError('unreviewed make/source escape')

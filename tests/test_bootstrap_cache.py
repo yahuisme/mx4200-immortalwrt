@@ -59,6 +59,7 @@ class BootstrapTests(unittest.TestCase):
         m = self.module()
         self.assertEqual(m.REVIEWED, {
             '5e09e8d00cbee466260d9391bab5d5f38a41ed7a439e553a9ee49a517deb435f',
+            'f9f1cf3f890f21211a0cf1a0dfee0f8ba15cc252788d31c86e887e0bd6090db0',
             'a6008400054b94165035f5a07888725ef3505818f63f5ad07db380214de04f4e'})
 
     @unittest.skipUnless(os.environ.get('MX_PREPARED_SOURCE'),
@@ -86,6 +87,35 @@ class BootstrapTests(unittest.TestCase):
         with patch.dict(os.environ, {'BOOTSTRAP_EXPECT_CONTRACT': 'auto'}):
             with self.assertRaises(AssertionError):
                 assert_prepared_contract(self, m, self.root)
+
+    def test_native_host_overrides_are_explicitly_rejected(self):
+        m = self.module()
+        # Independent of OVERRIDES enumeration: native ?= / conditional exports
+        # can inherit these inputs even when CONFIG_SITE itself is unset.
+        for name, value in (
+                ('HOST_CONFIG_SITE', '/unlocked/site'),
+                ('HOST_BUILD_DIR', '/unlocked/build'),
+                ('HOST_BUILD_PREFIX', '/unlocked/prefix'),
+                ('HOST_PATCH_DIR', '/unlocked/patches'),
+                ('HOST_USE_NINJA', '0'),
+                ('HOST_UNPACK', 'unlocked-command'),
+                ('PKG_FILE_DEPENDS', '/unlocked/depends'),
+                ('CMAKE_HOST_OPTIONS', '-C /unlocked/preload'),
+                ('MESON_USE_STAGING_PYTHON', '0'),
+                ('CONFIG_BUILD_ALL_HOST_TOOLS', 'y'),
+                ('Hooks/HostConfigure/Pre', 'unlocked-hook'),
+                ('tools/ccache/compile', 'tools/unlocked/compile'),
+                ('PATCH_DIR', '/unlocked/patches'),
+                ('CONFIGURE_PATH', '/unlocked/configure'),
+                ('CONFIG_SHELL', '/unlocked/shell'),
+                ('ac_cv_header_stdio_h', 'no'),
+                ('GIT_CONFIG_COUNT', '1')):
+            with self.subTest(variable=name):
+                with patch.dict(os.environ, {name: value}):
+                    with self.assertRaisesRegex(ValueError, 'environment overrides'):
+                        m.key(self.root, 'builder', 'tc-one')
+                with patch.dict(os.environ, {name: ''}):
+                    self.assertRegex(m.key(self.root, 'builder', 'tc-one'), r'^[0-9a-f]{64}$')
 
     def test_reviewed_inventory_has_independent_key(self):
         m = self.module()
@@ -645,6 +675,15 @@ class PreparedBootstrapTests(unittest.TestCase):
             self.assertIn(expected, cli().stderr)
             self.assertNotEqual(baseline, cli(builder='different').stdout)
             self.assertNotEqual(baseline, cli(updates={'LANG': 'changed'}).stdout)
+            for name, value in (
+                    ('HOST_CONFIG_SITE', '/unlocked/site'),
+                    ('HOST_BUILD_DIR', '/unlocked/build'),
+                    ('HOST_BUILD_PREFIX', '/unlocked/prefix'),
+                    ('HOST_PATCH_DIR', '/unlocked/patches'),
+                    ('HOST_USE_NINJA', '0')):
+                with self.subTest(native_override=name):
+                    cli(updates={name: value}, fails='environment overrides')
+                    self.assertEqual(baseline, cli(updates={name: ''}).stdout)
             cli(updates={'CONFIGURE_CACHE_DIR': '/unlocked'},
                 fails='environment overrides')
             self.assertEqual(baseline, cli(updates={'CONFIG_SITE_BASE': ''}).stdout)

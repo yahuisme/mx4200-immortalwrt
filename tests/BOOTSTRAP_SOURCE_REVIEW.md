@@ -179,6 +179,46 @@ key and native archive fixture evidence. No compiler, configuration generator,
 real bootstrap stamp reuse, firmware build, hardware or speed acceptance is
 claimed. Rolling unknown inventories continue to bind to TC_KEY until reviewed.
 
+## Current stable post-custom inventory
+
+The stable source `4fc16f2985a358bd43bb522e43f05395fcbd6ed5`, after the
+current complete `custom.sh` path, has inventory
+`f9f1cf3f890f21211a0cf1a0dfee0f8ba15cc252788d31c86e887e0bd6090db0`.
+Preparation uses the official LuCI revision
+`d6167ea0645cbd1327708d85f94824f42d0eb872`, package source
+`59f7751ebb2e92b11f1e897deb7d162f6bf945c6`, and the exact finalized
+configuration from successful build `42662146071` (SHA256
+`aad301c26da0dd0ced3a654b144386278b6c07f95a555c85af98dbfc9549ebb3`).
+The retained configuration is not regenerated locally.
+
+Against the historical reviewed stable inventory, only the generated
+`.external-packages.mk`, `include/rootfs.mk` and `package/Makefile` change.
+The generated fragment contains only the external package/repository
+assignments. The native APK snapshot/add and root verification calls execute
+in later package/rootfs recipes, not the early `tools/ccache/compile` producer.
+All changed bytes, modes and presence remain inventoried; no producer input
+is excluded. Unknown inventories and Rust/all-host selectors retain full
+TC_KEY binding. Builder, environment, full effective config and root path
+remain part of every key.
+
+Native `?=` defaults, conditional exports and appended configure options also
+consume inherited environment. The guard rejects unsupported nonempty
+CONFIG_/HOST_/PKG_/CMAKE_/MESON_ and make graph/hook namespaces, configure-cache
+variables, and explicit patch/unpack/orchestration/Git redirections. Named
+regressions cover host paths/site, Ninja, generated hooks, package dependencies,
+CMake preload options and CONFIG selectors; empty values remain controls.
+These guards close the reviewed native make inputs, not an assertion that
+arbitrary downloaded build tools are environment-hermetic outside the
+controlled builder contract.
+
+The new exact source lock permits bootstrap reuse when only the full toolchain
+key changes. The helper self-hash starts a new generation for every TB lock;
+it does not change TC/CC/DL key helpers, namespaces, cache budgets, archive
+validation, restore health, native stamp rechecks or publication safeguards.
+The preceding cold CI build measured bootstrap 544 seconds and a 206658558-byte
+compressed snapshot. Those observations are not a measured warm restore or a
+promised saving; changed-source hosted reuse still needs a matching CI run.
+
 ## Prepared-source test usage (current and historical inventories)
 
 The historical review above is not an authorization for a new post-custom
@@ -190,25 +230,26 @@ inventory. The opt-in entry points now take an explicit expected contract:
   post-custom inventory/key control.
 - `BOOTSTRAP_EXPECT_CONTRACT` applies to both paths. Its default is
   `reviewed-independent`: inventory membership in production `REVIEWED` and
-  identical keys across two TC keys are both mandatory. For a current stable or
-  other unreviewed prepared inventory, explicitly use `full-toolchain-bound`:
+  identical keys across two TC keys are both mandatory. For an unknown stable
+  or other unreviewed prepared inventory, explicitly use `full-toolchain-bound`:
   the inventory must **not** be reviewed, both key generations must succeed,
   and changing only TC_KEY must change the bootstrap key. Unknown expectation
   values fail; the suite never infers or silently downgrades the expectation.
 
-For the current unreviewed stable post-custom source:
+For the exact current reviewed stable post-custom source:
 
 ```sh
 env -u LD_LIBRARY_PATH PYTHONPATH=tests \
   BOOTSTRAP_SOURCE=/absolute/private/stable-post-custom \
   MX_PREPARED_SOURCE=/absolute/private/stable-post-custom \
-  BOOTSTRAP_EXPECT_CONTRACT=full-toolchain-bound \
+  BOOTSTRAP_EXPECT_CONTRACT=reviewed-independent \
   python3 -m unittest test_bootstrap_cache -v
 ```
 
-For an exact historically reviewed snapshot post-custom source, use the same
-command with `BOOTSTRAP_EXPECT_CONTRACT=reviewed-independent`. Do not add a
-production lock or change the expected contract just to accept source drift.
+For an unreviewed prepared source, use `full-toolchain-bound` explicitly.
+An exact historically reviewed snapshot source also uses
+`reviewed-independent`. Do not add a production lock or change the expected
+contract just to accept source drift.
 If the two source variables name different trees, both must satisfy the same
 explicit expectation, or run them separately.
 
