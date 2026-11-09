@@ -61,14 +61,87 @@ must precede world. Other W1700K customization writes apps, target/package/feed
 patches and runtime files, outside this producer inventory. No customization
 adds a host producer or edits tools/scripts.
 
-MX4200 retains its historical `5e09e8d00cbee466260d9391bab5d5f38a41ed7a439e553a9ee49a517deb435f`
-reference lock: stable ImmortalWrt `4fc16f2985a358bd43bb522e43f05395fcbd6ed5` with its production
-scripts/projectsmirrors.json filtering reproduces that hash. Its 16 early
-producers also match; its helper and cache namespaces remain separate.
+## MX4200 rolling-source review
 
-MX4200 now builds rolling official `master`. This historical inventory does not
-authorize a new snapshot inventory: unreviewed inventories retain full TC_KEY
-binding automatically. No new independent-reuse lock is asserted by migration.
+MX4200 has its own locks, not either W1700K lock:
+
+| Official source | MX post-customization inventory SHA256 |
+| --- | --- |
+| Stable `4fc16f2985a358bd43bb522e43f05395fcbd6ed5` | `5e09e8d00cbee466260d9391bab5d5f38a41ed7a439e553a9ee49a517deb435f` |
+| Master `4765b657625ec5bbda74b44400465fe043802b30` | `a6008400054b94165035f5a07888725ef3505818f63f5ad07db380214de04f4e` |
+
+The stable source was independently rematerialized from its immutable archive
+with Git 0644/0755 modes and the historical production mirror filter; all 453
+canonical records reproduce the existing stable digest. The current 447 records
+come from the complete current `custom.sh` → packages/settings/external-prepare
+execution, with package source `001160ae87f45aaa52ac81c39fe16c851a1f72b8` and
+LuCI `319f7c96e3530246cf91cfdd9bacb3fa44dc3a4e`. Only shell mount paths and
+clone transport were relocated; generated makefile bytes retain production paths.
+The four customization-affected locked paths are `.external-packages.mk`,
+`include/rootfs.mk`, `package/Makefile` and `scripts/projectsmirrors.json`.
+
+Complete stable/current record comparison identifies 170 changed paths: 24
+early-producer records, 19 framework/generated records, five early helper
+records, the tools dependency graph, three Rust helper records, 100 later-tool
+records and 18 later metadata/image/utility records. These are not exclusions:
+every changed/new/deleted file still participates in the exact inventory.
+
+- Early ccache advances 4.12.1 → 4.13.3, CMake 4.2.0 → 4.4.3, Expat
+  2.7.3 → 2.9.0, libdeflate 1.25 → 1.26, Meson 1.6.1 → 1.11.2,
+  patch 2.8 → 2.8.1, sed 4.9 → 4.10, xz 5.8.1 → 5.8.4 and
+  zlib 1.3.1 Git source → 1.3.2 archive. Their recipes, source hashes,
+  templates and patch additions/removals are locked, not declared compatible
+  with historical artifacts. CMake now supplies the explicit staged zstd
+  include/static library and disables tests through configure options.
+- `host-build.mk` still owns native prepared/configured/built/installed stamps.
+  New hooks record build time, remove host `.la` files via autotools, and enable
+  opt-in configure caching for Expat/LibreSSL/patch/sed/tar/xz. The new
+  `include/site/cache` is already a fixed input (formerly recorded missing);
+  its complete bytes, Darwin base site and host flags remain covered. Default
+  configure caches live under disposable `tmp`, not the archived host pair.
+  `CONFIGURE_CACHE_DIR` can redirect that new consumer outside the lock, so
+  nonempty environment overrides are now rejected, like `CONFIG_SITE`.
+  `site/cache:12-13` also sources a readable inherited `CONFIG_SITE_BASE`.
+  On Linux, `HOST_CONFIG_SITE_BASE` is empty and `Host/Exports/Default` only
+  exports a replacement when nonempty, leaving that inherited path effective.
+  Nonempty `CONFIG_SITE_BASE` environment values are therefore rejected too,
+  before inventory/key generation; hashing only its path would leave mutable
+  external shell contents unlocked. Unset/empty values preserve the normal
+  reviewed-independent contract.
+- `depends.mk` memoizes recipe hashes and fixes locale ordering; timestamp.pl
+  gains fractional timestamps and a find-newer fast path. Download integrity
+  memoization uses expected hash plus inode/size/mtime/ctime under disposable
+  tmp, and changed download.pl deletes a bad local file before terminating.
+  GNU download mirrors are the actual MX-filtered projects JSON. No completion
+  stamps are fabricated or touched by this change.
+- `rules.mk` memoizes config/CPU/compiler probes, adds configure-cache and build
+  logging helpers and target remapping/version helpers. Top-level changes cache
+  scans/config checks and build metadata; subdir refactoring adds parallel variant
+  dispatch and target-only DT checks. These entire framework files are locked.
+  The source-override paths remain rejected; early producer recipes do not opt
+  into `HOST_USE_GIT_SRC` or add external `PKG_FILE_DEPENDS`.
+- Actual tools-rule GNU make `-rR -qp` evaluation with the retained complete final
+  config still yields ccache, cmake, expat, flock, libdeflate, libressl, meson,
+  ninja, patch, pkgconf, sed, tar, xxhash, xz, zlib and zstd. The query has an
+  empty phony default, no recursive recipes/include remaking, and its tools
+  input has no parse-time shell/include calls. Explicit recursive include review
+  of these producers closes through rules/debug/verbose, host-build,
+  download/unpack/quilt/depends/autotools, CMake and Meson, with locked tools
+  headers, templates, site files and helper scripts. Later tool/source metadata,
+  image generators and firmware packers are outside this early producer set.
+- Rust is a newly selectable tools branch. `tools/rust`, bindgen/cbindgen and
+  sccache can read `include/rust-values.mk`/`rust-host-build.mk`, outside this
+  early C/C++ lock; corrosion introduces Rust too. Independent reuse therefore
+  falls back to full TC binding for all Rust tool/mode selectors, a nonempty
+  Rust host path and all-host selection. Even explicit `=n` is nonempty in GNU
+  make and conservatively stays bound. No Rust include is whitelisted.
+- The generated MX fragment has exactly two package/repository assignments,
+  consumed by deferred APK/rootfs macros. The new snapshot prerequisite is on
+  package/install, not tools/ccache/compile; rootfs cache shell/eval expansion is
+  deferred until that recipe. Its bytes/mode/presence remain locked and linked
+  or nonregular forms fail closed. Runtime signed APK indexes are later inputs,
+  not bootstrap producers. Package/feed/toolchain host writers run later; the
+  snapshot must still be taken before world.
 
 ## Acceptance and limits
 
@@ -80,6 +153,23 @@ environment invalidation plus unknown-inventory fallback. Full effective config
 fingerprinting remains intact; BUILD_ALL_HOST_TOOLS stays toolchain-bound.
 The helper self-hash makes this lock update cold for bootstrap only; it does not
 change the toolchain key algorithm or inputs.
+
+`BOOTSTRAP_SOURCE` enables the MX real-source CLI mutation matrix;
+`MX_PREPARED_SOURCE` also enables its exact MX post-custom control. The CLI
+checks content/mode/presence changes to tools, scripts, mirror JSON, host/site,
+rootfs/package and generated make inputs; linked/nonregular generated fragments;
+complete config/mode/builder/environment changes; every Rust/all-host y/m/n
+branch; and external-source/path rejection. Unknown inventories stay TC-bound.
+An explicit `CONFIG_SITE_BASE` negative is independent of the implementation's
+`OVERRIDES` enumeration; the prepared-source CLI also rejects the real inherited
+variable across changed external-file bytes and both TC keys, while empty is a
+positive control. Removing only this override guard must fail the regression.
+Native tar CLI controls retain script symlinks/nanosecond stamps, reject an empty
+executable ccache on restore and never execute restored binaries for health.
+Existing workflow/budget/recovery replays retain TC-hit skip, TB stamp recheck,
+pre-world packing, 1GB compressed admission, MX exact-key repair and publication
+gates. The self-hash deliberately starts a new TB cold generation only:
+TC compatibility policy and TC/CC/DL namespaces are unchanged.
 
 The OpenWrt config used for dependency parsing is the failed run's requested
 config, not a newly generated final defconfig. Complete tools rule/config branch

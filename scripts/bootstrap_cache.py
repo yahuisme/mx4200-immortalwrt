@@ -20,12 +20,13 @@ except ImportError:
         import cache_config
 
 EPOCH = 946684800
-# Historical MX4200 post-customization lock (ImmortalWrt v25.12.2):
+# Reviewed MX4200 post-customization locks (stable and rolling snapshot):
 # canonical path/permission/content records after the complete custom.sh path,
-# including MX mirror filtering. Current rolling snapshot inventories are not
-# implicitly reviewed: unknown inventories bind safely to the full TC_KEY.
+# including MX mirror filtering and any generated external make fragment.
+# Unknown inventories bind safely to the full TC_KEY; see the source review.
 REVIEWED = {
     '5e09e8d00cbee466260d9391bab5d5f38a41ed7a439e553a9ee49a517deb435f',
+    'a6008400054b94165035f5a07888725ef3505818f63f5ad07db380214de04f4e',
 }
 FIXED_INPUTS = ('Makefile', 'rules.mk', 'package/Makefile', 'target/Makefile',
                 'toolchain/Makefile', *('include/' + name for name in (
@@ -43,7 +44,13 @@ OVERRIDES = ('MAKEFLAGS', 'MFLAGS', 'MAKEOVERRIDES', 'MAKEFILES', 'CC', 'CXX', '
              'CPATH', 'LIBRARY_PATH', 'C_INCLUDE_PATH', 'CPLUS_INCLUDE_PATH',
              'TOPDIR', 'INCLUDE_DIR', 'BUILD_DIR_HOST', 'STAGING_DIR_HOST',
              'STAGING_DIR', 'BUILD_DIR', 'HOSTCC', 'HOSTCXX', 'HOST_CFLAGS',
-             'HOST_CXXFLAGS', 'HOST_LDFLAGS', 'CONFIG_SITE', 'BASH_ENV', 'ENV')
+             'HOST_CXXFLAGS', 'HOST_LDFLAGS', 'CONFIG_SITE', 'CONFIG_SITE_BASE',
+             'CONFIGURE_CACHE_DIR', 'BASH_ENV', 'ENV')
+# These tools can parse include/rust-*.mk outside the early C/C++ input lock.
+# GNU make's ifdef/$(if ...) treats explicit n as nonempty, not disabled.
+BOUND_SELECTORS = ('BUILD_ALL_HOST_TOOLS', 'USE_RUST_TOOLCHAIN', 'USE_RUST_BUILD',
+                   'USE_RUST_PREBUILT', 'USE_RUST_HOST', 'BUILD_BINDGEN',
+                   'USE_CBINDGEN', 'USE_CORROSION', 'RUST_SCCACHE')
 
 
 def serialized(value):
@@ -127,7 +134,9 @@ def key(root, builder, tc_key):
         raise ValueError('unreviewed make/source escape')
     raw, values = configuration(root)
     source = inventory(root)
-    independent = source in REVIEWED and values.get('CONFIG_BUILD_ALL_HOST_TOOLS') != 'y'
+    independent = (source in REVIEWED
+                   and not any(values.get('CONFIG_' + name) for name in BOUND_SELECTORS)
+                   and values.get('CONFIG_RUST_TOOLCHAIN_HOST_PATH', '""') == '""')
     environment = {name: os.environ.get(name) for name in ENVIRONMENT}
     host = os.uname()
     data = ['bootstrap-v3', builder, [host.sysname, host.release, host.version, host.machine], str(root), EPOCH,

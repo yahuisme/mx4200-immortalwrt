@@ -40,7 +40,8 @@ class BootstrapTests(unittest.TestCase):
     def test_mx_reviewed_lock_is_post_custom_not_bare_sibling_source(self):
         m = self.module()
         self.assertEqual(m.REVIEWED, {
-            '5e09e8d00cbee466260d9391bab5d5f38a41ed7a439e553a9ee49a517deb435f'})
+            '5e09e8d00cbee466260d9391bab5d5f38a41ed7a439e553a9ee49a517deb435f',
+            'a6008400054b94165035f5a07888725ef3505818f63f5ad07db380214de04f4e'})
 
     @unittest.skipUnless(os.environ.get('MX_PREPARED_SOURCE'),
                          'set MX_PREPARED_SOURCE to exact post-custom MX source')
@@ -109,6 +110,32 @@ class BootstrapTests(unittest.TestCase):
         ns = 1700000000123456789
         os.utime(self.root / 'build_dir/host/ccache-1.0/.built', ns=(ns, ns))
         return ns
+
+    def test_native_archive_cli_rechecks_health_without_running_restored_binary(self):
+        ns = self.artifacts()
+        binary = self.root / 'staging_dir/host/bin/ccache'
+        # This must never be executed by the archive structural health gate.
+        binary.write_text('#!/bin/sh\nexit 99\n')
+        binary.chmod(0o755)
+        self.prereq_scripts()
+        result = self.cli('pack', self.root, self.cache, 'tb-one')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = self.cli('restore', self.root, self.cache, 'tb-one')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('exact bootstrap restored', result.stdout)
+        self.assertEqual((self.root / 'build_dir/host/ccache-1.0/.built').stat().st_mtime_ns, ns)
+        self.assertTrue((self.root / 'staging_dir/host/bin/xxd').is_symlink())
+        # Native tar with valid headers/stamps but an empty executable is cold.
+        binary.write_bytes(b'')
+        with tarfile.open(self.cache / 'bootstrap.tar.gz', 'w:gz',
+                          format=tarfile.PAX_FORMAT) as archive:
+            for name in self.module().ROOTS:
+                archive.add(self.root / name, arcname=name)
+        result = self.cli('restore', self.root, self.cache, 'tb-one')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('nonempty executable host ccache', result.stderr)
+        self.assertFalse((self.root / 'build_dir/host').exists())
+        self.assertFalse((self.root / 'staging_dir/host').exists())
 
     def test_pack_restore_pair_preserves_nanoseconds_and_toolchain(self):
         m = self.module()
@@ -456,6 +483,73 @@ class BootstrapTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             m.restore(self.root, self.cache, 'tb-one')
 
+    def test_rust_tool_selectors_remain_toolchain_bound(self):
+        m = self.module()
+        setattr(m, 'REVIEWED', {m.inventory(self.root)})
+        original = (self.root / '.config').read_bytes()
+        # tools/Makefile admits these branches; rust-values/host-build inputs
+        # are outside FIXED_INPUTS. Explicit n is nonempty to GNU make too.
+        for name in ('BUILD_ALL_HOST_TOOLS', 'USE_RUST_TOOLCHAIN', 'USE_RUST_BUILD',
+                     'USE_RUST_PREBUILT', 'USE_RUST_HOST', 'BUILD_BINDGEN',
+                     'USE_CBINDGEN', 'USE_CORROSION', 'RUST_SCCACHE'):
+            for value in ('y', 'm', 'n'):
+                with self.subTest(selector=name, value=value):
+                    (self.root / '.config').write_bytes(
+                        original + f'CONFIG_{name}={value}\n'.encode())
+                    self.assertNotEqual(m.key(self.root, 'builder', 'tc-one'),
+                                        m.key(self.root, 'builder', 'tc-two'))
+        (self.root / '.config').write_bytes(
+            original + b'CONFIG_RUST_TOOLCHAIN_HOST_PATH="/unlocked/rust"\n')
+        self.assertNotEqual(m.key(self.root, 'builder', 'tc-one'),
+                            m.key(self.root, 'builder', 'tc-two'))
+
+    def test_all_external_selectors_and_override_escapes_reject(self):
+        m = self.module()
+        setattr(m, 'REVIEWED', {m.inventory(self.root)})
+        config = self.root / '.config'
+        original = config.read_bytes()
+        for name in ('EXTERNAL_TOOLCHAIN', 'SRC_TREE_OVERRIDE', 'NATIVE_TOOLCHAIN', 'SDK'):
+            config.write_bytes(original + f'CONFIG_{name}=y\n'.encode())
+            with self.subTest(selector=name), self.assertRaises(ValueError):
+                m.key(self.root, 'builder', 'tc')
+        for name in ('EXTERNAL_KERNEL_TREE', 'TOOLCHAIN_ROOT', 'TOOLCHAIN_BIN_PATH',
+                     'TOOLCHAIN_INC_PATH', 'TOOLCHAIN_LIB_PATH', 'DOWNLOAD_TOOL_CUSTOM',
+                     'DOWNLOAD_FOLDER', 'BUILD_SUFFIX'):
+            config.write_bytes(original + f'CONFIG_{name}="/unlocked"\n'.encode())
+            with self.subTest(selector=name), self.assertRaises(ValueError):
+                m.key(self.root, 'builder', 'tc')
+        config.write_bytes(original)
+        for name in m.OVERRIDES:
+            with self.subTest(override=name), patch.dict(os.environ, {name: '/unlocked'}):
+                with self.assertRaises(ValueError):
+                    m.key(self.root, 'builder', 'tc')
+        self.assertIn('CONFIGURE_CACHE_DIR', m.OVERRIDES)
+        for name in m.ESCAPES:
+            p = self.root / name
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text('# unreviewed include/source\n')
+            with self.subTest(escape=name), self.assertRaises(ValueError):
+                m.key(self.root, 'builder', 'tc')
+            p.unlink()
+
+    def test_config_site_base_environment_override_rejects_explicitly(self):
+        m = self.module()
+        setattr(m, 'REVIEWED', {m.inventory(self.root)})
+        # Independent of OVERRIDES: the native site/cache sources this file.
+        with patch.dict(os.environ, {'CONFIG_SITE_BASE': ''}):
+            baseline = m.key(self.root, 'builder', 'tc-one')
+            self.assertEqual(baseline, m.key(self.root, 'builder', 'tc-two'))
+        site = self.root.parent / 'external.site'
+        site.write_text('ac_cv_external_input=first\n')
+        for value in (str(site), str(self.root.parent / 'missing.site'), ' '):
+            with self.subTest(value=value), patch.dict(os.environ, {'CONFIG_SITE_BASE': value}):
+                with self.assertRaisesRegex(ValueError, 'environment overrides'):
+                    m.key(self.root, 'builder', 'tc-one')
+        site.write_text('ac_cv_external_input=changed\n')
+        with patch.dict(os.environ, {'CONFIG_SITE_BASE': str(site)}):
+            with self.assertRaisesRegex(ValueError, 'environment overrides'):
+                m.key(self.root, 'builder', 'tc-two')
+
     def test_unknown_source_binds_full_toolchain_key(self):
         a = self.cli('key', self.root, self.cache, 'builder', 'tc-one')
         self.assertEqual(a.returncode, 0, a.stderr)
@@ -476,6 +570,138 @@ class PreparedBootstrapTests(unittest.TestCase):
         self.assertIn(module.inventory(root), module.REVIEWED)
         self.assertEqual(module.key(root, 'builder', 'tc-one'),
                          module.key(root, 'builder', 'tc-two'))
+
+    def test_real_cli_lock_mutations_and_safe_fallbacks(self):
+        spec = importlib.util.spec_from_file_location('prepared_bootstrap_cli', SCRIPT)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        source = Path(os.environ['BOOTSTRAP_SOURCE'])
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'source'
+            root.mkdir()
+            for name in ('tools', 'scripts'):
+                shutil.copytree(source / name, root / name, symlinks=True)
+            for name in (*module.FIXED_INPUTS, '.config', '.external-packages.mk'):
+                src, dst = source / name, root / name
+                if src.is_file():
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src, dst)
+            self.assertIn(module.inventory(root), module.REVIEWED)
+
+            def cli(tc='tc-one', builder='builder', updates=None, fails=None):
+                env = dict(os.environ)
+                env.update(updates or {})
+                result = subprocess.run([sys.executable, str(SCRIPT), 'key', str(root),
+                                         str(Path(tmp) / 'cache'), builder, tc],
+                                        env=env, capture_output=True, text=True)
+                if fails:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(fails, result.stderr)
+                    self.assertEqual(result.stdout, '')
+                else:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertRegex(result.stdout, r'^[0-9a-f]{64}\n$')
+                return result
+
+            baseline = cli().stdout
+            self.assertEqual(baseline, cli('tc-two').stdout)
+            self.assertIn('reviewed-independent', cli().stderr)
+            self.assertNotEqual(baseline, cli(builder='different').stdout)
+            self.assertNotEqual(baseline, cli(updates={'LANG': 'changed'}).stdout)
+            cli(updates={'CONFIGURE_CACHE_DIR': '/unlocked'},
+                fails='environment overrides')
+            self.assertEqual(baseline, cli(updates={'CONFIG_SITE_BASE': ''}).stdout)
+            site = Path(tmp) / 'external.site'
+            for content in ('ac_cv_external_input=first\n', 'ac_cv_external_input=changed\n'):
+                site.write_text(content)
+                for tc in ('tc-one', 'tc-two'):
+                    with self.subTest(override='CONFIG_SITE_BASE', tc=tc, content=content):
+                        cli(tc, updates={'CONFIG_SITE_BASE': str(site)},
+                            fails='environment overrides')
+
+            def bound():
+                a, b = cli(), cli('tc-two')
+                self.assertNotEqual(a.stdout, baseline)
+                self.assertNotEqual(a.stdout, b.stdout)
+                self.assertIn('full-toolchain-bound', a.stderr)
+
+            for name in ('tools/ccache/Makefile', 'scripts/download.pl',
+                         'scripts/projectsmirrors.json', 'include/host-build.mk',
+                         'include/site/cache', 'include/rootfs.mk', 'package/Makefile',
+                         '.external-packages.mk'):
+                p = root / name
+                original, mode = p.read_bytes(), p.stat().st_mode & 0o777
+                for mutation in ('content', 'mode', 'missing'):
+                    with self.subTest(input=name, mutation=mutation):
+                        try:
+                            if mutation == 'content':
+                                p.write_bytes(original + b'\n# unknown source\n')
+                            elif mutation == 'mode':
+                                p.chmod(mode ^ 0o100)
+                            else:
+                                p.unlink()
+                            bound()
+                        finally:
+                            p.write_bytes(original)
+                            p.chmod(mode)
+                self.assertEqual(baseline, cli().stdout)
+            p = root / '.external-packages.mk'
+            original = p.read_bytes()
+            p.unlink()
+            p.symlink_to(root / 'tools/Makefile')
+            cli(fails='nonregular external make input')
+            p.unlink()
+            p.mkdir()
+            cli(fails='nonregular external make input')
+            p.rmdir()
+            p.write_bytes(original)
+            p.chmod(0o644)
+            cfg = root / '.config'
+            original, mode = cfg.read_bytes(), cfg.stat().st_mode & 0o777
+
+            def set_config(name, value):
+                # Real final configs can already contain an unset/assigned row.
+                lines = [line for line in original.splitlines(keepends=True)
+                         if not line.startswith((f'CONFIG_{name}='.encode(),
+                                                 f'# CONFIG_{name} is not set'.encode()))]
+                cfg.write_bytes(b''.join(lines) + f'CONFIG_{name}={value}\n'.encode())
+
+            try:
+                for name in ('EXTERNAL_TOOLCHAIN', 'SRC_TREE_OVERRIDE', 'NATIVE_TOOLCHAIN', 'SDK'):
+                    with self.subTest(rejected_selector=name):
+                        set_config(name, 'y')
+                        cli(fails='external/mutable bootstrap input')
+                for name in ('EXTERNAL_KERNEL_TREE', 'TOOLCHAIN_ROOT', 'TOOLCHAIN_BIN_PATH',
+                             'TOOLCHAIN_INC_PATH', 'TOOLCHAIN_LIB_PATH', 'DOWNLOAD_TOOL_CUSTOM',
+                             'DOWNLOAD_FOLDER', 'BUILD_SUFFIX'):
+                    with self.subTest(rejected_path=name):
+                        set_config(name, '"/unlocked"')
+                        cli(fails='unlocked external input')
+                set_config('BOOTSTRAP_BOUNDARY_TEST', 'y')
+                self.assertNotEqual(baseline, cli().stdout)
+                cfg.write_bytes(original)
+                cfg.chmod(0o600 if mode != 0o600 else 0o644)
+                self.assertNotEqual(baseline, cli().stdout)
+                cfg.chmod(mode)
+                for name in module.BOUND_SELECTORS:
+                    for value in ('y', 'm', 'n'):
+                        with self.subTest(selector=name, value=value):
+                            set_config(name, value)
+                            bound()
+                set_config('RUST_TOOLCHAIN_HOST_PATH', '"/unlocked/rust"')
+                bound()
+                # Rust make includes are deliberately outside the reviewed lock;
+                # changing one must not bypass the selector's full-key binding.
+                p = root / 'include/rust-values.mk'
+                p.write_text('include /unreviewed/rust.mk\n')
+                set_config('USE_RUST_TOOLCHAIN', 'y')
+                bound()
+                p.unlink()
+            finally:
+                cfg.write_bytes(original)
+                cfg.chmod(mode)
+            self.assertEqual(baseline, cli().stdout)
 
     def test_prepared_lock_keeps_source_config_and_environment_boundaries(self):
         spec = importlib.util.spec_from_file_location('prepared_bootstrap_boundaries', SCRIPT)
