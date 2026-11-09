@@ -62,6 +62,6 @@ Aurora 主题及配置插件通过官方签名 APK 软件源预装，可在 **�
 
 ## 构建与发布
 
-每日自动构建，计划时间为香港时间 12:00；也可手动运行 [Actions](https://github.com/yahuisme/mx4200-immortalwrt/actions/workflows/MX4200.yml)。
+每隔3天自动构建；也可手动运行 [Actions](https://github.com/yahuisme/mx4200-immortalwrt/actions/workflows/MX4200.yml)。
 
 每次构建自动选择官方最新稳定 Release 源码，不固定版本，版本显示沿用官方。使用 Ubuntu 24.04 ARM64 与 Debian Docker 环境，一次构建四个机型，按 MX4200、MX4300 两组发布，每组保留最新一版。

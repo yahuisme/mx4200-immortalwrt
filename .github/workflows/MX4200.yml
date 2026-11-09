@@ -3,9 +3,10 @@ name: MX4200 ImmortalWrt Builds
 on:
   workflow_dispatch:
 
-  # Daily at 12:00 Hong Kong time (04:00 UTC).
+  # Monthly days 1, 4, 7, 10... at 00:00 Hong Kong time.
   schedule:
-    - cron: '0 4 * * *'
+    - cron: '0 0 1-31/3 * *'
+      timezone: Asia/Hong_Kong
 concurrency:
   group: mx4200-build
   cancel-in-progress: false
