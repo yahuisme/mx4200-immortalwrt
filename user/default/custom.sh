@@ -4,7 +4,6 @@ export WRT_THEME=aurora WRT_SSID=MX4200 WRT_WORD=12345678 WRT_IP=192.168.10.1
 # Reject unreviewed sources before mirror, package or provenance writes.
 python3 /cache-scripts/external_packages.py preflight "$DK_OPENWRT"
 python3 /cache-scripts/homewrk_dts.py "$DK_OPENWRT"
-python3 /cache-scripts/homewrk_bdf.py "$DK_OPENWRT"
 python3 /cache-scripts/temperature.py "$DK_OPENWRT"
 # Keep regulatory reads and writes on the same extracted caldata file.
 python3 - "$DK_OPENWRT" <<'PY'

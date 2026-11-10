@@ -1,6 +1,7 @@
 """Execute current customization without requiring an unselected TLS recipe."""
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
 import tempfile
@@ -118,7 +119,7 @@ python3() {
             self.assertIn('review MAC protection', result.stderr)
             self.assertEqual(before, tree_contents(root))
 
-    def test_customization_patches_bdf_caldata_and_wifi_temperature(self):
+    def test_customization_preserves_native_bdf_and_patches_caldata_and_temperature(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / 'package').mkdir()
@@ -133,10 +134,14 @@ python3() {
             dts.parent.mkdir(parents=True)
             original_dts = (ROOT / 'tests/fixtures/homewrk/stable-homewrk.dts').read_text()
             dts.write_text(original_dts)
-            from test_homewrk_bdf import IMAGE, NATIVE
-            image = root / IMAGE
+            native_image = ('define Device/linksys_homewrk\n'
+                            '\tDEVICE_PACKAGES += kmod-leds-pca963x ipq-wifi-linksys_homewrk\n'
+                            'endef\nTARGET_DEVICES += linksys_homewrk\n\n'
+                            'define Device/linksys_mx4x00\n'
+                            '\tDEVICE_PACKAGES += ipq-wifi-linksys_mx4200\nendef\n')
+            image = root / 'target/linux/qualcommax/image/ipq807x.mk'
             image.parent.mkdir(parents=True)
-            image.write_text(NATIVE)
+            image.write_text(native_image)
             tempinfo = root / 'package/emortal/autocore/files/tempinfo'
             tempinfo.parent.mkdir(parents=True)
             tempinfo.write_bytes((ROOT / 'tests/fixtures/tempinfo.sh').read_bytes())
@@ -145,7 +150,6 @@ python3() {
             caldata.write_bytes((ROOT / 'tests/fixtures/ath11k-caldata-helper.sh').read_bytes())
             env = dict(os.environ, DK_OPENWRT=tmp, LOG=str(root / 'calls'),
                        HOMEWRK_HELPER=str(ROOT / 'scripts/homewrk_dts.py'),
-                       BDF_HELPER=str(ROOT / 'scripts/homewrk_bdf.py'),
                        TEMP_HELPER=str(ROOT / 'scripts/temperature.py'),
                        REAL_EXTERNAL=str(ROOT / 'scripts/external_packages.py'))
             boundary = '''
@@ -170,12 +174,6 @@ python3() {
         command python3 "$REAL_EXTERNAL" "$@"
         return "$?"
     fi
-    if [ "$1" = /cache-scripts/homewrk_bdf.py ]; then
-        printf 'bdf\\n' >> "$LOG"
-        shift
-        command python3 "$BDF_HELPER" "$@"
-        return "$?"
-    fi
     if [ "$1" = /cache-scripts/temperature.py ]; then
         printf 'temperature\\n' >> "$LOG"
         shift
@@ -190,10 +188,11 @@ python3() {
                                     cwd=root, env=env, text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual((root / 'calls').read_text().splitlines(),
-                             ['preflight', 'homewrk', 'bdf', 'temperature', 'packages', 'settings'])
-            self.assertIn('"Linksys-MX4200v1"', dts.read_text())
-            self.assertEqual(image.read_text(), NATIVE.replace(
-                'ipq-wifi-linksys_homewrk', 'ipq-wifi-linksys_mx4200'))
+                             ['preflight', 'homewrk', 'temperature', 'packages', 'settings'])
+            selector = r'qcom,(?:ath11k-)?calibration-variant\s*=\s*"[^"]+";'
+            self.assertEqual(re.findall(selector, dts.read_text()),
+                             re.findall(selector, original_dts))
+            self.assertEqual(image.read_text(), native_image)
             self.assertIn('status = "disabled";', dts.read_text())
             self.assertEqual(caldata.read_text(),
                              (ROOT / 'tests/fixtures/ath11k-caldata-helper.sh').read_text().replace(
