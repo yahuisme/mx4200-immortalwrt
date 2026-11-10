@@ -119,7 +119,7 @@ python3() {
             self.assertIn('review MAC protection', result.stderr)
             self.assertEqual(before, tree_contents(root))
 
-    def test_customization_preserves_native_bdf_and_patches_caldata_and_temperature(self):
+    def test_customization_preserves_native_bdf_and_temperature_and_patches_caldata(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / 'package').mkdir()
@@ -150,7 +150,6 @@ python3() {
             caldata.write_bytes((ROOT / 'tests/fixtures/ath11k-caldata-helper.sh').read_bytes())
             env = dict(os.environ, DK_OPENWRT=tmp, LOG=str(root / 'calls'),
                        HOMEWRK_HELPER=str(ROOT / 'scripts/homewrk_dts.py'),
-                       TEMP_HELPER=str(ROOT / 'scripts/temperature.py'),
                        REAL_EXTERNAL=str(ROOT / 'scripts/external_packages.py'))
             boundary = '''
 bash() {
@@ -174,12 +173,6 @@ python3() {
         command python3 "$REAL_EXTERNAL" "$@"
         return "$?"
     fi
-    if [ "$1" = /cache-scripts/temperature.py ]; then
-        printf 'temperature\\n' >> "$LOG"
-        shift
-        command python3 "$TEMP_HELPER" "$@"
-        return "$?"
-    fi
     if [ "$1" = - ]; then command python3 "$@"; return "$?"; fi
     return 99
 }
@@ -188,7 +181,7 @@ python3() {
                                     cwd=root, env=env, text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual((root / 'calls').read_text().splitlines(),
-                             ['preflight', 'homewrk', 'temperature', 'packages', 'settings'])
+                             ['preflight', 'homewrk', 'packages', 'settings'])
             selector = r'qcom,(?:ath11k-)?calibration-variant\s*=\s*"[^"]+";'
             self.assertEqual(re.findall(selector, dts.read_text()),
                              re.findall(selector, original_dts))
@@ -198,9 +191,8 @@ python3() {
                              (ROOT / 'tests/fixtures/ath11k-caldata-helper.sh').read_text().replace(
                                  '\tlocal target=$1\n',
                                  '\tlocal target=${1:-/lib/firmware/$FIRMWARE}\n', 1))
-            from scripts.temperature import OLD, NEW
-            self.assertEqual(tempinfo.read_text(),
-                             (ROOT / 'tests/fixtures/tempinfo.sh').read_text().replace(OLD, NEW, 1))
+            self.assertEqual(tempinfo.read_bytes(),
+                             (ROOT / 'tests/fixtures/tempinfo.sh').read_bytes())
             self.assertFalse((root / 'feeds/packages/libs/gnutls/Makefile').exists())
 
 
