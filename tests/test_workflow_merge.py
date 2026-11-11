@@ -13,8 +13,6 @@ tar() { record "extract:$3"; }
 sudo() {
     case "$1" in
         python3) record snapshot;;
-        tee) record daemon; command cat >/dev/null;;
-        systemctl) record reload;;
         *) return 99;;
     esac
 }
@@ -33,12 +31,12 @@ install() { record install; command cat > "$RUNNER_TEMP/docker_exec"; }
 CACHE_STUB = r'''
 record() { printf '%s\n' "$1" >> "$LOG"; [ "$FAIL" != "$1" ]; }
 docker_exec() { record "$4"; }
-sudo() { [ "$1" = chown ]; record chown; }
+sudo() { [ "$1" = chown ] || return 1; record chown; }
 python3() {
-    record admit
-    [ "$1" = scripts/cache_helper.py ] && [ "$2" = admit ]
-    [ "$3" = cc-v1-mx4200-arm64. ] && [ "$4" = ccarchive/ccache.tar.gz ]
-    [ "$5" = cc-v1-mx4200-arm64.new ]
+    record admit || return 1
+    [ "$#" = 5 ] && [ "$1" = scripts/cache_helper.py ] && [ "$2" = admit ] &&
+    [ "$3" = cc-v1-mx4200-arm64. ] && [ "$4" = ccarchive/ccache.tar.gz ] &&
+    [ "$5" = cc-v1-mx4200-arm64.new ] || return 1
     printf 'save=%s\n' "$ADMIT" >> "$GITHUB_OUTPUT"
 }
 '''
@@ -59,7 +57,7 @@ class WorkflowMergeTests(unittest.TestCase):
             self.assertIn(step(name), STEPS)
 
     def test_complete_environment_success_and_early_failures(self):
-        expected = ['snapshot', 'daemon', 'reload', 'build', 'image', 'run', 'exec', 'install']
+        expected = ['snapshot', 'build', 'image', 'run', 'exec', 'install']
         for fail in ['', *expected, 'missing-config']:
             with self.subTest(fail=fail), tempfile.TemporaryDirectory() as tmp:
                 base = Path(tmp)
@@ -85,6 +83,35 @@ class WorkflowMergeTests(unittest.TestCase):
                     self.assertEqual((base/'env').read_text(),
                                      f'IMAGE_ID=sha256:{1:064d}\nBUILDER_FINGERPRINT={2:064d}\n')
                     self.assertIn('exec docker exec', (base/'docker_exec').read_text())
+
+    def test_cache_save_reuses_archive_admission(self):
+        for item in STEPS:
+            if item.get('uses') == 'actions/cache/save@v6':
+                self.assertNotIn('hashFiles(', item['if'], item['name'])
+                self.assertIn("outputs.save == 'true'", item['if'], item['name'])
+        self.assertNotIn('hashFiles(', step('tb_budget')['if'])
+
+    def test_cache_stub_rejects_wrong_admission_arguments(self):
+        arguments = ['scripts/cache_helper.py', 'admit', 'cc-v1-mx4200-arm64.',
+                     'ccarchive/ccache.tar.gz', 'cc-v1-mx4200-arm64.new']
+        cases = [('valid', arguments, '')]
+        for index in range(len(arguments)):
+            wrong = arguments.copy()
+            wrong[index] = 'unexpected'
+            cases.append((f'argument-{index}', wrong, ''))
+        cases += [('missing', arguments[:-1], ''), ('extra', arguments + ['extra'], ''),
+                  ('record-failure', arguments, 'admit')]
+        for name, actual, failure in cases:
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as tmp:
+                base = Path(tmp)
+                # Conditional callers suppress errexit inside functions.
+                result = subprocess.run(['bash', '-eo', 'pipefail', '-c', CACHE_STUB +
+                                         '\nstatus=0; python3 "$@" || status=$?; exit "$status"',
+                                         'fixture', *actual], cwd=base, capture_output=True, text=True,
+                                        env=dict(os.environ, FAIL=failure, ADMIT='true',
+                                                 LOG=str(base / 'calls'), GITHUB_OUTPUT=str(base / 'output')))
+                self.assertEqual(result.returncode == 0, name == 'valid', result.stderr)
+                self.assertEqual((base / 'output').exists(), name == 'valid')
 
     def test_complete_cache_success_denial_and_early_failures(self):
         for warm in (False, True):

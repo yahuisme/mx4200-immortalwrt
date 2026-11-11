@@ -1,5 +1,6 @@
 """Bootstrap snapshot producer/consumer boundaries; execute real YAML shell."""
 import os
+import json
 from pathlib import Path
 import re
 import subprocess
@@ -7,6 +8,7 @@ import tempfile
 import unittest
 import yaml
 from test_cache_workflow import render_env
+from test_cache_helper import GH
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -93,6 +95,32 @@ class BootstrapWorkflowTests(unittest.TestCase):
                 else:
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(output.read_text(), 'key=tb-v1-mx4200-arm64-' + digest + '\n')
+
+    def test_optional_bootstrap_archive_uses_real_admission(self):
+        block = next(s['run'] for s in steps() if s.get('id') == 'tb_budget')
+        for size in (None, 0, 100, 1_000_000_001):
+            with self.subTest(size=size), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / 'scripts').symlink_to(ROOT / 'scripts')
+                archive = root / 'tbarchive/bootstrap.tar.gz'
+                archive.parent.mkdir()
+                if size is not None:
+                    with archive.open('wb') as stream:
+                        stream.truncate(size)
+                (root / 'gh').write_text(GH)
+                (root / 'gh').chmod(0o755)
+                state = root / 'state.json'
+                state.write_text(json.dumps(dict(entries=[], calls=[], reads=0)))
+                output = root / 'output'
+                result = subprocess.run(['bash', '-eo', 'pipefail', '-c',
+                                         'sudo() { :; };\n' + block], cwd=root,
+                                        env=dict(os.environ, PATH=tmp + ':' + os.environ['PATH'],
+                                                 MOCK_STATE=str(state), GITHUB_REF='refs/heads/main',
+                                                 GITHUB_OUTPUT=str(output), BOOTSTRAP_KEY='tb-v1-mx4200-arm64-new'),
+                                        text=True, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(output.read_text(), 'save=' + str(size == 100).lower() + '\n')
+                self.assertEqual(bool(json.loads(state.read_text())['calls']), size == 100)
 
     def test_bootstrap_save_is_confirmed_before_next_tier(self):
         all_steps = steps()

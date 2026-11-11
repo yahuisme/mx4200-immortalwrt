@@ -116,6 +116,7 @@ export -f make docker_exec sudo python3 official_download_python3 git
                       # A raw action hit can be rejected during extraction.
                       'steps.tc.outputs.cache-hit': 'true', 'steps.tb.outputs.cache-hit': 'true',
                       'steps.tc_restore.outputs.hit': tc_hit,
+                      'steps.environment.outcome': 'failure' if fault == 'environment' else 'success',
                       'steps.tb_restore.outputs.hit': tb_hit,
                       'steps.tb_inputs.outputs.key': 'tb-v1-mx4200-arm64-new',
                       'secrets.RELEASE_TOKEN': 'fixture-token',
@@ -124,7 +125,7 @@ export -f make docker_exec sudo python3 official_download_python3 git
                       'steps.dl.outputs.cache-primary-key': 'dl-v1-mx4200-arm64.new',
                       'steps.dl_restore.outputs.matched-key': '',
                       'steps.stage.outcome': 'skipped'}
-            successful, cancelled = True, False
+            successful, cancelled = fault != 'environment', False
             outcomes, executed, logs = {}, [], []
             def condition(expr):
                 expression = expr.removeprefix('${{').removesuffix('}}').strip()
@@ -147,6 +148,8 @@ export -f make docker_exec sudo python3 official_download_python3 git
                     cancelled = True
                 if not condition(item.get('if', 'True')):
                     outcomes[name] = 'skipped'
+                    if item.get('id'):
+                        values[f"steps.{item['id']}.outcome"] = 'skipped'
                     continue
                 executed.append(name)
                 if 'run' in item:
@@ -187,6 +190,15 @@ export -f make docker_exec sudo python3 official_download_python3 git
                 self.assertEqual(any(line.startswith('make tools/ccache/compile') for line in calls), want_make, log)
                 self.assertEqual('bootstrap pack' in log, want_pack, log)
                 self.assertEqual(outcomes['Publish firmware and prune releases'], 'success', log)
+
+    def test_early_failure_and_cancellation_skip_empty_diagnostics(self):
+        for fault in ('environment', 'cancel', 'compile', 'metadata'):
+            with self.subTest(fault=fault):
+                outcomes, _, _, log = self.replay(fault)
+                wanted = fault not in ('environment', 'cancel')
+                for name in ('Collect build record', 'Upload build record'):
+                    self.assertEqual(outcomes[name] != 'skipped', wanted, log)
+                self.assertEqual(outcomes['Publish firmware and prune releases'], 'skipped', log)
 
     def test_unverified_poison_eviction_still_compiles_and_publishes_without_exact_save(self):
         outcomes, executed, inventory, log = self.replay('none', repair='false')
@@ -252,7 +264,8 @@ export -f make docker_exec sudo python3 official_download_python3 git
                     self.assertEqual({item['key'] for item in inventory['entries']},
                                      {'cc-v1-mx4200-arm64.new', 'tc-v1-mx4200-arm64-new',
                                       'dl-v1-mx4200-arm64.new'}, log)
-                    self.assertEqual(outcomes['Check bootstrap cache budget'], 'skipped', log)
+                    self.assertEqual(outcomes['Check bootstrap cache budget'], 'success', log)
+                    self.assertEqual(outcomes['Save compiler bootstrap'], 'skipped', log)
                 elif fault in ('bootstrap_save', 'bootstrap_readback'):
                     self.assertEqual(outcomes['Check download cache budget'], 'skipped', log)
                     self.assertIn(3, {item['id'] for item in inventory['entries']}, log)
