@@ -11,12 +11,13 @@ import subprocess
 import sys
 
 try:
-    from . import cache_config
+    from . import cache_config, toolchain_archive
 except ImportError:
     try:
-        from scripts import cache_config
+        from scripts import cache_config, toolchain_archive
     except ImportError:
         import cache_config
+        import toolchain_archive
 
 try:
     from .build_profile import load
@@ -55,10 +56,11 @@ def record_input_group(groups, name, record):
 def key(root, builder):
     # Final defconfig; ignore only hash-only canonical unselected-package noise.
     # Archive/upload edits do not participate in the compatibility policy.
-    digest = hashlib.sha256(json.dumps(['tc-inputs-v10', builder, os.uname().machine,
+    digest = hashlib.sha256(json.dumps(['tc-inputs-v11', builder, os.uname().machine,
                                       str(root), EPOCH, INPUTS,
                                       key_policy_source(),
-                                      hashlib.sha256(cache_config.policy_bytes()).hexdigest()]).encode())
+                                      hashlib.sha256(cache_config.policy_bytes()).hexdigest(),
+                                      hashlib.sha256(toolchain_archive.policy_bytes()).hexdigest()]).encode())
     groups = {'environment': digest.copy(), **{name: hashlib.sha256() for name in INPUTS}}  # cache diagnostic
     if not (root / '.config').is_file():
         raise ValueError('missing input: .config')
@@ -151,8 +153,9 @@ def restore(root, cache, expected):
     if (cache / 'toolchain.tar.gz').exists():
         if (cache / 'key').read_text().strip() != expected:
             raise ValueError('toolchain key mismatch')
+        toolchain_archive.validate_archive(cache / 'toolchain.tar.gz', root)
         subprocess.run(['tar', '--gzip', '-xf', str(cache / 'toolchain.tar.gz'),
-                        '-C', str(root)], check=True)
+                        '--no-same-owner', '-C', str(root)], check=True)
         print('exact toolchain restored')
     else:
         print('cold toolchain')
@@ -173,6 +176,12 @@ def pack(root, cache, kind, expected):
     compressor = 'pigz -1' if shutil.which('pigz') else 'gzip -1'
     subprocess.run(['tar', '--format=posix', '-I', compressor, '-cf', str(archive),
                     '-C', str(base), *names], check=True)
+    if kind == 'toolchain':
+        try:
+            toolchain_archive.validate_archive(archive, root)
+        except Exception:
+            archive.unlink(missing_ok=True)
+            raise
     size = archive.stat().st_size
     print(f'{kind}: measured compressed bytes={size}, cap={LIMITS[kind]}')
     if size > LIMITS[kind]:
