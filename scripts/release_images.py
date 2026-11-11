@@ -32,12 +32,14 @@ def validate_images(directory, names):
 
 def stage(targets, output, group=None):
     contract = load(PROFILE)
-    groups = contract['release_groups']
+    all_groups = contract['release_groups']
+    groups = all_groups
     if group is not None:
-        groups = {group: groups[group]}
+        groups = {group: all_groups[group]}
     external = set(contract.get('external_images', []))
-    names = {name for item in groups.values() for name in item['images']} - external
-    boards = {board for item in groups.values() for board in item['profiles']}
+    # GROUP selects output only; input validation always covers every native image.
+    names = {name for item in all_groups.values() for name in item['images']} - external
+    boards = {board for item in all_groups.values() for board in item['profiles']}
     directory = targets / contract['target']
     selected = image_paths(targets, recursive=True, names=names)
     # Auxiliary binaries are allowed, but never another target's flash image.

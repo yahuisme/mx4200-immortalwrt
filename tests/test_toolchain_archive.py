@@ -117,6 +117,63 @@ class ToolchainArchiveTests(unittest.TestCase):
         self.assertEqual((self.root / 'build_dir/toolchain-test/hard').stat().st_ino,
                          (self.root / 'build_dir/toolchain-test/data').stat().st_ino)
 
+    def test_native_autoreconf_script_link_packs_and_restores(self):
+        # include/autotools.mk in official v25.12.2 creates this absolute
+        # source-script link inside host packages; do not dereference it.
+        script = self.root / 'scripts/config.rpath'
+        script.parent.mkdir(mode=0o755)
+        script.write_text('#!/bin/sh\nexit 0\n')
+        script.chmod(0o755)
+        self.archive_entries()
+        self.assertEqual(self.cli().stdout, 'hit=true\nmatched-key=matched\npoisoned=false\n')
+        link = self.root / 'build_dir/host/gmp-6.3.0/config.rpath'
+        link.parent.mkdir()
+        subprocess.run(['ln', '-s', str(script), str(link)], check=True)
+        pack = subprocess.run([sys.executable, str(SCRIPT.with_name('cache.py')),
+                               'toolchain', str(self.root), str(self.archive), 'matched'],
+                              text=True, capture_output=True)
+        self.assertEqual(pack.returncode, 0, pack.stdout + pack.stderr)
+        with tarfile.open(self.archive / 'toolchain.tar.gz', 'r:gz') as tf:
+            member = tf.getmember(link.relative_to(self.root).as_posix())
+            self.assertTrue(member.issym())
+            self.assertEqual(member.linkname, str(script))
+        restored = self.cli()
+        self.assertEqual(restored.returncode, 0, restored.stderr)
+        self.assertEqual(restored.stdout, 'hit=true\nmatched-key=matched\npoisoned=false\n')
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(link.read_bytes(), script.read_bytes())
+
+    def test_autoreconf_exception_remains_exact_and_source_locked(self):
+        script = self.root / 'scripts/config.rpath'
+        script.parent.mkdir(mode=0o755)
+        good = ('build_dir/host/gmp-6.3.0/config.rpath', str(script), 'regular')
+        cases = [
+            ('build_dir/host/gmp-6.3.0/config.rpath', str(self.root / 'scripts/noop.sh'), 'regular'),
+            ('build_dir/host/gmp-6.3.0/other', str(script), 'regular'),
+            ('staging_dir/host/share/config.rpath', str(script), 'regular'),
+            ('build_dir/host/config.rpath', str(script), 'regular'),
+            (good[0], '../../../scripts/config.rpath', 'regular'),
+            (good[0], str(script), 'missing'),
+            (good[0], str(script), 'nonexec'),
+            (good[0], str(script), 'writable'),
+            (good[0], str(script), 'symlink'),
+        ]
+        for name, target, state in cases:
+            with self.subTest(name=name, target=target, state=state):
+                script.unlink(missing_ok=True)
+                if state != 'missing':
+                    script.write_text('#!/bin/sh\nexit 0\n')
+                    script.chmod({'nonexec': 0o644, 'writable': 0o777}.get(state, 0o755))
+                if state == 'symlink':
+                    script.unlink()
+                    script.symlink_to('/bin/sh')
+                self.archive_entries([self.member(name, tarfile.SYMTYPE, target)])
+                result = self.cli()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, 'hit=false\nmatched-key=\npoisoned=true\n')
+                self.assertFalse((self.root / 'build_dir').exists())
+                self.assertEqual(list(self.archive.iterdir()), [])
+
     def test_valid_toolchain_graph_restores_and_hits(self):
         self.archive_entries()
         result = self.cli()

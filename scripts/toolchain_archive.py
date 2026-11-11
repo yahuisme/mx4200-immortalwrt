@@ -30,6 +30,10 @@ def _link_target(name, entry, root):
                 # permissions by inventory(). Never admit arbitrary TOPDIR links.
                 script = {'staging_dir/host/bin/xxd': 'scripts/xxdi.pl',
                           'staging_dir/host/bin/ldconfig': 'scripts/noop.sh'}.get(name)
+                # Native autoreconf supplies this input to host build trees.
+                if (name.startswith('build_dir/host/') and len(Path(name).parts) >= 4
+                        and Path(name).name == 'config.rpath'):
+                    script = 'scripts/config.rpath'
                 if script is None or entry.linkname != str(root / script):
                     raise ValueError('archive link escapes host pair: ' + name)
                 if any(p.is_symlink() for p in (target, *target.parents)):

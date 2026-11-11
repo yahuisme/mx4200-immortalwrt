@@ -268,6 +268,132 @@ class HomewrkDtsTests(unittest.TestCase):
                             prepare(tmp)
                         self.assertEqual(path.read_text(), changed)
 
+    def test_commented_mac_and_nand_contracts_fail_before_writes(self):
+        from scripts.homewrk_dts import ANCHOR, GUARD, prepare
+        for layout in ('stable', 'newer'):
+            for guarded in (False, True):
+                for style in ('block', 'line'):
+                    for target in ('cell', 'cell-compatible', 'cell-width', 'layout-compatible',
+                                   'consumer', 'consumer-name', 'port2', 'port3', 'port4', 'port5',
+                                   'nand-controller', 'nand-node', 'partition-compatible'):
+                        with self.subTest(layout=layout, guarded=guarded, style=style, target=target), \
+                                tempfile.TemporaryDirectory() as tmp:
+                            relative = (Path('target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8174-homewrk.dts')
+                                        if layout == 'stable' else DTS)
+                            path = Path(tmp) / relative
+                            path.parent.mkdir(parents=True)
+                            path.write_text((FIXTURE.parent / 'stable-homewrk.dts').read_text()
+                                            if layout == 'stable' else FIXTURE.read_text())
+                            prepare(tmp)
+                            text = path.read_text()
+                            if not guarded:
+                                text = text.replace(GUARD, '', 1)
+                            if target == 'cell':
+                                start = text.index('\t\t\tpartition-devinfo {')
+                                end = text.index('\n\t\t};', start)
+                                payload = text[start:end]
+                            elif target.startswith('port'):
+                                prefix = 'dp' if layout == 'stable' else 'swport'
+                                start = text.index(f'&{prefix}{target[-1]} {{')
+                                payload = text[start:text.index('\n};', start) + 3]
+                            else:
+                                payload = {
+                                    'cell-compatible': 'compatible = "mac-base";',
+                                    'cell-width': '#nvmem-cell-cells = <1>;',
+                                    'layout-compatible': 'compatible = "ascii-eq-delim-env";',
+                                    'consumer': 'nvmem-cells = <&mac_address 0>;\n\tnvmem-cell-names = "mac-address";',
+                                    'consumer-name': 'nvmem-cell-names = "mac-address";',
+                                    'nand-controller': ANCHOR,
+                                    'nand-node': '\n\tnand@0 {',
+                                    'partition-compatible': 'compatible = "qcom,smem-part";',
+                                }[target]
+                            self.assertIn(payload, text)
+                            comment = ('/*\n' + payload + '\n*/' if style == 'block' else
+                                       '\n'.join('// ' + line for line in payload.split('\n')))
+                            changed = text.replace(payload, comment, 1)
+                            path.write_text(changed)
+                            mode, mtime = path.stat().st_mode, path.stat().st_mtime_ns
+                            with self.assertRaisesRegex(ValueError, 'review MAC protection'):
+                                prepare(tmp)
+                            self.assertEqual(path.read_text(), changed)
+                            self.assertEqual(path.stat().st_mode, mode)
+                            self.assertEqual(path.stat().st_mtime_ns, mtime)
+
+    def test_stable_commented_insertion_targets_fail_before_writes(self):
+        from scripts.homewrk_dts import ANCHOR, prepare
+        original = (FIXTURE.parent / 'stable-homewrk.dts').read_text()
+        partition = '\t\tpartitions {\n\t\t\tcompatible = "qcom,smem-part";\n\t\t};'
+        for payload in (partition, ANCHOR, *(original[original.index(f'&dp{port} {{'):
+                          original.index('\n};', original.index(f'&dp{port} {{')) + 3]
+                          for port in (2, 3, 4, 5))):
+            with self.subTest(target=payload), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / 'target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8174-homewrk.dts'
+                path.parent.mkdir(parents=True)
+                changed = original.replace(payload, '/*\n' + payload + '\n*/', 1)
+                path.write_text(changed)
+                mtime = path.stat().st_mtime_ns
+                with self.assertRaisesRegex(ValueError, 'review MAC protection'):
+                    prepare(tmp)
+                self.assertEqual(path.read_text(), changed)
+                self.assertEqual(path.stat().st_mtime_ns, mtime)
+
+    def test_comment_mask_preserves_quotes_offsets_and_newlines(self):
+        from scripts.homewrk_dts import mask_comments
+        quoted = r'url = "http://host/a/*literal*/"; note = "escaped \" // /* text"; slash = "\\";'
+        source = quoted + ' /* hidden " quote\nand node {}; */\n// hidden " quote\nactive;'
+        masked = mask_comments(source)
+        self.assertEqual(masked[:len(quoted)], quoted)
+        self.assertEqual(len(masked), len(source))
+        self.assertEqual([i for i, char in enumerate(masked) if char == '\n'],
+                         [i for i, char in enumerate(source) if char == '\n'])
+        self.assertEqual(masked[source.index('/* hidden'):source.index('\nactive;')],
+                         ' ' * len('/* hidden " quote') + '\n' + ' ' * len('and node {}; */') +
+                         '\n' + ' ' * len('// hidden " quote'))
+        self.assertEqual(masked[source.index('active;'):], 'active;')
+        self.assertEqual(mask_comments('value; // comment at EOF'), 'value; ' + ' ' * len('// comment at EOF'))
+        for text in ('/* unclosed', 'note = "unclosed', 'note = "escaped \\"'):
+            with self.subTest(text=text), self.assertRaisesRegex(ValueError, 'review MAC protection'):
+                mask_comments(text)
+
+    def test_comments_and_quoted_markers_survive_source_edits(self):
+        from scripts.homewrk_dts import ANCHOR, GUARD, prepare
+        literals = ('\n/ {\n\tcomment-markers = ' +
+                    r'"http://host/a/*literal*/", "escaped \" // /* text", "\\";' + '\n};\n')
+        for layout in ('stable', 'newer'):
+            with self.subTest(layout=layout), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                relative = (Path('target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8174-homewrk.dts')
+                            if layout == 'stable' else DTS)
+                raw = ((FIXTURE.parent / 'stable-homewrk.dts').read_text()
+                       if layout == 'stable' else FIXTURE.read_text())
+                baseline = root / 'baseline' / relative
+                baseline.parent.mkdir(parents=True)
+                baseline.write_text(raw)
+                prepare(root / 'baseline')
+                expected = baseline.read_text()
+                # Exact inactive copies must never receive the real source edits.
+                decoy = ('/*\n' + raw.replace('/*', 'comment-open').replace('*/', 'comment-close') +
+                         '\nmac_address: mac_address {\n};\n' + GUARD.replace('/*', '').replace('*/', '') +
+                         '\n*/\n// nvmem-cells = <&mac_address 99>;\n')
+                path = root / 'actual' / relative
+                path.parent.mkdir(parents=True)
+                path.write_text(decoy + raw + literals)
+                path.chmod(0o640)
+                prepare(root / 'actual')
+                modified = path.read_text()
+                self.assertEqual(modified, decoy + expected + literals)
+                self.assertEqual(path.stat().st_mode & 0o777, 0o640)
+                mtime = path.stat().st_mtime_ns
+                prepare(root / 'actual')
+                self.assertEqual(path.read_text(), modified)
+                self.assertEqual(path.stat().st_mtime_ns, mtime)
+                blob = self.compile(root, modified)
+                fixup(blob)
+                self.assertEqual(get(blob, '/nand-controller/partitions', 'status').stdout.strip(), 'disabled')
+                self.assertEqual(get(blob, '/', 'comment-markers').stdout.splitlines(),
+                                 ['http://host/a/*literal*/ escaped " // /* text \\'])
+                self.assertEqual(modified.count(ANCHOR), decoy.count(ANCHOR) + expected.count(ANCHOR))
+
     def test_mac_reference_survives_bootloader_fixup(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -19,16 +19,17 @@ class ImageStageTests(unittest.TestCase):
         targets = root / 'targets'
         directory = targets / 'qualcommax/ipq807x'
         directory.mkdir(parents=True)
-        for device in ('mx4200v1', 'mx4200v2'):
+        # GROUP selects output only; every fixture supplies all four native profiles.
+        profiles = {}
+        for device in ('mx4200v1', 'mx4200v2', 'mx4300', 'homewrk'):
+            images = []
             for kind in ('factory', 'sysupgrade'):
-                name = f'immortalwrt-qualcommax-ipq807x-linksys_{device}-squashfs-{kind}.bin'
+                suffix = 'ubi' if device == 'homewrk' and kind == 'factory' else 'bin'
+                name = f'immortalwrt-qualcommax-ipq807x-linksys_{device}-squashfs-{kind}.{suffix}'
                 (directory / name).write_bytes(name.encode())
-        data: dict = dict(target='qualcommax/ipq807x', version_code='r123-abcdef',
-                    profiles={f'linksys_{device}': {'images': [
-                        dict(name=p.name, type=kind, filesystem='squashfs', size=p.stat().st_size)
-                        for kind in ('factory', 'sysupgrade')
-                        for p in [directory / f'immortalwrt-qualcommax-ipq807x-linksys_{device}-squashfs-{kind}.bin']]}
-                        for device in ('mx4200v1', 'mx4200v2')})
+                images.append(dict(name=name, type=kind, filesystem='squashfs', size=len(name.encode())))
+            profiles['linksys_' + device] = dict(images=images)
+        data: dict = dict(target='qualcommax/ipq807x', version_code='r123-abcdef', profiles=profiles)
         (directory / 'profiles.json').write_text(json.dumps(data))
         return targets, directory, data
 
@@ -41,8 +42,7 @@ class ImageStageTests(unittest.TestCase):
             with patch.object(hashlib, 'file_digest', side_effect=AssertionError('unused staging hash')):
                 self.assertIsNone(release_images.stage(targets, output, "mx4200"))
             self.assertEqual({p.name: p.read_bytes() for p in output.iterdir()},
-                             {p.name: p.read_bytes() for p in directory.glob('*.bin')
-                              if p.name != 'auxiliary.bin'})
+                             {p.name: p.read_bytes() for p in directory.glob('*linksys_mx4200*-*.bin')})
             self.assertEqual(len(list(output.iterdir())), 4)
 
     def test_rejects_invalid_image_sets_across_all_targets_before_copy(self):

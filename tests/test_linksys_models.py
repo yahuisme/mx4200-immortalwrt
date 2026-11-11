@@ -92,16 +92,75 @@ class LinksysModelsTests(unittest.TestCase):
         (directory / 'profiles.json').write_text(json.dumps(data))
         return profile, targets, directory, data
 
+    def test_group_selects_output_but_validates_complete_native_inventory(self):
+        module = helper('release_images')
+        for selected in ('mx4200', 'mx4300-homewrk'):
+            with self.subTest(selected=selected), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                profile, targets, directory, _ = self.fixture(root)
+                with patch('hashlib.file_digest', side_effect=AssertionError('staging must not hash')):
+                    module.stage(targets, root / 'firmware', selected)
+                expected = {name for name in profile['release_groups'][selected]['images']
+                            if name not in profile['external_images']}
+                self.assertEqual({p.name: p.read_bytes() for p in (root / 'firmware').iterdir()},
+                                 {name: (directory / name).read_bytes() for name in expected})
+                self.assertTrue(all(p.is_file() and not p.is_symlink() and p.stat().st_size
+                                    for p in (root / 'firmware').iterdir()))
+
+    def test_group_rejects_input_missing_entire_unselected_group(self):
+        module = helper('release_images')
+        for selected, omitted in (
+                ('mx4200', 'mx4300-homewrk'), ('mx4300-homewrk', 'mx4200')):
+            with self.subTest(selected=selected, omitted=omitted), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                profile, targets, directory, data = self.fixture(root)
+                for board in profile['release_groups'][omitted]['profiles']:
+                    data['profiles'].pop(board)
+                    for path in directory.glob('*-' + board + '-*'):
+                        path.unlink()
+                (directory / 'profiles.json').write_text(json.dumps(data))
+                with self.assertRaises(ValueError):
+                    module.stage(targets, root / 'firmware', selected)
+                self.assertFalse((root / 'firmware').exists())
+
+    def test_group_selection_rejects_damage_in_unselected_group_before_output(self):
+        module = helper('release_images')
+        for selected, damaged in (
+                ('mx4200', 'mx4300-homewrk'), ('mx4300-homewrk', 'mx4200')):
+            for fault in ('missing-file', 'empty-file', 'missing-profile', 'bad-metadata'):
+                with self.subTest(selected=selected, damaged=damaged, fault=fault), tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    profile, targets, directory, data = self.fixture(root)
+                    name = next(name for name in profile['release_groups'][damaged]['images']
+                                if name not in profile['external_images'])
+                    if fault == 'missing-file':
+                        (directory / name).unlink()
+                    elif fault == 'empty-file':
+                        (directory / name).write_bytes(b'')
+                    elif fault == 'missing-profile':
+                        board = profile['release_groups'][damaged]['profiles'][0]
+                        data['profiles'].pop(board)
+                        (directory / 'profiles.json').write_text(json.dumps(data))
+                    else:
+                        board = profile['release_groups'][damaged]['profiles'][0]
+                        data['profiles'][board]['images'][0]['size'] += 1
+                        (directory / 'profiles.json').write_text(json.dumps(data))
+                    with self.assertRaises(ValueError):
+                        module.stage(targets, root / 'firmware', selected)
+                    self.assertFalse((root / 'firmware').exists())
+
     def test_stage_splits_native_eight_and_ignores_auxiliary_initramfs_without_hashing(self):
         module = helper('release_images')
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            profile, targets, _, _ = self.fixture(root)
+            profile, targets, directory, _ = self.fixture(root)
             with patch('hashlib.file_digest', side_effect=AssertionError('staging must not hash')):
                 module.stage(targets, root / 'firmware')
+            self.assertEqual({p.name for p in (root / 'firmware').iterdir()}, set(profile['release_groups']))
             for key, group in profile['release_groups'].items():
-                self.assertEqual({p.name for p in (root / 'firmware' / key).iterdir()},
-                                 set(group['images']) - set(profile['external_images']))
+                self.assertEqual({p.name: p.read_bytes() for p in (root / 'firmware' / key).iterdir()},
+                                 {name: (directory / name).read_bytes() for name in group['images']
+                                  if name not in profile['external_images']})
             self.assertEqual([len(list((root / 'firmware' / key).iterdir()))
                               for key in profile['release_groups']], [4, 4])
 
