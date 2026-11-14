@@ -12,6 +12,9 @@ USTEER = ('usteer', 'luci-app-usteer', 'luci-i18n-usteer-zh-cn')
 
 
 class ProfileConfigurationTests(unittest.TestCase):
+    def test_nft_tproxy_is_builtin_for_all_devices(self):
+        self.assertEqual(PROFILE.read_text().splitlines().count('CONFIG_PACKAGE_kmod-nft-tproxy=y'), 1)
+
     def test_usteer_has_no_redundant_negative_profile_records(self):
         symbols = set(re.findall(r'^(?:# )?CONFIG_([^= ]+)', PROFILE.read_text(), re.M))
         for package in USTEER:

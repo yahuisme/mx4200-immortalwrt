@@ -37,6 +37,7 @@ CONFIG_PACKAGE_luci-app-wol=y
 # HomeProxy 依赖由源码配方提供；Aurora 使用官方签名 APK 预装
 # 保留命令行下载工具
 CONFIG_PACKAGE_curl=y
+CONFIG_PACKAGE_kmod-nft-tproxy=y
 
 # 明确排除，不继承旧项目其他软件包取舍
 CONFIG_PACKAGE_luci-app-attendedsysupgrade=n
