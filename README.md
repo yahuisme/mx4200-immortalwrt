@@ -18,11 +18,11 @@
 | `factory.bin` | MX4200 / MX4300 从原厂固件刷入 |
 | `factory.ubi` | HomeWRK 命令行写入用，本教程无需使用 |
 | `sysupgrade.bin` | 系统升级；HomeWRK 从临时系统首次安装 |
-| `initramfs-uImage.itb` | HomeWRK 从 USB 启动的临时系统，自带 LuCI |
+| `initramfs-uImage.itb` | HomeWRK 拆机连接 TTL，通过 U 盘启动的临时系统，自带 LuCI |
 
 MX4300 发布组附带 HomeWRK 官方最新稳定版临时镜像，自带 LuCI，管理地址为 `192.168.1.1`。每次构建自动下载并校验大小与 SHA-256，保持官方原版不变。
 
-**首次安装：[Linksys 刷机教程](linksys-first-flash.md)。MX4200 / MX4300 网页刷入，HomeWRK 使用 TTL＋U 盘。**
+**首次安装：[Linksys 刷机教程](linksys-first-flash.md)。MX4200 / MX4300 网页刷入；HomeWRK 拆机连接 TTL，通过 U 盘启动 `initramfs-uImage.itb` 临时镜像，再经 LuCI 后台升级 `sysupgrade.bin`。**
 
 ## 功能与应用
 

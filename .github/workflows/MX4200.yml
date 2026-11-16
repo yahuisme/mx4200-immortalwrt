@@ -254,7 +254,7 @@ jobs:
             mx4300-homewrk)
               DEVICE=MX4300
               MODELS='Linksys MX4300 / HomeWRK'
-              INSTALL="MX4300 用 \`factory.bin\` 原厂刷入；HomeWRK 用官方 $OFFICIAL_VERSION 临时镜像启动，再经 LuCI 刷入 \`sysupgrade.bin\`。"
+              INSTALL="MX4300 用 \`factory.bin\` 原厂刷入；HomeWRK 拆机连接 TTL，通过 U 盘启动 \`initramfs-uImage.itb\` 临时镜像，再经 LuCI 后台升级 \`sysupgrade.bin\`。"
               ;;
           esac
           VERSION="${DEVICE}-ImmortalWrt-${SOURCE_VERSION}-r${WRT_REV}-${WRT_DATE/-/_}"

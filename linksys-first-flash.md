@@ -3,7 +3,7 @@
 安装本仓库的 ImmortalWrt 固件，按机型选择路线：
 
 - **MX4200v1 / v2、MX4300**：原厂后台刷入，再升级一次。
-- **HomeWRK**：TTL＋U 盘启动临时系统，再通过网页安装。
+- **HomeWRK**：拆机连接 TTL，通过 U 盘启动 `initramfs-uImage.itb` 临时镜像，再经 LuCI 后台升级 `sysupgrade.bin`。
 
 > 固件必须匹配机型，MX4200 需区分 v1 / v2。刷写期间不要断电，校验失败时不要强刷。
 
@@ -27,7 +27,7 @@
 
 进入 **MX4300** 发布组，下载文件名含 `linksys_homewrk` 的两个文件：
 
-- `initramfs-uImage.itb`：USB 启动临时系统，自带 LuCI，管理地址 `192.168.1.1`。
+- `initramfs-uImage.itb`：拆机连接 TTL 后，通过 U 盘启动的临时系统，自带 LuCI，管理地址 `192.168.1.1`。
 - `squashfs-sysupgrade.bin`：安装正式固件。
 
 本教程不使用 `factory.ubi`，无需下载。
@@ -82,7 +82,7 @@
 
 ### 接线与串口设置
 
-路由器断电后接线。白色六针串口插座从左到右，前四针如下：
+路由器断电后拆机，连接 TTL。白色六针串口插座从左到右，前四针如下：
 
 ```text
 从左到右：  第1针   第2针   第3针   第4针
