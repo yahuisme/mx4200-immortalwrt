@@ -117,6 +117,7 @@ class OfficialMigrationTests(unittest.TestCase):
             'luci-app-cpufreq', 'luci-i18n-cpufreq-zh-cn',
             'luci-app-ttyd', 'luci-app-wol', 'curl',
             'luci-app-homeproxy', 'luci-i18n-homeproxy-zh-cn', 'sing-box',
+            'kmod-nft-tproxy',
         })
         self.assertIn('CONFIG_PACKAGE_luci-app-attendedsysupgrade=n', config)
         for package in ('luci-theme-aurora', 'luci-app-aurora-config',
