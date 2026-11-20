@@ -115,11 +115,13 @@ class OfficialMigrationTests(unittest.TestCase):
         self.assertEqual(positive, {
             'luci', 'autocore', 'luci-app-advanced-reboot',
             'luci-app-cpufreq', 'luci-i18n-cpufreq-zh-cn',
-            'luci-app-ttyd', 'luci-app-wol',
+            'luci-app-ttyd', 'luci-app-wol', 'curl',
             'luci-app-homeproxy', 'luci-i18n-homeproxy-zh-cn', 'sing-box',
             'kmod-nft-tproxy',
         })
-        self.assertNotRegex('\n'.join(config), r'(?m)^CONFIG_PACKAGE_curl=[ym]$')
+        curl = [line for line in config if line.startswith('CONFIG_PACKAGE_curl=')
+                or line == '# CONFIG_PACKAGE_curl is not set']
+        self.assertEqual(curl, ['CONFIG_PACKAGE_curl=y'])
         self.assertIn('CONFIG_PACKAGE_luci-app-attendedsysupgrade=n', config)
         for package in ('luci-theme-aurora', 'luci-app-aurora-config',
                         'luci-i18n-aurora-config-zh-cn'):

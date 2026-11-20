@@ -100,7 +100,7 @@ class DefaultPackageTests(unittest.TestCase):
             (build / 'tmp').mkdir()
             (build / 'tmp/.packageinfo').write_text('')
             config = 'CONFIG_MODULE_DEFAULT_driver=y\nCONFIG_PACKAGE_driver=m\n' + requested
-            for fault in ('', 'missing-app', 'excluded-module', 'missing-v2',
+            for fault in ('', 'missing-app', 'missing-curl', 'excluded-module', 'missing-v2',
                           'missing-rootfs', 'missing-homeproxy', 'missing-core', 'missing-translation',
                           'missing-cpu-ui'):
                 broken = config
@@ -110,6 +110,7 @@ class DefaultPackageTests(unittest.TestCase):
                     broken += '\nCONFIG_PACKAGE_usteer=m\n'
                     self.assertNotEqual(broken, config)
                 for name, symbol in (
+                        ('missing-curl', 'PACKAGE_curl'),
                         ('missing-v2', 'TARGET_DEVICE_qualcommax_ipq807x_DEVICE_linksys_mx4200v2'),
                         ('missing-rootfs', 'TARGET_PER_DEVICE_ROOTFS'),
                         ('missing-homeproxy', 'PACKAGE_luci-app-homeproxy'),
