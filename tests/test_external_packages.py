@@ -494,7 +494,7 @@ class ExternalPackageTests(unittest.TestCase):
                             module.verify_root(root, provenance)
                         path.write_bytes(saved)
             core_bytes = core.read_bytes()
-            for state in ('nonexecutable', 'missing', 'empty', 'directory'):
+            for state in ('nonexecutable', 'missing', 'empty', 'directory', 'symlink'):
                 with self.subTest(core=state):
                     if state == 'nonexecutable':
                         core.chmod(0o644)
@@ -502,15 +502,24 @@ class ExternalPackageTests(unittest.TestCase):
                         core.unlink()
                     elif state == 'empty':
                         core.write_bytes(b'')
-                    else:
+                    elif state == 'directory':
                         core.unlink()
                         core.mkdir()
+                    else:
+                        core.unlink()
+                        target = core.with_name('foreign-core')
+                        target.write_bytes(core_bytes)
+                        target.chmod(0o755)
+                        core.symlink_to(target.name)
                     try:
                         with self.assertRaisesRegex(ValueError, 'Missing executable sing-box core'):
                             module.verify_root(root, provenance)
                     finally:
                         if core.is_dir():
                             core.rmdir()
+                        if core.is_symlink():
+                            core.unlink()
+                        core.with_name('foreign-core').unlink(missing_ok=True)
                         core.write_bytes(core_bytes)
                         core.chmod(0o755)
             package = packages[0]

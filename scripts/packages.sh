@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: MIT
 set -euo pipefail
 
+# Direct callers must reject source drift before clone or recipe/provenance writes.
+python3 /cache-scripts/external_packages.py preflight ..
 # Source packages and signed Aurora APKs use separate provenance boundaries.
 rm -f ../.custom-revisions.tsv
 stage=$(mktemp -d -t mx4200-packages.XXXXXXXX)
