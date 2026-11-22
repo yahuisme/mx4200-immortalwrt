@@ -140,9 +140,11 @@ docker_exec() { shift; "$@"; }
                         self.assertEqual(title,tag)
                         suffixes.append(tag.removeprefix(device+'-ImmortalWrt-'))
                         notes=(directory/'release-notes.md').read_text()
-                        for text in ('`factory.bin`','`sysupgrade.bin`','构建时间：',
+                        for text in ('- 首次安装：','从原厂后台刷入 `factory.bin`，再用 `sysupgrade.bin` 升级',
+                                     '构建时间：',
                                      '[ImmortalWrt 25.12.2](https://github.com/immortalwrt/immortalwrt/tree/v25.12.2)',
-                                     '请选择对应机型镜像，不可混刷。','[默认设置与使用说明]'):
+                                     '按机型和硬件版本选择镜像，不可混刷。',
+                                     '[刷机教程与默认设置](https://github.com/yahuisme/mx4200-immortalwrt#固件下载)'):
                             self.assertIn(text,notes)
                         for text in ('UBI2','首次刷机教程','linksys-first-flash.md',
                                      '- 机型：','- 定制：','官方 snapshot','c'*40):
@@ -154,7 +156,7 @@ docker_exec() { shift; "$@"; }
                     self.assertIn('LuCI',notes)
                     self.assertIn('25.12.2',notes)
                     self.assertNotIn(official_record()['url'],notes)
-                    self.assertIn('HomeWRK 拆机连接 TTL，通过 U 盘启动 `initramfs-uImage.itb` 临时镜像，再经 LuCI 后台升级 `sysupgrade.bin`。',notes)
+                    self.assertIn('HomeWRK 拆机连接 TTL，通过 U 盘启动 `initramfs-uImage.itb`，再经 LuCI 后台升级 `sysupgrade.bin`。',notes)
                     self.assertNotIn('HomeWRK 用官方',notes)
                     self.assertTrue((base/'build-record/official-initramfs.json').is_file())
                     self.assertTrue((base/'firmware/mx4300-homewrk'/INITRAMFS).is_file())

@@ -1,9 +1,7 @@
 # Linksys 首次刷机教程
 
-安装本仓库的 ImmortalWrt 固件，按机型选择路线：
-
-- **MX4200v1 / v2、MX4300**：原厂后台刷入，再升级一次。
-- **HomeWRK**：拆机连接 TTL，通过 U 盘启动 `initramfs-uImage.itb` 临时镜像，再经 LuCI 后台升级 `sysupgrade.bin`。
+- **MX4200v1/v2、MX4300**：从原厂后台刷入 `factory.bin`，再用 `sysupgrade.bin` 升级。
+- **HomeWRK**：拆机连接 TTL，通过 U 盘启动 `initramfs-uImage.itb`，再经 LuCI 后台升级 `sysupgrade.bin`。
 
 > 固件必须匹配机型，MX4200 需区分 v1 / v2。刷写期间不要断电，校验失败时不要强刷。
 
@@ -15,7 +13,7 @@
 
 ### MX4200 / MX4300
 
-- MX4200v1 / v2：进入 **MX4200** 发布组，区分硬件版本。
+- MX4200v1/v2：进入 **MX4200** 发布组，区分硬件版本。
 - MX4300：进入 **MX4300** 发布组。
 
 按机型下载两个文件：
@@ -27,7 +25,7 @@
 
 进入 **MX4300** 发布组，下载文件名含 `linksys_homewrk` 的两个文件：
 
-- `initramfs-uImage.itb`：拆机连接 TTL 后，通过 U 盘启动的临时系统，自带 LuCI，管理地址 `192.168.1.1`。
+- `initramfs-uImage.itb`：ImmortalWrt 官方临时系统，通过 U 盘启动，LuCI 地址为 `192.168.1.1`。
 - `squashfs-sysupgrade.bin`：安装正式固件。
 
 本教程不使用 `factory.ubi`，无需下载。
@@ -53,7 +51,7 @@
 5. **取消勾选“保留配置”**；若有“升级当前分区”，也不要勾选。
 6. 校验通过后开始升级，等待重启。
 
-这次升级会覆盖另一分区的原厂系统，使两个分区都安装新系统，无需 SSH 或手动补刷。
+这次升级默认写入另一分区，覆盖该分区的原有系统，无需 SSH 或手动补刷。
 
 完成后跳到“登录与日常升级”。
 
@@ -69,14 +67,14 @@
 
 ### 制作启动 U 盘
 
+> 此操作会清空整个 U 盘，请勿选中电脑硬盘。写完后若 Windows 提示格式化，点取消。
+
 1. 在资源管理器开启“文件扩展名”，将临时镜像重命名为 `initramfs.img`。
 2. 插入 U 盘，以管理员身份打开 Rufus。
 3. 在“设备”中选择 U 盘，核对型号和容量。
-4. 按 **Alt＋M**，启用“忽略启动标记”检查。
+4. 按 **Alt＋M**，开启“忽略启动标记”。
 5. 点击“选择”，打开 `initramfs.img`，再点击“开始”。
 6. 若提示写入方式，选择 **DD 镜像模式**，确认清空并等待完成。
-
-> 会清空整个 U 盘，不能选电脑硬盘。写完后 Windows 若提示格式化，点取消。
 
 镜像不解压、不转换，不选 ISO 模式；无需提前格式化或手动分区，也不是把文件复制进 U 盘。
 
@@ -147,8 +145,6 @@ usb start && usbboot 44000000 0 && bootm 44000000
 无需重新刷 factory，也无需再次启动临时系统。
 
 ## 参考
-
-HomeWRK 临时镜像为 ImmortalWrt 官方最新稳定 Release 原版，随构建获取并核对大小及 SHA-256，不修改系统或默认配置。
 
 - [OpenWrt：MX4200 v1 / v2](https://openwrt.org/toh/linksys/mx4200_v1_and_v2)
 - [OpenWrt：MX4300](https://openwrt.org/toh/linksys/mx4300)
