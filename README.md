@@ -18,7 +18,7 @@
 | `sysupgrade.bin` | 固件升级；也用于 HomeWRK 从临时系统安装正式固件 |
 | `initramfs-uImage.itb` | HomeWRK 从 U 盘启动的临时系统，不写入闪存 |
 
-HomeWRK 临时镜像使用同一份 Snapshot 源码独立构建，保留上游默认设置，加入中文 LuCI。U 盘启动后访问 `192.168.1.1`，可直接在网页升级正式固件。
+HomeWRK 临时镜像跟随 ImmortalWrt 最新官方稳定版，原样随 Release 提供，不重新编译。U 盘启动后访问 `192.168.1.1`，在 LuCI 中安装本项目基于 Snapshot 的正式固件。
 
 **首次安装：[Linksys 刷机教程](linksys-first-flash.md)。MX4200v1/v2、MX4300 从原厂后台刷入 `factory.bin`，再用 `sysupgrade.bin` 升级；HomeWRK 拆机连接 TTL，通过 U 盘启动 `initramfs-uImage.itb`，再经 LuCI 后台升级 `sysupgrade.bin`。**
 

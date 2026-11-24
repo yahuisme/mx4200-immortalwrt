@@ -220,9 +220,6 @@ jobs:
           exit "$status"
         '
 
-    - name: Build HomeWRK LuCI RAM system
-      run: docker_exec DK bash /cache-scripts/build_ramboot.sh
-
     - name: Validate and stage firmware
       id: stage
       run: |
@@ -230,16 +227,18 @@ jobs:
         docker_exec DK cat "$DK_OPENWRT/.config" > final.config
         docker_exec DK cat "$DK_OPENWRT/tmp/.packageinfo" > final.packageinfo
         python3 scripts/check_defaults.py final.config final.packageinfo user/default/config.diff
-        python3 scripts/stage_ramboot.py verify openwrt_bin/targets/qualcommax/ipq807x build-record
         WRT_DATE="$(TZ=Asia/Hong_Kong date +'%y.%m.%d-%H.%M.%S')"
         WRT_REV=$(jq -er '.version_code | capture("^r(?<revision>[0-9]+)-[0-9a-f]+$").revision' openwrt_bin/targets/qualcommax/ipq807x/profiles.json)
         [[ "$WRT_REV" =~ ^[1-9][0-9]*$ ]]
+        [[ "$(jq -er '.version_number' openwrt_bin/targets/qualcommax/ipq807x/profiles.json)" = SNAPSHOT ]]
         [[ "$(jq -er .version_code openwrt_bin/targets/qualcommax/ipq807x/profiles.json)" = "$(cat build-record/source-revision.txt)" ]]
         SOURCE_REF="$(cat build-record/source-ref.txt)"
         [[ "$SOURCE_REF" = refs/heads/master ]]
         SOURCE_SHA="$(cat build-record/source-sha.txt)"
         [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
         python3 scripts/release_images.py stage openwrt_bin/targets firmware
+        python3 scripts/official_initramfs.py firmware/mx4300-homewrk --record build-record/official-initramfs.json
+        OFFICIAL_VERSION=$(jq -er .version build-record/official-initramfs.json)
         BUILD_TIME="$(TZ=Asia/Hong_Kong date '+%Y-%m-%d %H:%M:%S %Z')"
         for GROUP in mx4200 mx4300-homewrk; do
           case "$GROUP" in
@@ -251,7 +250,7 @@ jobs:
             mx4300-homewrk)
               DEVICE=MX4300
               MODELS='Linksys MX4300 / HomeWRK'
-              INSTALL="MX4300 从原厂后台刷入 \`factory.bin\`，再用 \`sysupgrade.bin\` 升级；HomeWRK 拆机连接 TTL，通过 U 盘启动 \`initramfs-uImage.itb\`，再访问 \`192.168.1.1\`，经 LuCI 升级 \`sysupgrade.bin\`。"
+              INSTALL="MX4300 从原厂后台刷入 \`factory.bin\`，再用 \`sysupgrade.bin\` 升级；HomeWRK 拆机连接 TTL，从 U 盘启动官方 ImmortalWrt ${OFFICIAL_VERSION} 的 \`initramfs-uImage.itb\`，再访问 \`192.168.1.1\`，经 LuCI 升级 \`sysupgrade.bin\`。"
               ;;
           esac
           VERSION="${DEVICE}-ImmortalWrt-r${WRT_REV}-${WRT_DATE/-/_}"
@@ -386,16 +385,18 @@ jobs:
         }
         current_main
         # Validate BOTH local groups before any Release mutation. Metadata stays
-        # in Actions artifacts; bind the separately built RAM FIT as well.
+        # in Actions artifacts; verify the unchanged official RAM FIT separately.
         python3 - <<'PY'
         import hashlib
         import json
         from pathlib import Path
         import re
-        from scripts.stage_ramboot import verify
+        from scripts.official_initramfs import load_record, verify
         profile = json.loads(Path('user/default/build.json').read_text())
+        official = load_record('build-record/official-initramfs.json')
+        verify(Path('firmware') / official['group'] / official['name'], official)
         # Bind staged native bytes to the collector before either publication.
-        native = set(profile['images'])
+        native = set(profile['images']) - set(profile['external_images'])
         entries = json.loads(Path('build-record/build.json').read_text())['images']
         if (not isinstance(entries, list) or len(entries) != len(native)
                 or any(not isinstance(row, dict) for row in entries)
@@ -403,7 +404,6 @@ jobs:
             raise ValueError('Invalid native build-record image inventory')
         recorded = {row['name']: row for row in entries}
         metadata_dir = Path('build-record/targets') / profile['target']
-        verify(metadata_dir, Path('build-record'), Path('firmware/mx4300-homewrk'))
         metadata = json.loads((metadata_dir / 'profiles.json').read_text())
         native_rows = [row for device in metadata['profiles'].values()
                        for row in device['images'] if row.get('name') in native]

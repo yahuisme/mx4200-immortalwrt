@@ -85,19 +85,12 @@ def profile_fixture(base):
 
 
 
-def ramboot_records(record, data=b'fixture image', revision='r123-abcdef', sha='c'*40):
-    config = b'fixture LuCI RAM config'
-    (record/'ramboot.config').write_bytes(config)
-    (record/'source-sha.txt').write_text(sha + '\n')
-    (record/'source-revision.txt').write_text(revision + '\n')
-    (record/'ramboot.json').write_text(json.dumps(dict(
-        source_sha=sha, revision=revision, pristine=True, customization='Chinese LuCI only',
-        config_sha256=hashlib.sha256(config).hexdigest())))
-    proof = dict(name=INITRAMFS, size=len(data), sha256=hashlib.sha256(data).hexdigest(),
-                 source_sha=sha, revision=revision, language='zh_cn', complete_cpio=True,
-                 fit_config='config@oak03')
-    (record/'initramfs.json').write_text(json.dumps(proof))
-    return {k: proof[k] for k in ('name', 'size', 'sha256')} | dict(type='kernel', filesystem='initramfs')
+def official_record(data=b'fixture image'):
+    version = '25.12.2'
+    source = INITRAMFS.replace('immortalwrt-', f'immortalwrt-{version}-', 1)
+    return dict(version=version, name=INITRAMFS, source_name=source, target='qualcommax/ipq807x',
+                group='mx4300-homewrk', size=len(data), sha256=hashlib.sha256(data).hexdigest(),
+                url=f'https://downloads.immortalwrt.org/releases/{version}/targets/qualcommax/ipq807x/{source}')
 
 
 def staged_fixture(base):
@@ -118,18 +111,17 @@ def staged_fixture(base):
         rows.extend([row(tag), row(device+'-ImmortalWrt-old')])
     record = base/'build-record'
     record.mkdir()
-    ramboot_records(record)
+    (record/'official-initramfs.json').write_text(json.dumps(official_record()))
     images = [dict(name=p.name, size=p.stat().st_size,
                    digest='sha256:' + hashlib.sha256(p.read_bytes()).hexdigest())
-              for p in (base/'firmware').glob('*/*') if p.suffix in ('.bin', '.ubi', '.itb')]
+              for p in (base/'firmware').glob('*/*') if p.suffix in ('.bin', '.ubi')]
     (record/'build.json').write_text(json.dumps(dict(images=images)))
     metadata = record/'targets/qualcommax/ipq807x/profiles.json'
     metadata.parent.mkdir(parents=True)
     metadata.write_text(json.dumps(dict(target='qualcommax/ipq807x', version_number='SNAPSHOT', version_code='r123-abcdef', profiles={
         board: dict(images=[dict(name=row['name'], size=row['size'],
                                  sha256=row['digest'].removeprefix('sha256:'),
-                                 type='kernel' if row['name'] == INITRAMFS else 'unused',
-                                 filesystem='initramfs' if row['name'] == INITRAMFS else 'squashfs')
+                                 filesystem='squashfs')
                             for row in images if '-' + board + '-' in row['name']])
         for group in profile['release_groups'].values() for board in group['profiles']
     })))
@@ -212,7 +204,7 @@ class DualPublicationTests(unittest.TestCase):
                 self.assertIn('Native image differs from profiles metadata', result.stderr)
                 self.assertFalse(any(a[0] == 'release' for a in calls))
 
-    def test_ramboot_attachment_failure_blocks_both_publications(self):
+    def test_official_attachment_failure_blocks_both_publications(self):
         for mode in ('missing', 'empty', 'same-size-corrupt', 'symlink', 'wrong-group'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
                 base = Path(tmp); pages = staged_fixture(base)
@@ -229,30 +221,26 @@ class DualPublicationTests(unittest.TestCase):
                 if mode == 'same-size-corrupt':
                     self.assertIn('SHA-256 mismatch', result.stderr)
 
-    def test_ramboot_record_failure_blocks_both_publications(self):
+    def test_official_record_failure_blocks_both_publications(self):
         for fault in ('missing', 'malformed', 'wrong-name', 'wrong-size', 'wrong-digest',
-                      'wrong-language', 'wrong-revision', 'wrong-source', 'incomplete-cpio',
-                      'no-fit-proof', 'wrong-fit-config'):
+                      'wrong-version', 'wrong-url', 'wrong-group', 'wrong-target'):
             with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
                 base = Path(tmp); pages = staged_fixture(base)
-                evidence = base/'build-record/initramfs.json'
+                evidence = base/'build-record/official-initramfs.json'
                 data = json.loads(evidence.read_text())
                 if fault == 'wrong-name': data['name'] = 'other.itb'
                 if fault == 'wrong-size': data['size'] += 1
                 if fault == 'wrong-digest': data['sha256'] = '0'*64
-                if fault == 'wrong-language': data['language'] = 'en'
-                if fault == 'wrong-revision': data['revision'] = 'r124-abcdef'
-                if fault == 'wrong-source': data['source_sha'] = '0'*40
-                if fault == 'incomplete-cpio': data['complete_cpio'] = False
-                if fault == 'no-fit-proof': data.pop('fit_config')
-                if fault == 'wrong-fit-config': data['fit_config'] = 'config@1'
+                if fault == 'wrong-version': data['version'] = 'SNAPSHOT'
+                if fault == 'wrong-url': data['url'] = 'https://example.invalid/image.itb'
+                if fault == 'wrong-group': data['group'] = 'mx4200'
+                if fault == 'wrong-target': data['target'] = 'other/target'
                 evidence.write_text('{' if fault == 'malformed' else json.dumps(data))
                 if fault == 'missing': evidence.unlink()
                 result, calls = replay(base, pages)
                 self.assertNotEqual(result.returncode, 0, result.stderr)
                 self.assertFalse(any(a[0] == 'release' for a in calls))
-                if fault in ('no-fit-proof', 'wrong-fit-config'):
-                    self.assertIn('Invalid HomeWRK RAM build/inspection identity', result.stderr)
+
                 self.assertNotIn('ModuleNotFoundError', result.stderr)
 
     def test_unexpected_initramfs_rejected_before_any_mutation(self):

@@ -28,10 +28,6 @@ class ImageStageTests(unittest.TestCase):
                 name = f'immortalwrt-qualcommax-ipq807x-linksys_{device}-squashfs-{kind}.{suffix}'
                 (directory / name).write_bytes(name.encode())
                 images.append(dict(name=name, type=kind, filesystem='squashfs', size=len(name.encode())))
-            if device == 'homewrk':
-                from test_dual_publish import INITRAMFS
-                (directory / INITRAMFS).write_bytes(b'fixture')
-                images.append(dict(name=INITRAMFS, type='kernel', filesystem='initramfs', size=7))
             profiles['linksys_' + device] = dict(images=images)
         data: dict = dict(target='qualcommax/ipq807x', version_code='r123-abcdef', profiles=profiles)
         (directory / 'profiles.json').write_text(json.dumps(data))

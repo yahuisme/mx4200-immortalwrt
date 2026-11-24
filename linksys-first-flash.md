@@ -25,7 +25,7 @@
 
 进入 **MX4300** 发布组，下载文件名含 `linksys_homewrk` 的两个文件：
 
-- `initramfs-uImage.itb`：基于同一期 ImmortalWrt Snapshot 构建的临时系统，已加入中文 LuCI。通过 U 盘启动，后台地址为 `192.168.1.1`。
+- `initramfs-uImage.itb`：发布时从最新 ImmortalWrt 官方稳定版取得的临时系统，未作修改。通过 U 盘启动，LuCI 地址为 `192.168.1.1`。
 - `squashfs-sysupgrade.bin`：安装正式固件。
 
 本教程不使用 `factory.ubi`，无需下载。
