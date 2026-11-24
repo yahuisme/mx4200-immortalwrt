@@ -4,6 +4,8 @@ The builder uses a digest-pinned Debian ARM64 base and installs a checksum-verif
 Go bootstrap at `/usr/lib/go`. It contains no firmware source or prebuilt firmware toolchain.
 The workflow runs the inspected image ID and uses a separate fingerprint of the
 recipe, architecture and installed packages for toolchain cache keys.
+New exact toolchain caches use PAX tar with zstd. Restore logs validation and
+extraction separately; compiler, download and bootstrap cache formats are unchanged.
 
 Before building, the workflow checks the Go bootstrap against the selected feed's
 minimum version and rejects `CONFIG_USE_LLVM_HOST=y` because host LLVM is not installed.
