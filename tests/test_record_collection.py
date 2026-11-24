@@ -199,8 +199,8 @@ class BuildRecordTests(unittest.TestCase):
 
     def test_artifact_contract(self):
         collect, upload = step('Collect build record'), step('Upload build record')
-        self.assertTrue(collect['continue-on-error'])
-        self.assertTrue(upload['continue-on-error'])
+        self.assertFalse(collect.get('continue-on-error', False))
+        self.assertFalse(upload.get('continue-on-error', False))
         self.assertEqual(step('Prepare build environment')['id'], 'environment')
         self.assertEqual(collect['if'], "${{ !cancelled() && steps.environment.outcome == 'success' }}")
         self.assertEqual(upload['if'], "${{ !cancelled() && steps.record.outcome != 'skipped' }}")

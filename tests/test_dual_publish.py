@@ -12,6 +12,10 @@ from test_cache_workflow import ROOT, step
 
 GROUPS = {'mx4200': 'MX4200', 'mx4300-homewrk': 'MX4300'}
 TAG_SUFFIX = '-ImmortalWrt-r123-26.11.24_00.00.00'
+OLD_MX4200 = 'MX4200-ImmortalWrt-r100-26.11.22_00.00.00'
+OLD_MX4300 = 'MX4300-ImmortalWrt-r100-26.11.22_00.00.00'
+OLD_HOMEWRK = 'MX4300-HomeWRK-ImmortalWrt-25.12.2-r99-26.11.21_00.00.00'
+OLD_UNDERSCORE = 'MX4200_ImmortalWrt_v25.12.1_26.11.21-00.00.00_r99'
 INITRAMFS = 'immortalwrt-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb'
 STUB = r'''#!/usr/bin/env python3
 import hashlib, json, os, sys
@@ -25,7 +29,9 @@ if a[0] == 'api' and a[1].endswith('/git/ref/heads/main'):
     if mode == 'error' or (count >= 4 and mode == 'recheck-error'): sys.exit(17)
     if mode == 'empty': sys.exit(0)
     if mode == 'malformed': print('null'); sys.exit(0)
-    stale = mode == 'stale' or (count >= 4 and mode == 'advance') or (count >= 3 and mode == 'between-groups')
+    stale = (mode == 'stale' or (count >= 4 and mode == 'advance')
+             or (count >= 3 and mode == 'between-groups')
+             or (count >= 6 and mode == 'between-deletions'))
     print('b'*40 if stale else os.environ['GITHUB_SHA']); sys.exit(0)
 if a[:2] == ['release', 'create']:
     second = a[2].startswith('MX4300-ImmortalWrt-')
@@ -72,8 +78,10 @@ raise SystemExit('unexpected gh invocation: '+repr(a))
 '''
 
 
-def row(tag, **kwargs):
-    return dict(tag_name=tag, draft=False, prerelease=False) | kwargs
+def row(tag, id, **kwargs):
+    return dict(tag_name=tag, id=id, draft=False, prerelease=False,
+                published_at='2026-11-24T00:01:00Z' if tag.endswith(TAG_SUFFIX)
+                else '2026-11-23T00:00:00Z') | kwargs
 
 
 def profile_fixture(base):
@@ -108,7 +116,8 @@ def staged_fixture(base):
         (directory/'version.txt').write_text(tag)
         (directory/'title.txt').write_text(tag)
         (directory/'release-notes.md').write_text('fixture notes')
-        rows.extend([row(tag), row(device+'-ImmortalWrt-old')])
+        position = len(rows) + 1
+        rows.extend([row(tag, position), row(OLD_MX4200 if group == 'mx4200' else OLD_MX4300, position + 1)])
     record = base/'build-record'
     record.mkdir()
     (record/'official-initramfs.json').write_text(json.dumps(official_record()))
@@ -278,40 +287,43 @@ class DualPublicationTests(unittest.TestCase):
             self.assertEqual(len(reads), 2)
             self.assertTrue(all(index < first_delete for index in reads))
             self.assertEqual([a[2] for a in calls if a[:2] == ['release','delete']],
-                             ['MX4200-ImmortalWrt-old','MX4300-ImmortalWrt-old'])
+                             [OLD_MX4200, OLD_MX4300])
 
     def test_group_retention_is_disjoint_across_paginated_inventory(self):
-        pages = [[row('MX4200-ImmortalWrt-old'), row('MX4300-ImmortalWrt-old'),
-                  row('MX4300-HomeWRK-ImmortalWrt-old'),
-                  row('MX4200_ImmortalWrt_legacy'), row('Other-keep'),
-                  row('MX4300-HomeWRK-ImmortalWrt-draft', draft=True),
-                  row('MX4300-HomeWRK-ImmortalWrt-preview', prerelease=True),
-                  row('MX4300-ImmortalWrt-draft', draft=True)],
-                 [row('MX4200-ImmortalWrt-r123-26.11.24_00.00.00'), row('MX4300-ImmortalWrt-r123-26.11.24_00.00.00'),
-                  row('MX4300-ImmortalWrt-preview', prerelease=True)]]
+        pages = [[row(OLD_MX4200, 1), row(OLD_MX4300, 2), row(OLD_HOMEWRK, 3),
+                  row(OLD_UNDERSCORE, 4), row('Other-keep', 5),
+                  row('MX4300-HomeWRK-ImmortalWrt-r97-26.11.20_00.00.00', 6, draft=True, published_at=None),
+                  row('MX4300-HomeWRK-ImmortalWrt-r98-26.11.20_00.00.00', 7, prerelease=True),
+                  row('MX4200-ImmortalWrt-r150-26.11.25_00.00.00', 8)],
+                 [row('MX4200' + TAG_SUFFIX, 9), row('MX4300' + TAG_SUFFIX, 10),
+                  row('MX4300-ImmortalWrt-r96-26.11.20_00.00.00', 11, prerelease=True)]]
         with tempfile.TemporaryDirectory() as tmp:
             base=Path(tmp); staged_fixture(base)
             result,calls=replay(base,pages)
             self.assertEqual(result.returncode,0,result.stderr)
             inventories=[i for i,a in enumerate(calls) if a[:3]==['api','--paginate','--slurp']]
-            self.assertEqual(len(inventories),2)
+            self.assertEqual(len(inventories),1)
             deletes=[(i,a[2]) for i,a in enumerate(calls) if a[:2]==['release','delete']]
-            self.assertEqual([tag for i,tag in deletes if inventories[0]<i<inventories[1]],
-                             ['MX4200-ImmortalWrt-old','MX4200_ImmortalWrt_legacy'])
-            self.assertEqual([tag for i,tag in deletes if i>inventories[1]],
-                             ['MX4300-ImmortalWrt-old','MX4300-HomeWRK-ImmortalWrt-old'])
+            self.assertTrue(all(i > inventories[0] for i, _ in deletes))
+            self.assertEqual([tag for _, tag in deletes], [OLD_MX4200, OLD_MX4300, OLD_HOMEWRK, OLD_UNDERSCORE])
 
-    def test_missing_current_inventory_protects_only_its_own_group(self):
+    def test_missing_current_inventory_protects_both_groups(self):
         for missing in GROUPS:
             with self.subTest(missing=missing), tempfile.TemporaryDirectory() as tmp:
                 base=Path(tmp); pages=staged_fixture(base)
                 pages[0]=[r for r in pages[0] if r['tag_name']!=GROUPS[missing]+'-ImmortalWrt-r123-26.11.24_00.00.00']
                 result,calls=replay(base,pages)
                 self.assertEqual(result.returncode,0,result.stderr)
-                other=next(device for group,device in GROUPS.items() if group!=missing)
-                self.assertEqual([a[2] for a in calls if a[:2]==['release','delete']],
-                                 [other+'-ImmortalWrt-old'])
-                self.assertIn('::warning::Release inventory unavailable for '+missing,result.stdout)
+                self.assertFalse(any(a[:2] == ['release','delete'] for a in calls))
+                self.assertIn('retaining both groups', result.stdout)
+
+    def test_main_advance_during_cleanup_stops_remaining_deletion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp); pages = staged_fixture(base)
+            result, calls = replay(base, pages, 'between-deletions')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('Obsolete build', result.stdout)
+            self.assertEqual([a[2] for a in calls if a[:2] == ['release','delete']], [OLD_MX4200])
 
     def test_second_group_failures_protect_both_release_histories(self):
         for mode in ('second-create-error','second-verify-error','between-groups'):

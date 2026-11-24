@@ -346,7 +346,6 @@ jobs:
 
     - name: Collect build record
       id: record
-      continue-on-error: true
       if: ${{ !cancelled() && steps.environment.outcome == 'success' }}
       run: |
         mkdir -p build-record
@@ -358,7 +357,6 @@ jobs:
 
     - name: Upload build record
       id: record_upload
-      continue-on-error: true
       if: ${{ !cancelled() && steps.record.outcome != 'skipped' }}
       uses: actions/upload-artifact@v7
       with:
@@ -456,30 +454,17 @@ jobs:
           gh release create "$VERSION" "${IMAGES[@]}" --target "$GITHUB_SHA" --title "$RELEASE_TITLE" --notes-file "firmware/$GROUP/release-notes.md" --latest="$LATEST" --prerelease=false --draft=false
           python3 scripts/verify_release.py --group "$GROUP" "$VERSION" "${IMAGES[@]}"
         done
-        # Verify BOTH publications before any destructive retention. A failure
-        # in the second group preserves all older releases in both groups.
-        for GROUP in mx4200 mx4300-homewrk; do
-          current_main
-          VERSION="$(cat "firmware/$GROUP/version.txt")"
-          case "$GROUP" in
-            mx4200) RELEASE_PATTERN="^(MX4200-ImmortalWrt-|MX4200_ImmortalWrt_)";;
-            mx4300-homewrk) RELEASE_PATTERN="^MX4300(-HomeWRK)?-ImmortalWrt-";;
-          esac
-          # Include legacy names only within their own group;
-          # drafts/prereleases remain protected.
-          if releases=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100") &&
-            old_tags=$(jq -er --arg current "$VERSION" --arg pattern "$RELEASE_PATTERN" '
-              flatten | map(select(.draft == false and .prerelease == false and
-                (.tag_name | test($pattern)))) |
-              if any(.tag_name == $current) then
-                [.[] | select(.tag_name != $current)] | map(.tag_name) | join("\n")
-              else error("Published release missing from inventory") end
-            ' <<< "$releases"); then
-            while IFS= read -r tag; do
-              [ -n "$tag" ] || continue
-              gh release delete "$tag" --cleanup-tag -y || echo "::warning::Failed to delete release $tag"
-            done <<< "$old_tags"
-          else
-            echo "::warning::Release inventory unavailable for $GROUP; retaining its releases"
-          fi
-        done
+        # Plan retention for both verified groups from the same inventory.
+        current_main
+        MX4200_TAG="$(cat firmware/mx4200/version.txt)"
+        MX4300_TAG="$(cat firmware/mx4300-homewrk/version.txt)"
+        if releases=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100") &&
+          old_tags=$(python3 scripts/release_retention.py "$MX4200_TAG" "$MX4300_TAG" <<< "$releases"); then
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            current_main
+            gh release delete "$tag" --cleanup-tag -y || echo "::warning::Failed to delete release $tag"
+          done <<< "$old_tags"
+        else
+          echo '::warning::Release inventory unavailable or inconsistent; retaining both groups'
+        fi

@@ -178,7 +178,21 @@ export -f make docker_exec sudo python3 git official_download
                         output.unlink()
                 successful = successful and (rc == 0 or item.get('continue-on-error', False))
             calls = (base / 'bootstrap-calls').read_text() if (base / 'bootstrap-calls').exists() else ''
+            outcomes['job'] = 'cancelled' if cancelled else 'success' if successful else 'failure'
             return outcomes, executed, json.loads(state.read_text()), '\n'.join(logs) + '\n' + calls
+
+    def test_required_record_failures_fail_job_without_publication(self):
+        for fault, collect, upload, publish, job in (
+            ('none', 'success', 'success', 'success', 'success'),
+            ('metadata', 'failure', 'success', 'skipped', 'failure'),
+            ('upload', 'success', 'failure', 'skipped', 'failure'),
+        ):
+            with self.subTest(fault=fault):
+                outcomes, _, _, log = self.replay(fault)
+                self.assertEqual(outcomes['Collect build record'], collect, log)
+                self.assertEqual(outcomes['Upload build record'], upload, log)
+                self.assertEqual(outcomes['Publish firmware and prune releases'], publish, log)
+                self.assertEqual(outcomes['job'], job, log)
 
     def test_compile_cache_state_branches_use_production_env(self):
         for tc, tb, want_make, want_pack in (('false', 'false', True, True),

@@ -1,9 +1,13 @@
-"""Exercise independent Release retention with a private gh boundary."""
+"""Exercise Release retention with a private gh boundary."""
 from pathlib import Path
 import tempfile
 import unittest
 
-from test_dual_publish import TAG_SUFFIX, replay as replay_publish, staged_fixture
+from test_dual_publish import GROUPS, TAG_SUFFIX, replay as replay_publish, staged_fixture
+
+CURRENT = [device + TAG_SUFFIX for device in GROUPS.values()]
+PREVIOUS = 'MX4200-ImmortalWrt-r122-26.11.23_00.00.00'
+OLD = 'MX4200-ImmortalWrt-25.12.2-r100-26.11.01_00.00.00'
 
 
 def row(tag, rank, **kwargs):
@@ -13,15 +17,45 @@ def row(tag, rank, **kwargs):
 
 class ReleaseRetention(unittest.TestCase):
     def replay(self, pages, fault='none'):
-        with tempfile.TemporaryDirectory() as d:
-            p = Path(d)
-            staged_fixture(p)
-            mode = {'none':'fresh', 'create':'create-error', 'malformed':'bad-json'}.get(fault,fault)
-            result,calls = replay_publish(p,pages,mode)
-            return result, [a[2] for a in calls if a[:2] == ['release','delete']]
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            staged_fixture(base)
+            mode = {'none': 'fresh', 'create': 'create-error', 'malformed': 'bad-json'}.get(fault, fault)
+            result, calls = replay_publish(base, pages, mode)
+            return result, [a[2] for a in calls if a[:2] == ['release', 'delete']]
+
+    def test_only_older_production_tags_are_pruned(self):
+        current = [row(tag, rank) for rank, tag in enumerate(CURRENT, 10)]
+        older = [row('MX4200-ImmortalWrt-25.12.2-r100-26.10.08_00.00.00', 8),
+                 row('MX4300-HomeWRK-ImmortalWrt-r100-26.10.09_00.00.00', 9)]
+        protected = [row('MX4200-ImmortalWrt-r120-26.10.07_00.00.00', 12),
+                     row('MX4300-ImmortalWrt-r119-26.10.07_00.00.00', 13),
+                     row('MX4200-ImmortalWrt-manual-recovery', 7),
+                     row('MX4200-ImmortalWrt-r99-26.10.07_00.00.00', 14,
+                         published_at=current[0]['published_at']),
+                     row('MX4300-ImmortalWrt-r130-26.11.25_00.00.00', 6),
+                     row('MX4200-ImmortalWrt-r90-26.10.00_00.00.00', 5)]
+        result, deleted = self.replay([[current[0], older[0], *protected], [current[1], older[1]]])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(deleted, [r['tag_name'] for r in older])
+
+    def test_uncertain_dual_inventory_never_prunes_either_group(self):
+        current = [row(tag, rank) for rank, tag in enumerate(CURRENT, 10)]
+        old = row(OLD, 8)
+        for pages in ([[current[0], old]],
+                      [[*current, old], [old]],
+                      [[*current, old], [dict(old, id=90)]],
+                      [[*current, old], [dict(old, tag_name='Other')]],
+                      [[*current, old], [row('MX4300-ImmortalWrt-r121-26.10.09_00.00.00', 9,
+                                              published_at='2026-10-32T00:00:00Z')]]):
+            with self.subTest(pages=pages):
+                result, deleted = self.replay(pages)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(deleted, [])
+                self.assertIn('retaining both groups', result.stdout)
 
     def test_readback_failures_protect_old_releases(self):
-        pages = [[row('MX4200' + TAG_SUFFIX, 10), row('MX4200-ImmortalWrt-previous', 9), row('MX4200-ImmortalWrt-old', 1)]]
+        pages = [[row(CURRENT[0], 10), row(CURRENT[1], 11), row(PREVIOUS, 9), row(OLD, 1)]]
         for fault in ('readback', 'malformed', 'missing', 'extra', 'name', 'duplicate',
                       'size', 'state', 'digest', 'tag', 'title', 'tag-sha', 'tag-ref', 'draft', 'prerelease',
                       'download-corrupt', 'download-failed'):
@@ -31,51 +65,53 @@ class ReleaseRetention(unittest.TestCase):
                 self.assertEqual(deleted, [])
         result, deleted = self.replay(pages, 'no-digest')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(deleted, ['MX4200-ImmortalWrt-previous', 'MX4200-ImmortalWrt-old'])
+        self.assertEqual(deleted, [PREVIOUS, OLD])
 
     def test_zero_one_two_three(self):
         for count in range(4):
-            rows = [row('MX4200' + TAG_SUFFIX, 10)] if count else []
-            rows += [row(f'MX4200-ImmortalWrt-old{i}', i) for i in range(1, count)]
+            rows = [row(CURRENT[1], 11)]
+            if count:
+                rows.append(row(CURRENT[0], 10))
+            older = [row(f'MX4200-ImmortalWrt-r10{i}-26.11.0{i}_00.00.00', i) for i in range(1, count)]
+            rows.extend(older)
             result, deleted = self.replay([rows])
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(deleted,
-                             (['MX4200-ImmortalWrt-old1'] if count == 2 else
-                              ['MX4200-ImmortalWrt-old1', 'MX4200-ImmortalWrt-old2']
-                              if count == 3 else []))
+            self.assertEqual(deleted, [r['tag_name'] for r in older])
 
     def test_pagination_publication_order_and_protected_releases(self):
-        pages = [[row('MX4200-ImmortalWrt-old', 1), row('Other_keep', 20),
-                  row('MX4200-ImmortalWrt-draft', 21, draft=True)],
-                 [row('MX4200-ImmortalWrt-previous', 9), row('MX4200' + TAG_SUFFIX, 10),
-                  row('MX4200_ImmortalWrt_preview', 22, prerelease=True)]]
+        pages = [[row(OLD, 1), row('Other_keep', 20),
+                  row('MX4200-ImmortalWrt-r81-26.11.10_00.00.00', 21, draft=True)],
+                 [row(PREVIOUS, 9), row(CURRENT[0], 10), row(CURRENT[1], 11),
+                  row('MX4200_ImmortalWrt_26.11.11-00.00.00_r82', 22, prerelease=True)]]
         result, deleted = self.replay(pages)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(deleted, ['MX4200-ImmortalWrt-old', 'MX4200-ImmortalWrt-previous'])
+        self.assertEqual(deleted, [OLD, PREVIOUS])
 
     def test_failures_never_delete_from_partial_inventory(self):
-        pages = [[row('MX4200' + TAG_SUFFIX, 10), row('MX4200-ImmortalWrt-previous', 9), row('MX4200-ImmortalWrt-old', 1)]]
+        pages = [[row(CURRENT[0], 10), row(CURRENT[1], 11), row(PREVIOUS, 9), row(OLD, 1)]]
         for fault in ('create', 'list'):
             result, deleted = self.replay(pages, fault)
             self.assertEqual(deleted, [])
             self.assertEqual(result.returncode != 0, fault == 'create')
-        for data in ([], [[row('MX4200-ImmortalWrt-old', 1)]], {'malformed': True}):
+        for data in ([], [[row(OLD, 1)]], {'malformed': True}):
             result, deleted = self.replay(data)
+            self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(deleted, [])
-            self.assertIn('::warning::', result.stdout)
+            self.assertIn('retaining both groups', result.stdout)
 
-    def test_single_release_retention_does_not_require_ordering_metadata(self):
-        pages = [[dict(tag_name=tag, draft=False, prerelease=False) for tag in (
-            'MX4200-ImmortalWrt-old', 'MX4200_ImmortalWrt_legacy',
-            'MX4200' + TAG_SUFFIX, 'MX4200-ImmortalWrt-previous')]]
-        result, deleted = self.replay(pages)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(deleted, ['MX4200-ImmortalWrt-old', 'MX4200_ImmortalWrt_legacy',
-                                   'MX4200-ImmortalWrt-previous'])
+    def test_missing_publication_timestamp_disables_cleanup(self):
+        for tag in (*CURRENT, OLD):
+            with self.subTest(tag=tag):
+                rows = [row(CURRENT[0], 10), row(CURRENT[1], 11), row(OLD, 1)]
+                next(r for r in rows if r['tag_name'] == tag).pop('published_at')
+                result, deleted = self.replay([rows])
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(deleted, [])
+                self.assertIn('retaining both groups', result.stdout)
 
     def test_delete_failure_is_visible(self):
-        result, deleted = self.replay([[row('MX4200' + TAG_SUFFIX, 10), row('MX4200-ImmortalWrt-previous', 9),
-                                       row('MX4200-ImmortalWrt-old', 1)]], 'delete')
-        self.assertEqual(deleted, ['MX4200-ImmortalWrt-previous', 'MX4200-ImmortalWrt-old'])
+        result, deleted = self.replay([[row(CURRENT[0], 10), row(CURRENT[1], 11), row(PREVIOUS, 9),
+                                       row(OLD, 1)]], 'delete')
+        self.assertEqual(deleted, [PREVIOUS, OLD])
         self.assertEqual(result.returncode, 0)
         self.assertIn('::warning::Failed to delete release', result.stdout)

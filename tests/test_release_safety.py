@@ -211,7 +211,7 @@ python3() {
                 self.assertFalse(list((base / 'firmware').glob('*/title.txt')))
 
     def test_own_main_freshness_before_create_and_prune(self):
-        from test_dual_publish import replay, staged_fixture
+        from test_dual_publish import OLD_MX4200, OLD_MX4300, replay, staged_fixture
         cases=('fresh','annotated','stale','error','empty','malformed','advance','recheck-error',
                'create-error','verify-error','title-error','tag-error','tag-ref-error')
         for case in cases:
@@ -224,13 +224,13 @@ python3() {
                 self.assertEqual(result.returncode==0,case in ('fresh','annotated','stale','advance'),result.stderr)
                 self.assertEqual(len(creates),2 if case in ('fresh','annotated','advance','recheck-error') else
                                  0 if case in ('stale','error','empty','malformed') else 1)
-                self.assertEqual(len(gates),5 if case in ('fresh','annotated') else
+                self.assertEqual(len(gates),6 if case in ('fresh','annotated') else
                                  4 if case in ('advance','recheck-error') else
                                  1 if case in ('stale','error','empty','malformed') else 2)
                 tag_refs=[a for a in calls if a[0]=='api' and '/git/ref/tags/' in a[1]]
                 self.assertEqual(len(tag_refs),2 if case in ('fresh','annotated','advance','recheck-error') else
                                  1 if case in ('tag-error','tag-ref-error') else 0)
                 self.assertEqual([a[2] for a in deletes],
-                                 ['MX4200-ImmortalWrt-old','MX4300-ImmortalWrt-old']
+                                 [OLD_MX4200, OLD_MX4300]
                                  if case in ('fresh','annotated') else [])
                 self.assertTrue(all('immortalwrt/immortalwrt' not in ' '.join(a) for a in calls))
