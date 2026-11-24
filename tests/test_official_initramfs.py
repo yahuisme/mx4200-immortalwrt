@@ -170,6 +170,19 @@ class DownloadTests(unittest.TestCase):
             self.assertEqual([call.args[0] for call in request.call_args_list],
                              [record_for()['url']] * 2)
 
+    def test_truncated_http_image_retries_same_version(self):
+        class TruncatedResponse(io.BytesIO):
+            headers = {'Content-Length': str(len(DATA))}
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(official, 'resolve', return_value=record_for()) as resolve, \
+                patch('urllib.request.urlopen', side_effect=[TruncatedResponse(DATA[:-1]), io.BytesIO(DATA)]) as request, \
+                patch('time.sleep'):
+            official.download(directory, Path(directory) / 'record.json')
+            self.assertEqual(resolve.call_count, 1)
+            self.assertEqual([call.args[0] for call in request.call_args_list], [record_for()['url']] * 2)
+            self.assertEqual((Path(directory) / official.NAME).read_bytes(), DATA)
+
     def test_content_length_mismatch_rejected_before_read(self):
         response = io.BytesIO(DATA)
         response.headers = {'Content-Length': str(len(DATA) + 1)}

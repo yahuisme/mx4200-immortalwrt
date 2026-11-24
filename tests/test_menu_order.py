@@ -23,6 +23,9 @@ ROOT = Path(__file__).resolve().parents[1]
 MENUS = ROOT / 'user/default/files/usr/share/luci/menu.d'
 STABLE_LUCI = 'd6167ea0645cbd1327708d85f94824f42d0eb872'
 SNAPSHOT_LUCI = '319f7c96e3530246cf91cfdd9bacb3fa44dc3a4e'
+# The menu blobs at this later pair match the existing Snapshot fixture exactly.
+SAME_SNAPSHOT_MENUS = ('6839c87b4da0e8274ab6c0948e688c26447c1547',
+                       'ce90a8b0f85bbcaf62c0cebc8f8cb20bc8822007')
 BASELINES = {
     STABLE_LUCI: ('services-menu-contract.json',
                   '1265f37428e8d8c100d57322f5b8199d67f7e2f1855f6275183d11e19f462e40'),
@@ -71,7 +74,14 @@ def installed_source(root, record=None):
     assert luci[0].get('url') in ('https://github.com/immortalwrt/luci',
                                   'https://github.com/immortalwrt/luci.git'), 'Nonofficial LuCI source'
     revision = luci[0].get('sha')
-    source = source_menus(revision)
+    baseline = revision
+    if revision == SAME_SNAPSHOT_MENUS[0]:
+        custom = [row.get('sha') for row in record.get('custom_sources', [])
+                  if row.get('name') == 'custom/yahuisme/packages'
+                  and row.get('url') == 'https://github.com/yahuisme/packages.git']
+        assert custom == [SAME_SNAPSHOT_MENUS[1]], 'Unreviewed HomeProxy menu source'
+        baseline = SNAPSHOT_LUCI
+    source = source_menus(baseline)
     # Package identity is only a cross-check, never a source of expected menu bytes.
     packages = (root / 'lib/apk/db/installed').read_text().split('\n\n')
     versions = [line[2:] for block in packages if 'P:luci-base' in block.splitlines()
@@ -222,6 +232,22 @@ class MenuOrderTests(unittest.TestCase):
                 database.write_text('P:other\nV:1\n\n')
                 with self.assertRaisesRegex(AssertionError, 'luci-base'):
                     installed_source(root, record)
+
+    def test_equivalent_snapshot_baseline_requires_both_recorded_sources(self):
+        luci, custom = SAME_SNAPSHOT_MENUS
+        record = {
+            'feeds': [{'name': 'feed/luci', 'url': 'https://github.com/immortalwrt/luci.git', 'sha': luci}],
+            'custom_sources': [{'name': 'custom/yahuisme/packages',
+                                'url': 'https://github.com/yahuisme/packages.git', 'sha': custom}],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db = root / 'lib/apk/db/installed'
+            db.parent.mkdir(parents=True)
+            db.write_text(f'P:luci-base\nV:26.309.25350~{luci[:7]}\n\n')
+            self.assertEqual(installed_source(root, record), source_menus(SNAPSHOT_LUCI))
+            with self.assertRaisesRegex(AssertionError, 'Unreviewed HomeProxy menu source'):
+                installed_source(root, dict(record, custom_sources=[]))
 
     def test_stable_and_snapshot_contracts_keep_all_source_checks(self):
         stable = source_menus(STABLE_LUCI)

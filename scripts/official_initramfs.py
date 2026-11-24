@@ -168,6 +168,10 @@ def download(destination, record_path, record=None):
                         if count > record['size']:
                             raise ValueError('Official image exceeds expected size')
                         output.write(chunk)
+                    # A bounded HTTPResponse.read() can return early EOF
+                    # without raising IncompleteRead on a dropped connection.
+                    if length is not None and count < record['size']:
+                        raise http.client.IncompleteRead(b'', record['size'] - count)
                 output.flush()
                 os.fsync(output.fileno())
             verify(image_temp, record)
@@ -202,7 +206,7 @@ def main():
         result = (verify(args.destination, load_record(args.record)) if args.verify
                   else download(args.destination, args.record,
                                 load_record(args.resolved) if args.resolved else None))
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, http.client.IncompleteRead) as error:
         parser.exit(1, f'official initramfs: {error}\n')
     print(json.dumps(result, sort_keys=True))
 

@@ -45,7 +45,8 @@ class HomeProxySourceTests(unittest.TestCase):
             # Positive first: actual source import and native preparation are reachable.
             for source, fault in (('stable-apk-source', ''), ('snapshot-source', ''),
                                   ('snapshot-source', 'version'), ('snapshot-source', 'version-override'),
-                                  ('snapshot-source', 'assembly')):
+                                  ('snapshot-source', 'assembly'), ('snapshot-source', 'opkg'),
+                                  ('snapshot-source', 'wrong-arch')):
                 with self.subTest(source=source, fault=fault):
                     build = base / (source + '-' + (fault or 'valid'))
                     shutil.copytree(ROOT / 'tests/fixtures' / source, build)
@@ -61,6 +62,10 @@ class HomeProxySourceTests(unittest.TestCase):
                         (build / 'include/version.mk').write_text('VERSION_NUMBER:=SNAPSHOTgarbage\n')
                     elif fault == 'version-override':
                         (build / '.config').write_text('CONFIG_VERSION_NUMBER="99.99.0"\n')
+                    elif fault == 'opkg':
+                        (build / '.config').write_text('# CONFIG_USE_APK is not set\n')
+                    elif fault == 'wrong-arch':
+                        (build / '.config').write_text('CONFIG_TARGET_ARCH_PACKAGES="aarch64_generic"\n')
                     elif fault == 'assembly':
                         path = build / 'include/image.mk'
                         path.write_text(path.read_text().replace('$(call apk,$(mkfs_cur_target_dir)) --no-scripts',
@@ -73,7 +78,9 @@ class HomeProxySourceTests(unittest.TestCase):
                     if fault:
                         expected = {'assembly': 'Unsupported upstream assembly boundary',
                                     'version': 'reviewed ImmortalWrt Snapshot',
-                                    'version-override': 'without version override'}
+                                    'version-override': 'without version override',
+                                    'opkg': 'require APK and aarch64_cortex-a53',
+                                    'wrong-arch': 'require APK and aarch64_cortex-a53'}
                         self.assertIn(expected[fault], result.stderr)
                         self.assertEqual(before, tree_contents(base), 'rejected direct caller changed its input tree')
                         self.assertNotIn('Cloning into', result.stderr)

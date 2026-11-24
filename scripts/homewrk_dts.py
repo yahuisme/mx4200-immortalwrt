@@ -92,13 +92,32 @@ def prepare(root):
             source = (source[:end] + f'\tnvmem-cells = <&mac_address {increment}>;\n'
                       '\tnvmem-cell-names = "mac-address";\n' + source[end:])
     active = mask_comments(source)
+    if active.count(ANCHOR) != 1:
+        raise ValueError('HomeWRK NAND controller changed; review MAC protection')
+    anchor_end = active.index(ANCHOR) + len(ANCHOR)
+    before_nand = active[anchor_end:].split('\n\tnand@0 {', 1)
+    if len(before_nand) != 2:
+        raise ValueError('HomeWRK NAND node changed; review MAC protection')
+    guard, nand = before_nand
+    if 'partitions {' in guard:
+        if guard != mask_comments(GUARD):
+            raise ValueError('HomeWRK partition protection changed; review upstream')
+    elif guard:
+        raise ValueError('HomeWRK partition layout changed; review MAC protection')
+    # Match the direct partition child: NAND properties may contain quoted
+    # braces, but a real opening or closing brace before partitions is drift.
+    partition = re.match(r'(?:[^"{}]|"(?:\\.|[^"\\])*")*?^\t\tpartitions\s*\{\s*'
+                         r'compatible = "qcom,smem-part";', nand, re.M)
+    if partition is None:
+        raise ValueError('HomeWRK partition layout changed; review MAC protection')
     # Existing cells are not enough: validate the complete factory mapping on
     # repeat preparation and newer layouts before accepting the NAND guard.
-    cell_pattern = (r'partition-devinfo\s*\{\s*label = "devinfo";\s*read-only;\s*'
+    cell_pattern = (r'\s*partition-devinfo\s*\{\s*label = "devinfo";\s*read-only;\s*'
                     r'nvmem-layout\s*\{\s*compatible = "ascii-eq-delim-env";\s*'
                     r'mac_address: mac_address\s*\{\s*compatible = "mac-base";\s*'
                     r'#nvmem-cell-cells = <1>;\s*\};\s*\};\s*\};')
-    if len(re.findall(cell_pattern, active)) != 1 or active.count('mac_address: mac_address {') != 1:
+    if (not re.match(cell_pattern, nand[partition.end():]) or
+            active.count('mac_address: mac_address {') != 1):
         raise ValueError('HomeWRK factory MAC cell changed; review MAC protection')
     prefix = 'dp' if re.search(r'^&dp2 \{', active, re.M) else 'swport'
     for port, label, offset in ((2, 'wan', 0), (3, 'lan3', 1), (4, 'lan2', 1), (5, 'lan1', 1)):
@@ -108,21 +127,7 @@ def prepare(root):
                 re.findall(r'nvmem-cells\s*=([^;]*);', blocks[0]) != [f' <&mac_address {offset}>'] or
                 re.findall(r'nvmem-cell-names\s*=([^;]*);', blocks[0]) != [' "mac-address"']):
             raise ValueError('HomeWRK Ethernet MAC mapping changed; review MAC protection')
-    if active.count(ANCHOR) != 1:
-        raise ValueError('HomeWRK NAND controller changed; review MAC protection')
-    anchor_end = active.index(ANCHOR) + len(ANCHOR)
-    tail = active[anchor_end:]
-    before_nand = tail.split('\n\tnand@0 {', 1)
-    if len(before_nand) != 2:
-        raise ValueError('HomeWRK NAND node changed; review MAC protection')
-    if 'compatible = "qcom,smem-part";' not in tail:
-        raise ValueError('HomeWRK partition layout changed; review MAC protection')
-    if 'partitions {' in before_nand[0]:
-        if before_nand[0] != mask_comments(GUARD):
-            raise ValueError('HomeWRK partition protection changed; review upstream')
-    else:
-        if before_nand[0] != '':
-            raise ValueError('HomeWRK partition layout changed; review MAC protection')
+    if not guard:
         source = source[:anchor_end] + GUARD + source[anchor_end:]
     if source != original:
         path.write_text(source)

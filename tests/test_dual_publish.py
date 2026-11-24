@@ -84,6 +84,11 @@ def row(tag, id, **kwargs):
                 else '2026-11-23T00:00:00Z') | kwargs
 
 
+def full_page(rows):
+    """Pad a nonfinal API page with unique, unrelated Releases."""
+    return [*rows, *(row(f'Unrelated-{i}', 1000 + i) for i in range(100 - len(rows)))]
+
+
 def profile_fixture(base):
     """Use the production nine-image contract, with harmless local scripts."""
     shutil.copytree(ROOT/'scripts', base/'scripts')
@@ -290,13 +295,15 @@ class DualPublicationTests(unittest.TestCase):
                              [OLD_MX4200, OLD_MX4300])
 
     def test_group_retention_is_disjoint_across_paginated_inventory(self):
-        pages = [[row(OLD_MX4200, 1), row(OLD_MX4300, 2), row(OLD_HOMEWRK, 3),
-                  row(OLD_UNDERSCORE, 4), row('Other-keep', 5),
-                  row('MX4300-HomeWRK-ImmortalWrt-r97-26.11.20_00.00.00', 6, draft=True, published_at=None),
-                  row('MX4300-HomeWRK-ImmortalWrt-r98-26.11.20_00.00.00', 7, prerelease=True),
-                  row('MX4200-ImmortalWrt-r150-26.11.25_00.00.00', 8)],
-                 [row('MX4200' + TAG_SUFFIX, 9), row('MX4300' + TAG_SUFFIX, 10),
-                  row('MX4300-ImmortalWrt-r96-26.11.20_00.00.00', 11, prerelease=True)]]
+        first = full_page([
+            row(OLD_MX4200, 1), row(OLD_MX4300, 2), row(OLD_HOMEWRK, 3),
+            row(OLD_UNDERSCORE, 4), row('Other-keep', 5),
+            row('MX4300-HomeWRK-ImmortalWrt-r97-26.11.20_00.00.00', 6, draft=True, published_at=None),
+            row('MX4300-HomeWRK-ImmortalWrt-r98-26.11.20_00.00.00', 7, prerelease=True),
+            row('MX4200-ImmortalWrt-r150-26.11.25_00.00.00', 8),
+        ])
+        pages = [first, [row('MX4200' + TAG_SUFFIX, 9), row('MX4300' + TAG_SUFFIX, 10),
+                         row('MX4300-ImmortalWrt-r96-26.11.20_00.00.00', 11, prerelease=True)]]
         with tempfile.TemporaryDirectory() as tmp:
             base=Path(tmp); staged_fixture(base)
             result,calls=replay(base,pages)

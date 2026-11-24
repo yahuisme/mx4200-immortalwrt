@@ -31,6 +31,7 @@ class CustomScopeTests(unittest.TestCase):
             ('malformed', 'VERSION_NUMBER:=SNAPSHOTgarbage\n', ''),
             ('override', 'VERSION_NUMBER:=25.12.2\n', 'CONFIG_VERSION_NUMBER="26.01.0"\n'),
             ('assembly', 'VERSION_NUMBER:=SNAPSHOT\n', ''),
+            ('opkg', 'VERSION_NUMBER:=SNAPSHOT\n', 'CONFIG_USE_APK=n\n'),
         )
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -60,7 +61,7 @@ class CustomScopeTests(unittest.TestCase):
                     for name in ('include', 'scripts', 'package', 'feeds/luci', 'feeds/packages',
                                  'tmp/info/empty', '.external-packages/empty'):
                         (root / name).mkdir(parents=True, exist_ok=True)
-                    if label == 'assembly':
+                    if label in ('assembly', 'opkg'):
                         import shutil
                         source = ROOT / 'tests/fixtures/snapshot-source'
                         for name in ('package/Makefile', 'include/rootfs.mk', 'include/image.mk'):
@@ -68,8 +69,12 @@ class CustomScopeTests(unittest.TestCase):
                         dts = root / 'target/linux/qualcommax/dts/ipq8174-homewrk.dts'
                         dts.parent.mkdir(parents=True)
                         dts.write_bytes((ROOT / 'tests/fixtures/homewrk/ipq8174-homewrk.dts').read_bytes())
-                        package = root / 'package/Makefile'
-                        package.write_text(package.read_text().replace('$(curdir)/install:', 'changed/install:', 1))
+                        caldata = root / 'package/base-files/files/lib/functions/caldata.sh'
+                        caldata.parent.mkdir(parents=True)
+                        caldata.write_bytes((ROOT / 'tests/fixtures/ath11k-caldata-helper.sh').read_bytes())
+                        if label == 'assembly':
+                            package = root / 'package/Makefile'
+                            package.write_text(package.read_text().replace('$(curdir)/install:', 'changed/install:', 1))
                     (root / 'include/version.mk').write_text(version)
                     (root / '.config').write_text(override)
                     (root / 'scripts/projectsmirrors.json').write_text(
@@ -88,10 +93,11 @@ class CustomScopeTests(unittest.TestCase):
                                             GIT_CONFIG_GLOBAL=str(config), GIT_CONFIG_NOSYSTEM='1',
                                             TMPDIR=tmp))
                     self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-                    self.assertIn('Unsupported upstream assembly boundary' if label == 'assembly'
-                                  else 'require numeric ImmortalWrt stable', result.stderr)
                     self.assertEqual(before, tree_contents(base),
                                      'custom must reject before changing any fixture file/directory')
+                    self.assertIn({'assembly': 'Unsupported upstream assembly boundary',
+                                   'opkg': 'require APK and aarch64_cortex-a53'}.get(
+                                       label, 'require numeric ImmortalWrt stable'), result.stderr)
 
     def test_homewrk_guard_failure_stops_all_downstream_changes(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -154,6 +160,7 @@ python3() {
             boundary = '''
 bash() {
     case "$1" in
+        /cache-scripts/ttyd_compat.sh) [ "$2" = "$DK_OPENWRT" ] && printf 'ttyd\\n' >> "$LOG";;
         /cache-scripts/packages.sh) printf 'packages\\n' >> "$LOG";;
         /cache-scripts/settings.sh) printf 'settings\\n' >> "$LOG";;
         *) return 98;;
@@ -181,7 +188,7 @@ python3() {
                                     cwd=root, env=env, text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual((root / 'calls').read_text().splitlines(),
-                             ['preflight', 'homewrk', 'packages', 'settings'])
+                             ['preflight', 'homewrk', 'ttyd', 'packages', 'settings'])
             selector = r'qcom,(?:ath11k-)?calibration-variant\s*=\s*"[^"]+";'
             self.assertEqual(re.findall(selector, dts.read_text()),
                              re.findall(selector, original_dts))

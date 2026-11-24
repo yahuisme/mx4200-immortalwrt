@@ -142,6 +142,13 @@ def artifacts(root):
             for p in sorted(root.glob(pattern))]
 
 
+def validate_ccache(root):
+    binary = root / 'staging_dir/host/bin/ccache'
+    if (binary.is_symlink() or not binary.is_file() or not binary.stat().st_size
+            or not os.access(binary, os.X_OK)):
+        raise ValueError('missing nonempty executable host ccache')
+
+
 def restore(root, cache, expected):
     # Never merge an image's staging or target objects with another generation.
     for name in ('build_dir', 'staging_dir'):
@@ -156,6 +163,7 @@ def restore(root, cache, expected):
         toolchain_archive.validate_archive(cache / 'toolchain.tar.gz', root)
         subprocess.run(['tar', '--gzip', '-xf', str(cache / 'toolchain.tar.gz'),
                         '--no-same-owner', '-C', str(root)], check=True)
+        validate_ccache(root)
         print('exact toolchain restored')
     else:
         print('cold toolchain')
@@ -165,31 +173,36 @@ def pack(root, cache, kind, expected):
     cache.mkdir(parents=True, exist_ok=True)
     archive = cache / (kind + '.tar.gz')
     archive.unlink(missing_ok=True)
+    keyfile = cache / 'key'
     paths = artifacts(root) if kind == 'toolchain' else [root]
     if kind == 'toolchain':
+        keyfile.unlink(missing_ok=True)
         if not (root / 'build_dir/host').is_dir() or not (root / 'staging_dir/host').is_dir() or not list(root.glob('build_dir/toolchain-*')) or not list(root.glob('staging_dir/toolchain-*')):
             raise ValueError('incomplete toolchain artifact set')
+        validate_ccache(root)
         names = [str(p.relative_to(root)) for p in paths]
         base = root
     else:
         names, base = ['.'], root
     compressor = 'pigz -1' if shutil.which('pigz') else 'gzip -1'
-    subprocess.run(['tar', '--format=posix', '-I', compressor, '-cf', str(archive),
-                    '-C', str(base), *names], check=True)
-    if kind == 'toolchain':
-        try:
+    try:
+        subprocess.run(['tar', '--format=posix', '-I', compressor, '-cf', str(archive),
+                        '-C', str(base), *names], check=True)
+        if kind == 'toolchain':
             toolchain_archive.validate_archive(archive, root)
-        except Exception:
-            archive.unlink(missing_ok=True)
-            raise
-    size = archive.stat().st_size
-    print(f'{kind}: measured compressed bytes={size}, cap={LIMITS[kind]}')
-    if size > LIMITS[kind]:
-        archive.unlink()
-        print('cache upload declined: over per-entry budget')
-        return
-    if kind == 'toolchain':
-        (cache / 'key').write_text(expected + '\n')
+        size = archive.stat().st_size
+        print(f'{kind}: measured compressed bytes={size}, cap={LIMITS[kind]}')
+        if size > LIMITS[kind]:
+            archive.unlink()
+            print('cache upload declined: over per-entry budget')
+            return
+        if kind == 'toolchain':
+            keyfile.write_text(expected + '\n')
+    except Exception:
+        archive.unlink(missing_ok=True)
+        if kind == 'toolchain':
+            keyfile.unlink(missing_ok=True)
+        raise
 
 
 if __name__ == '__main__':

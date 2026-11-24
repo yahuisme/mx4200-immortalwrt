@@ -20,7 +20,7 @@
 
 HomeWRK 临时镜像跟随 ImmortalWrt 最新官方稳定版，原样随 Release 提供，不重新编译。U 盘启动后访问 `192.168.1.1`，在 LuCI 中安装本项目基于 Snapshot 的正式固件。
 
-**首次安装：[Linksys 刷机教程](linksys-first-flash.md)。MX4200v1/v2、MX4300 从原厂后台刷入 `factory.bin`，再用 `sysupgrade.bin` 升级；HomeWRK 拆机连接 TTL，通过 U 盘启动 `initramfs-uImage.itb`，再经 LuCI 后台升级 `sysupgrade.bin`。**
+**首次安装：[Linksys 刷机教程](linksys-first-flash.md)。MX4200v1/v2、MX4300 从原厂后台刷入 `factory.bin`，再经 LuCI 升级 `sysupgrade.bin`；HomeWRK 拆机连接 TTL，通过 U 盘启动 `initramfs-uImage.itb`，再经 LuCI 后台升级 `sysupgrade.bin`。**
 
 ## 功能与应用
 

@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from test_dual_publish import GROUPS, TAG_SUFFIX, replay as replay_publish, staged_fixture
+from test_dual_publish import GROUPS, TAG_SUFFIX, full_page, replay as replay_publish, staged_fixture
 
 CURRENT = [device + TAG_SUFFIX for device in GROUPS.values()]
 PREVIOUS = 'MX4200-ImmortalWrt-r122-26.11.23_00.00.00'
@@ -35,23 +35,27 @@ class ReleaseRetention(unittest.TestCase):
                          published_at=current[0]['published_at']),
                      row('MX4300-ImmortalWrt-r130-26.11.25_00.00.00', 6),
                      row('MX4200-ImmortalWrt-r90-26.10.00_00.00.00', 5)]
-        result, deleted = self.replay([[current[0], older[0], *protected], [current[1], older[1]]])
+        result, deleted = self.replay([full_page([current[0], older[0], *protected]),
+                                       [current[1], older[1]]])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(deleted, [r['tag_name'] for r in older])
 
     def test_uncertain_dual_inventory_never_prunes_either_group(self):
         current = [row(tag, rank) for rank, tag in enumerate(CURRENT, 10)]
         old = row(OLD, 8)
-        for pages in ([[current[0], old]],
-                      [[*current, old], [old]],
-                      [[*current, old], [dict(old, id=90)]],
-                      [[*current, old], [dict(old, tag_name='Other')]],
-                      [[*current, old], [row('MX4300-ImmortalWrt-r121-26.10.09_00.00.00', 9,
-                                              published_at='2026-10-32T00:00:00Z')]]):
-            with self.subTest(pages=pages):
+        first = full_page([*current, old])
+        invalid_date = row('MX4300-ImmortalWrt-r121-26.10.09_00.00.00', 9,
+                           published_at='2026-10-32T00:00:00Z')
+        for pages, diagnostic in (([[current[0], old]], 'Current publication missing'),
+                                  ([first, [old]], 'Duplicate Release ID or tag'),
+                                  ([first, [dict(old, id=90)]], 'Duplicate Release ID or tag'),
+                                  ([first, [dict(old, tag_name='Other')]], 'Duplicate Release ID or tag'),
+                                  ([first, [invalid_date]], 'day is out of range')):
+            with self.subTest(diagnostic=diagnostic):
                 result, deleted = self.replay(pages)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(deleted, [])
+                self.assertIn(diagnostic, result.stderr)
                 self.assertIn('retaining both groups', result.stdout)
 
     def test_readback_failures_protect_old_releases(self):
@@ -79,10 +83,10 @@ class ReleaseRetention(unittest.TestCase):
             self.assertEqual(deleted, [r['tag_name'] for r in older])
 
     def test_pagination_publication_order_and_protected_releases(self):
-        pages = [[row(OLD, 1), row('Other_keep', 20),
-                  row('MX4200-ImmortalWrt-r81-26.11.10_00.00.00', 21, draft=True)],
-                 [row(PREVIOUS, 9), row(CURRENT[0], 10), row(CURRENT[1], 11),
-                  row('MX4200_ImmortalWrt_26.11.11-00.00.00_r82', 22, prerelease=True)]]
+        first = full_page([row(OLD, 1), row('Other_keep', 20),
+                           row('MX4200-ImmortalWrt-r81-26.11.10_00.00.00', 21, draft=True)])
+        pages = [first, [row(PREVIOUS, 9), row(CURRENT[0], 10), row(CURRENT[1], 11),
+                         row('MX4200_ImmortalWrt_26.11.11-00.00.00_r82', 22, prerelease=True)]]
         result, deleted = self.replay(pages)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(deleted, [OLD, PREVIOUS])
@@ -98,6 +102,21 @@ class ReleaseRetention(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(deleted, [])
             self.assertIn('retaining both groups', result.stdout)
+
+    def test_inconsistent_page_sizes_disable_cleanup(self):
+        current = [row(tag, rank) for rank, tag in enumerate(CURRENT, 10)]
+        first = [*current, row(OLD, 8)]
+        full = full_page(first)
+        for case, pages in (
+                ('empty trailing page', [full, []]),
+                ('short nonfinal page', [first, [row('Other-final', 50)]]),
+                ('overlong page', [[*full, row('Other-extra', 51)]])):
+            with self.subTest(case=case):
+                result, deleted = self.replay(pages)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(deleted, [])
+                self.assertIn('Inconsistent Release inventory page sizes', result.stderr)
+                self.assertIn('retaining both groups', result.stdout)
 
     def test_missing_publication_timestamp_disables_cleanup(self):
         for tag in (*CURRENT, OLD):

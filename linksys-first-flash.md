@@ -1,6 +1,6 @@
 # Linksys 首次刷机教程
 
-- **MX4200v1/v2、MX4300**：从原厂后台刷入 `factory.bin`，再用 `sysupgrade.bin` 升级。
+- **MX4200v1/v2、MX4300**：从原厂后台刷入 `factory.bin`，再经 LuCI 升级 `sysupgrade.bin`。
 - **HomeWRK**：拆机连接 TTL，通过 U 盘启动 `initramfs-uImage.itb`，再经 LuCI 后台升级 `sysupgrade.bin`。
 
 > 固件必须匹配机型，MX4200 需区分 v1 / v2。刷写期间不要断电，校验失败时不要强刷。

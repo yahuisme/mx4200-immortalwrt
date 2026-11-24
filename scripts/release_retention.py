@@ -40,6 +40,10 @@ def published_at(row):
 def select(pages, mx4200, mx4300):
     if not isinstance(pages, list) or not pages or any(not isinstance(page, list) for page in pages):
         raise ValueError('Invalid Release inventory pages')
+    # Match per_page=100 in the workflow. A premature short or empty page
+    # can mean the inventory moved while GitHub was paginating it.
+    if any(len(page) != 100 for page in pages[:-1]) or not 1 <= len(pages[-1]) <= 100:
+        raise ValueError('Inconsistent Release inventory page sizes')
     ids, inventory = set(), {}
     for page in pages:
         for row in page:

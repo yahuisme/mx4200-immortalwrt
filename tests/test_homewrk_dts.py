@@ -108,6 +108,35 @@ class HomewrkDtsTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(path.read_text(), changed)
 
+    def test_factory_cell_must_be_under_nand_partition_on_each_pass(self):
+        from scripts.homewrk_dts import GUARD, prepare
+        for layout in ('stable', 'newer'):
+            with self.subTest(layout=layout), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                if layout == 'stable':
+                    path = root / 'target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8174-homewrk.dts'
+                    source = FIXTURE.with_name('stable-homewrk.dts')
+                else:
+                    path = root / DTS
+                    source = FIXTURE
+                path.parent.mkdir(parents=True)
+                path.write_bytes(source.read_bytes())
+                prepare(root)
+                valid = path.read_text()
+                start = valid.index('\t\t\tpartition-devinfo {')
+                end = valid.index('\n\t\t};', start)
+                cell = valid[start:end]
+                # A node under the root can still satisfy the phandle reads,
+                # but is not associated with the actual NAND MTD partition.
+                moved = valid[:start] + valid[end:] + '\n/ {\n' + cell + '\n};\n'
+                for guarded in (False, True):
+                    with self.subTest(guarded=guarded):
+                        original = moved if guarded else moved.replace(GUARD, '', 1)
+                        path.write_text(original)
+                        with self.assertRaisesRegex(ValueError, 'HomeWRK factory MAC cell changed'):
+                            prepare(root)
+                        self.assertEqual(path.read_text(), original)
+
     def test_stable_source_dts_path_preserves_mac_fix_and_rejects_ambiguity(self):
         from scripts.homewrk_dts import prepare
         stable = Path('target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8174-homewrk.dts')

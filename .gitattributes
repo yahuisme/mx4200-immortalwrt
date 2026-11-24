@@ -3,4 +3,5 @@
 *.defaults text eol=lf
 # Preserve exact upstream patch bytes, including whitespace in diff context.
 scripts/edma-patches/*.patch text eol=lf whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+scripts/ttyd-patches/*.patch text eol=lf whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
 tests/fixtures/edma/**/*.patch text eol=lf whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab

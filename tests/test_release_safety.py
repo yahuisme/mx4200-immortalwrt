@@ -51,10 +51,10 @@ class ReleaseTests(unittest.TestCase):
         (base/'tmp/.packageinfo').write_text('')
         (base/'build-record').mkdir()
         (base/'build-record/source-ref.txt').write_text('refs/heads/master\n')
-        (base/'build-record/source-revision.txt').write_text('r123-abcdef\n')
+        (base/'build-record/source-revision.txt').write_text('r123-ccccccc\n')
         (base/'build-record/source-sha.txt').write_text('c'*40+'\n')
         (base/'fixture-official.json').write_text(json.dumps(official_record()))
-        data={'target':'qualcommax/ipq807x','version_number':'SNAPSHOT','version_code':'r123-abcdef', 'profiles': {}}
+        data={'target':'qualcommax/ipq807x','version_number':'SNAPSHOT','version_code':'r123-ccccccc', 'profiles': {}}
         for device in ('mx4200v1','mx4200v2','mx4300','homewrk'):
             images = []
             for kind in ('factory','sysupgrade'):
@@ -121,7 +121,7 @@ python3() {
                         self.assertEqual(title,tag)
                         suffixes.append(tag.removeprefix(device+'-ImmortalWrt-'))
                         notes=(directory/'release-notes.md').read_text()
-                        for text in ('- 首次安装：','从原厂后台刷入 `factory.bin`，再用 `sysupgrade.bin` 升级',
+                        for text in ('- 首次安装：','从原厂后台刷入 `factory.bin`，再经 LuCI 升级 `sysupgrade.bin`',
                                      '构建时间：',
                                      '[ImmortalWrt Snapshot](https://github.com/immortalwrt/immortalwrt/tree/' + 'c'*40 + ')',
                                      '按机型和硬件版本选择镜像，不可混刷。',
@@ -167,17 +167,21 @@ python3() {
                 self.assertFalse((base/'firmware').exists())
 
     def test_snapshot_identity_failure_blocks_download_and_release(self):
-        for fault in ('profile-version', 'source-ref'):
+        for fault in ('profile-version', 'source-ref', 'source-sha'):
             with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
                 base = Path(tmp)
                 output, data = self.fixture(base)
                 if fault == 'profile-version':
                     data['version_number'] = '26.01.0'
                     (output / 'profiles.json').write_text(json.dumps(data))
-                else:
+                elif fault == 'source-ref':
                     (base / 'build-record/source-ref.txt').write_text('refs/tags/v26.01.0\n')
+                else:
+                    (base / 'build-record/source-sha.txt').write_text('d'*40+'\n')
                 result = self.stage(base)
-                self.assertNotEqual(result.returncode, 0, result.stderr)
+                self.assertNotEqual(result.returncode, 0)
+                if fault == 'source-sha':
+                    self.assertIn('Snapshot revision does not match source SHA', result.stdout)
                 self.assertFalse((base/'official-download-calls').exists())
                 self.assertFalse(list((base / 'firmware').glob('*/version.txt')))
 

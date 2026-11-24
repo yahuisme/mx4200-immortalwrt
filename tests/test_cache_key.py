@@ -222,10 +222,11 @@ class KeyTests(unittest.TestCase):
         self.assertEqual(before, self.key())
 
     def test_archive_pairing_pax_and_gzip_fallback(self):
-        for name in ('build_dir/host/.built', 'staging_dir/host/bin/tool',
+        for name in ('build_dir/host/.built', 'staging_dir/host/bin/ccache',
                      'build_dir/toolchain-test/.built', 'staging_dir/toolchain-test/lib/test'):
             p = self.put(name, 'layout fixture, not GCC')
             os.utime(p, ns=(1700000000123456789, 1700000000123456789))
+        (self.root / 'staging_dir/host/bin/ccache').chmod(0o755)
         archive = Path(self.tmp.name) / 'archive'
         expected = self.key()
         with patch.object(self.cache.shutil, 'which', return_value=None):

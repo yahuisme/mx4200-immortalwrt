@@ -38,7 +38,7 @@ def put(root, name, text):
     path.write_text(text)
 
 
-def reviewed_version(root):
+def reviewed_version(root, config):
     """Recognize the official Snapshot and numeric stable version templates.
 
     Latest-release selection belongs to the official-source resolver, not this
@@ -56,8 +56,6 @@ def reviewed_version(root):
                                number + r'\)', assignments[1])
     if version is None:
         raise ValueError('External APK feeds require numeric ImmortalWrt stable or reviewed ImmortalWrt Snapshot')
-    config_path = root / '.config'
-    config = config_path.read_text() if config_path.exists() else ''
     overrides = re.findall(r'^CONFIG_VERSION_NUMBER=(.*)$', config, re.M)
     if len(overrides) > 1 or (overrides and overrides[0] not in ('""', '"' + version[1] + '"')):
         raise ValueError('External APK feeds require numeric ImmortalWrt stable or reviewed ImmortalWrt Snapshot without version override')
@@ -174,8 +172,16 @@ def snapshot_assembly_updates(root, texts):
     return texts
 
 
-def reviewed_assembly(root):
-    version = reviewed_version(root)
+def reviewed_assembly(root, *, resolved=False):
+    config_path = root / '.config'
+    config = config_path.read_text() if resolved or config_path.exists() else ''
+    version = reviewed_version(root, config)
+    for symbol, expected in (('USE_APK', 'y'), ('TARGET_ARCH_PACKAGES', f'"{ARCH}"')):
+        values = re.findall(rf'^(?:CONFIG_{symbol}=(.*)|# CONFIG_{symbol} is not set)$', config, re.M)
+        # The recipe fragment can omit native defaults before defconfig. Reject
+        # explicit incompatibility now and require both resolved values at install.
+        if values != [expected] and (resolved or values):
+            raise ValueError('External APK feeds require APK and ' + ARCH)
     return version, assembly_updates(root, version)
 
 
@@ -213,11 +219,7 @@ def digest(path):
 def snapshot(root, apk, repositories=None):
     root, apk = Path(root).resolve(), str(Path(apk).resolve())
     repositories = repositories or REPOSITORIES
-    config = (root / '.config').read_text()
-    version, _ = reviewed_assembly(root)  # Recheck before refreshing provenance.
-    if (re.findall(r'^CONFIG_USE_APK=(.*)$', config, re.M) != ['y'] or
-            re.findall(r'^CONFIG_TARGET_ARCH_PACKAGES=(.*)$', config, re.M) != ['"' + ARCH + '"']):
-        raise ValueError('External APK feeds require APK and aarch64_cortex-a53')
+    version, _ = reviewed_assembly(root, resolved=True)  # Recheck before refreshing provenance.
     destination = root / '.external-packages'
     destination.mkdir(exist_ok=True)
     # No valid provenance survives a failed refresh or a truncated download.

@@ -108,6 +108,71 @@ class RecoveryTests(unittest.TestCase):
                 self.assertFalse((self.root / 'staging_dir/host').exists())
                 self.assertEqual(list(self.archive.iterdir()), [])
 
+    def test_toolchain_pack_never_offers_archive_with_unusable_ccache(self):
+        for name in ('build_dir/host', 'staging_dir/host/bin',
+                     'build_dir/toolchain-test', 'staging_dir/toolchain-test'):
+            (self.root / name).mkdir(parents=True)
+        binary = self.root / 'staging_dir/host/bin/ccache'
+        binary.write_bytes(b'not run by structural validation')
+        binary.chmod(0o755)
+        pack = [sys.executable, str(REPO / 'scripts/cache.py'), 'toolchain',
+                str(self.root), str(self.archive), 'matched']
+        result = subprocess.run(pack, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.cli('toolchain').stdout, 'hit=true\nmatched-key=matched\npoisoned=false\n')
+
+        for bad in ('empty', 'nonexecutable', 'missing', 'directory', 'symlink'):
+            with self.subTest(bad=bad):
+                binary.parent.mkdir(parents=True, exist_ok=True)
+                if bad == 'empty':
+                    binary.write_bytes(b'')
+                    binary.chmod(0o755)
+                elif bad == 'nonexecutable':
+                    binary.write_bytes(b'nonexecutable')
+                    binary.chmod(0o644)
+                else:
+                    binary.unlink(missing_ok=True)
+                    if bad == 'directory':
+                        binary.mkdir()
+                    elif bad == 'symlink':
+                        binary.symlink_to('/bin/sh')
+                result = subprocess.run(pack, text=True, capture_output=True)
+                if bad == 'directory':
+                    binary.rmdir()
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn('missing nonempty executable host ccache', result.stderr)
+                self.assertEqual(list(self.archive.iterdir()), [])
+
+    def test_failed_pack_clears_candidate(self):
+        import shutil
+        tar = shutil.which('tar')
+        assert tar is not None
+        bindir = self.base / 'bin'
+        bindir.mkdir()
+        shim = bindir / 'tar'
+        shim.write_text('#!/bin/sh\n"$REAL_TAR" "$@" || exit "$?"\nexit 1\n')
+        shim.chmod(0o755)
+        env = dict(os.environ, REAL_TAR=tar, PATH=str(bindir) + os.pathsep + os.environ['PATH'])
+        (self.root / 'download').write_text('fixture')
+        for kind in ('ccache', 'dl', 'toolchain'):
+            with self.subTest(kind=kind):
+                if kind == 'toolchain':
+                    for name in ('build_dir/host', 'staging_dir/host/bin',
+                                 'build_dir/toolchain-test', 'staging_dir/toolchain-test'):
+                        (self.root / name).mkdir(parents=True)
+                    binary = self.root / 'staging_dir/host/bin/ccache'
+                    binary.write_bytes(b'nonempty')
+                    binary.chmod(0o755)
+                    (self.archive / 'key').write_text('old\n')
+                (self.archive / (kind + '.tar.gz')).write_bytes(b'old')
+                result = subprocess.run([sys.executable, str(REPO / 'scripts/cache.py'), kind,
+                                         str(self.root), str(self.archive), 'matched'],
+                                        env=env, text=True, capture_output=True)
+                self.assertNotEqual(result.returncode, 0, result.stderr)
+                self.assertIn('returned non-zero exit status 1', result.stderr)
+                self.assertFalse((self.archive / (kind + '.tar.gz')).exists())
+                self.assertFalse((self.archive / 'key').exists())
+
     def fake_gh(self, entries, failure=''):
         import json
         bindir = self.base / 'bin'
