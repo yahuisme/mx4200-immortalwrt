@@ -1,4 +1,4 @@
-"""Stable-source signed Aurora/native offline APK tests; no compilation.
+"""Signed Aurora/native offline APK tests; no compilation.
 
 Integration inputs are reusable, external fixtures: MX_APK_SOURCE_FIXTURE holds
 four untouched official assembly/version files; MX_APK_RUNTIME_FIXTURE contains a native
@@ -40,7 +40,7 @@ def helper():
 def fixture(test, name):
     value = os.environ.get(name)
     if not value and name == 'MX_APK_SOURCE_FIXTURE':
-        value = str(ROOT / 'tests/fixtures/stable-apk-source')
+        value = str(ROOT / 'tests/fixtures/snapshot-source')
     if not value:
         test.skipTest('set ' + name + ' to an isolated real fixture; no verification substitute')
     assert value is not None
@@ -63,7 +63,7 @@ def local_repositories(module, directory):
 
 class ExternalPackageTests(unittest.TestCase):
     def copy_source(self, root):
-        shutil.copytree(fixture(self, 'MX_APK_SOURCE_FIXTURE'), root, dirs_exist_ok=True)
+        shutil.copytree(ROOT / 'tests/fixtures/stable-apk-source', root, dirs_exist_ok=True)
 
     def tree(self, root):
         return {str(p.relative_to(root)): ('link', os.readlink(p)) if p.is_symlink()
@@ -103,7 +103,7 @@ class ExternalPackageTests(unittest.TestCase):
                     self.assertEqual(before, self.tree(root))
 
     def test_prepare_rejects_nonstable_or_malformed_version_without_any_writes(self):
-        versions = ('SNAPSHOT', '25.12.2-rc1', '25.12.2beta1', 'v25.12.2', '25.12',
+        versions = ('SNAPSHOTgarbage', '25.12.2-rc1', '25.12.2beta1', 'v25.12.2', '25.12',
                     '25.12.2garbage', 'prefix25.12.2)', '$(unreviewed,25.12.2)')
         assignments = ['VERSION_NUMBER:=' + value + '\n' for value in versions]
         assignments += ['# missing version assignment\n',
@@ -217,7 +217,7 @@ class ExternalPackageTests(unittest.TestCase):
                 self.assertEqual(before, self.tree(root))
 
     def test_snapshot_rechecks_changed_version_without_any_writes(self):
-        for version, config in (('SNAPSHOT', ''), ('25.12.2-rc1', ''),
+        for version, config in (('SNAPSHOTgarbage', ''), ('25.12.2-rc1', ''),
                                 ('25.12.2', 'CONFIG_VERSION_NUMBER="26.01.0"\n')):
             with self.subTest(version=version, config=config), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
@@ -233,7 +233,7 @@ class ExternalPackageTests(unittest.TestCase):
                 self.assertEqual(before, self.tree(root))
 
     def test_real_assembly_hooks_cover_common_and_device_rootfs(self):
-        source = fixture(self, 'MX_APK_SOURCE_FIXTURE')
+        source = ROOT / 'tests/fixtures/stable-apk-source'
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             shutil.copytree(source, root, dirs_exist_ok=True)
@@ -257,6 +257,138 @@ class ExternalPackageTests(unittest.TestCase):
             before = self.tree(root)
             helper().prepare(root)
             self.assertEqual(before, self.tree(root))
+
+    def test_snapshot_preflight_prepare_are_read_only_and_idempotent_respectively(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(fixture(self, 'MX_APK_SOURCE_FIXTURE'), root, dirs_exist_ok=True)
+            before = self.tree(root)
+            helper().preflight(root)
+            self.assertEqual(before, self.tree(root))
+            helper().prepare(root)
+            self.assertFalse((root / 'files/etc/apk/repositories.d/customfeeds.list').exists())
+            self.assertTrue((root / '.external-packages/files/etc/apk/repositories.d/customfeeds.list').is_file())
+            before = self.tree(root)
+            helper().prepare(root)
+            self.assertEqual(before, self.tree(root))
+
+    def test_snapshot_boundary_drift_rejected_before_refresh_or_writes(self):
+        mutations = (
+            ('include/image.mk', '$(call prepare_rootfs,$(mkfs_cur_target_dir),$(TOPDIR)/files,,mx-external)'),
+            ('include/rootfs.mk', '--keys-dir $(if $(filter mx-external,$(2))'),
+            ('package/Makefile', 'define rootfs_cache_key\n'),
+            ('package/Makefile', '$(eval ROOTFS_KEY:='),
+            ('package/Makefile', '$(TOPDIR)/.external-packages/provenance.json \\'),
+            ('package/Makefile', '$$(cat $(TMP_DIR)/apk_install_list) $(MX_EXTERNAL_PACKAGES)'),
+            ('package/Makefile', 'kernel=$(subst -rc,_rc,'),
+        )
+        module = helper()
+        for name, marker in mutations:
+            with self.subTest(name=name, marker=marker), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                initialize(root, fixture(self, 'MX_APK_SOURCE_FIXTURE'))
+                (root / '.external-packages/provenance.json').write_text('previous evidence\n')
+                path = root / name
+                text = path.read_text()
+                self.assertEqual(text.count(marker), 1)
+                path.write_text(text.replace(marker, 'changed-boundary'))
+                before = self.tree(root)
+                for run in (module.preflight, module.prepare, lambda p: module.snapshot(p, p / 'not-apk')):
+                    with self.assertRaisesRegex(ValueError, 'Unsupported upstream assembly boundary'):
+                        run(root)
+                    self.assertEqual(before, self.tree(root))
+
+    def test_native_snapshot_make_cache_and_isolated_root(self):
+        """Execute native install/key/copy rules with harmless APK boundaries."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            initialize(root, fixture(self, 'MX_APK_SOURCE_FIXTURE'))
+            (root / 'include/feeds.mk').touch()
+            for name in ('packages.adb', 'bin/tar', 'bin/gzip', '.build'):
+                path = root / name
+                path.parent.mkdir(exist_ok=True)
+                path.write_text('native key input\n')
+            (root / 'staging-root').mkdir()
+            for name in ('base-files', 'libc', 'kernel'):
+                (root / (name + '.version')).write_text('1-rc2\n')
+            for name, body in (
+                ('bin/apk', 'printf "<%s>\\n" "$@" >> args; echo apk >> events'),
+                ('hash', 'sha256sum | cut -d " " -f1'),
+            ):
+                path = root / name
+                path.write_text('#!/bin/sh\n' + body + '\n')
+                path.chmod(0o755)
+            script = root / 'external.py'
+            script.write_text('import os, shutil, sys\nfrom pathlib import Path\n'
+                              'if sys.argv[1] == "snapshot":\n'
+                              '    if os.environ.get("FAIL") == "yes": sys.exit(19)\n'
+                              '    shutil.copyfile("next.json", ".external-packages/provenance.json")\n'
+                              '    Path(".external-packages/files/etc/apk/keys").mkdir(exist_ok=True)\n'
+                              '    Path(".external-packages/files/etc/apk/keys/eamonxg.pem").touch()\n'
+                              '    with open("events", "a") as f: f.write("refresh\\n")\n'
+                              'else:\n'
+                              '    assert Path(sys.argv[2], "etc/apk/keys/eamonxg.pem").is_file()\n'
+                              '    with open("events", "a") as f: f.write("verify\\n")\n')
+            for relative in ('package/Makefile', 'include/rootfs.mk'):
+                path = root / relative
+                text = path.read_text().replace('/cache-scripts/external_packages.py', str(script))
+                if relative == 'include/rootfs.mk':
+                    # Only native postinstall commands need runnable target hooks.
+                    start = text.index('\t@( \\\n')
+                    end = text.index('\n\n', start)
+                    text = text[:start] + text[end:]
+                path.write_text(text)
+            image = (root / 'include/image.mk').read_text()
+            device = image[image.index('apk_target = '):image.index('\n$(KDIR)/root.%:')]
+            (root / 'harness.mk').write_text(
+                f'TOPDIR:={root}\nINCLUDE_DIR:=$(TOPDIR)/include\nTMP_DIR:=$(TOPDIR)\n'
+                'STAGING_DIR:=.\nSTAGING_DIR_HOST:=.\nSTAGING_DIR_ROOT:=staging-root\n'
+                'PACKAGE_DIR_ALL:=.\nBUILD_KEY_APK_SEC:=private.pem\nBUILD_KEY_APK_PUB:=public.pem\n'
+                'SOURCE_DATE_EPOCH:=1\nMKHASH:=./hash\nTARGET_ROOTFS_DIR:=.\nBOARD:=test\n'
+                'TARGET_DIR:=common\nCONFIG_USE_APK:=y\nCONFIG_SIGNED_PACKAGES:=y\n'
+                'CP:=cp -a\nXARGS:=xargs -r\nfile_copy = cp -a $(1) $(2)\n'
+                'include package/Makefile\n'
+                'mkfs_cur_target_dir:=device\nmkfs_packages_add:=native-extra\n'
+                + device + '\nFORCE:\n'
+                'ramboot:\n\tmkdir -p ram\n\t$(call apk,ram) add luci\n\t$(call prepare_rootfs,ram)\n'
+                # All tool/index inputs are prebuilt for this make test.
+                'package/merge package/merge-index: ; @:\n')
+            def run(target, **overrides):
+                return subprocess.run(['make', '--no-print-directory', '-sf', 'harness.mk', target,
+                                       *[f'{k}={v}' for k, v in overrides.items()]],
+                                      cwd=root, capture_output=True, text=True)
+
+            for provenance, cache_hit in (('signed-A', False), ('signed-A', True), ('signed-B', False)):
+                (root / 'next.json').write_text(provenance)
+                (root / 'events').unlink(missing_ok=True)
+                result = run('package/install')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual((root / 'events').read_text().splitlines(),
+                                 ['refresh', 'verify'] if cache_hit else ['refresh', 'apk', 'verify'])
+            args = (root / 'args').read_text()
+            for name in helper().REPOSITORIES['eamonxg']['packages']:
+                self.assertIn(f'<{name}@eamonxg>', args)
+            self.assertIn('<kernel=1_rc2>', args)
+            (root / 'events').unlink()
+            result = run('package/install', FAIL='yes')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse((root / 'events').exists())
+            self.assertTrue((root / 'common').is_dir(), 'failed prerequisite ran native rm')
+
+            for target in ('target-dir-test', 'ramboot'):
+                (root / 'args').unlink()
+                (root / 'events').unlink(missing_ok=True)
+                result = run(target)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                formal = target == 'target-dir-test'
+                args = (root / 'args').read_text()
+                self.assertEqual('eamonxg' in args, formal)
+                self.assertEqual('--no-network' in args, formal)
+                self.assertEqual((root / 'events').read_text().splitlines(),
+                                 ['apk', 'verify'] if formal else ['apk'])
+                target_root = root / ('device' if formal else 'ram')
+                self.assertEqual((target_root / helper().RUNTIME_FEEDS).is_file(), formal)
+                self.assertEqual((target_root / 'etc/apk/keys/eamonxg.pem').is_file(), formal)
 
     def test_native_stable_recipe_stops_before_add_when_signed_refresh_fails(self):
         """Execute native add lines with a harmless APK boundary, no compilation."""
@@ -309,6 +441,10 @@ class ExternalPackageTests(unittest.TestCase):
                 repositories[tag]['key'] = (runtime / 'keys' / (tag + '.pem')).as_uri()
             module.snapshot(root, apk, repositories)
             provenance = root / '.external-packages/provenance.json'
+            key_path = 'etc/apk/keys/eamonxg.pem'
+            self.assertFalse((root / 'files' / key_path).exists())
+            self.assertEqual((root / '.external-packages/files' / key_path).read_bytes(),
+                             (runtime / 'keys/eamonxg.pem').read_bytes())
             record = json.loads(provenance.read_text())
             self.assertEqual({p['name'] for p in record['packages']},
                              {p for repo in repositories.values() for p in repo['packages']})
@@ -363,9 +499,7 @@ class ExternalPackageTests(unittest.TestCase):
                             (root / '.external-packages' / tag / 'packages.adb').as_uri()]
             wanted = [p + '@' + tag for tag, repo in repositories.items() for p in repo['packages']]
             subprocess.run(command + ['add', *wanted], check=True, capture_output=True, text=True)
-            shutil.copytree(root / 'files', image, dirs_exist_ok=True)
-            (image / 'etc/apk/repositories.d/customfeeds.list').write_text(''.join(
-                '@' + tag + ' ' + repo['url'] + '/packages.adb\n' for tag, repo in module.REPOSITORIES.items()))
+            shutil.copytree(root / '.external-packages/files', image, dirs_exist_ok=True)
             record = json.loads((root / '.external-packages/provenance.json').read_text())
 
             def assert_native_root(target, native):

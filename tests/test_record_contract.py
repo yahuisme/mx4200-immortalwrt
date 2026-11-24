@@ -51,7 +51,7 @@ def write_external_fixture(base):
 
 
 class RecordContract(unittest.TestCase):
-    def fixture(self, base, *, include_external=False):
+    def fixture(self, base):
         profile = json.loads((ROOT / 'user/default/build.json').read_text())
         for path in (base, base / 'feeds/packages'):
             path.mkdir(parents=True, exist_ok=True)
@@ -65,8 +65,7 @@ class RecordContract(unittest.TestCase):
         target.mkdir(parents=True)
         (target / 'fixture.manifest').write_text('fixture - 1\n')
         (target / 'profiles.json').write_text('{}\n')
-        paths = [target / name for name in profile['images']
-                 if include_external or name not in profile.get('external_images', [])]
+        paths = [target / name for name in profile['images']]
         for path in paths:
             path.write_bytes(b'fixture image')
         return profile, paths
@@ -103,8 +102,7 @@ class RecordContract(unittest.TestCase):
             self.assertEqual(record['target'], profile['target'])
             self.assertEqual(record['config']['digest'], 'sha256:' + hashlib.sha256((base / '.config').read_bytes()).hexdigest())
             self.assertEqual({e['name'] for e in record['images']}, {p.name for p in paths})
-            self.assertEqual(len(record['images']), 8)
-            self.assertTrue(set(profile['external_images']).isdisjoint(e['name'] for e in record['images']))
+            self.assertEqual(len(record['images']), 9)
             self.assertEqual(json.loads((base / 'record/diagnostics.json').read_text()), dict(errors=[], warnings=[]))
             self.assertFalse((base / 'record/images.json').exists())
             self.assertFalse((base / 'record/source-revisions.txt').exists())
@@ -147,7 +145,7 @@ class RecordContract(unittest.TestCase):
                       'download', 'download-wrong', 'download-failure'):
             with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
                 base = Path(tmp)
-                profile, paths = self.fixture(base, include_external=True)
+                profile, paths = self.fixture(base)
                 digest = 'sha256:' + hashlib.sha256(b'fixture image').hexdigest()
                 assets = [dict(id=i, name=p.name, size=p.stat().st_size, state='uploaded', digest=digest)
                           for i, p in enumerate(paths, 1)]
@@ -194,7 +192,7 @@ class RecordContract(unittest.TestCase):
     def test_actual_tag_commit_must_match_workflow_sha(self):
         helper = module('verify_release')
         with tempfile.TemporaryDirectory() as tmp:
-            _, paths = self.fixture(Path(tmp), include_external=True)
+            _, paths = self.fixture(Path(tmp))
             release = dict(tag_name='tag/a', name='tag/a', target_commitish='a' * 40,
                            draft=False, prerelease=False, assets=[
                                dict(name=p.name, size=p.stat().st_size, state='uploaded',
@@ -221,7 +219,7 @@ class RecordContract(unittest.TestCase):
     def test_annotated_tags_resolve_to_workflow_commit(self):
         helper = module('verify_release')
         with tempfile.TemporaryDirectory() as tmp:
-            _, paths = self.fixture(Path(tmp), include_external=True)
+            _, paths = self.fixture(Path(tmp))
             release = dict(tag_name='tag/a', name='tag/a', target_commitish='main',
                            draft=False, prerelease=False, assets=[
                                dict(name=p.name, size=p.stat().st_size, state='uploaded',
@@ -270,7 +268,7 @@ class RecordContract(unittest.TestCase):
     def test_workflow_sha_is_explicit_full_hex_before_api(self):
         helper = module('verify_release')
         with tempfile.TemporaryDirectory() as tmp:
-            _, paths = self.fixture(Path(tmp), include_external=True)
+            _, paths = self.fixture(Path(tmp))
             for sha in (None, '', 'main', 'a' * 39, 'a' * 41, 'g' * 40, 'a' * 40 + '\n'):
                 with self.subTest(sha=sha), patch.dict(os.environ, GITHUB_REPOSITORY='fixture/repo'), \
                      patch.object(helper.subprocess, 'check_output',
@@ -287,7 +285,7 @@ class RecordContract(unittest.TestCase):
         for fault in ('empty-list', 'duplicate', 'missing', 'name', 'empty', 'symlink'):
             with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
                 base = Path(tmp)
-                _, paths = self.fixture(base, include_external=True)
+                _, paths = self.fixture(base)
                 if fault == 'empty-list': paths = []
                 if fault == 'duplicate': paths.append(paths[0])
                 if fault == 'missing': paths[0].unlink()

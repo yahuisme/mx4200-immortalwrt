@@ -1,6 +1,8 @@
 # MX4200 ImmortalWrt
 
-基于 [ImmortalWrt 官方最新稳定 Release 源码](https://github.com/immortalwrt/immortalwrt/releases) 构建，支持 Linksys MX4200v1、MX4200v2、MX4300 和 HomeWRK。
+每次构建跟随 [ImmortalWrt 官方 Snapshot 源码](https://github.com/immortalwrt/immortalwrt/tree/master)，支持 Linksys MX4200v1、MX4200v2、MX4300 和 HomeWRK。
+
+正式固件临时回移植 [qca_edma RX 缓冲优化](https://github.com/openwrt/openwrt/commit/1698cc246e28cf9f68e5ac4131a20b757728fe49)：保留四个收包队列，标准 MTU 下 RX 缓冲的理论占用从约 32 MiB 降至约 4 MiB。ImmortalWrt 合入等效实现后不再叠加本地补丁。
 
 ## 固件下载
 
@@ -18,7 +20,7 @@
 | `sysupgrade.bin` | 固件升级；也用于 HomeWRK 从临时系统安装正式固件 |
 | `initramfs-uImage.itb` | HomeWRK 从 U 盘启动的临时系统，不写入闪存 |
 
-HomeWRK 使用同版本的 ImmortalWrt 官方临时镜像，校验大小和 SHA-256 后原样发布。临时系统的 LuCI 地址为 `192.168.1.1`。
+HomeWRK 临时镜像使用同一份 Snapshot 源码独立构建，保留上游默认设置，加入中文 LuCI。U 盘启动后访问 `192.168.1.1`，可直接在网页升级正式固件。
 
 **首次安装：[Linksys 刷机教程](linksys-first-flash.md)。MX4200v1/v2、MX4300 从原厂后台刷入 `factory.bin`，再用 `sysupgrade.bin` 升级；HomeWRK 拆机连接 TTL，通过 U 盘启动 `initramfs-uImage.itb`，再经 LuCI 后台升级 `sysupgrade.bin`。**
 
@@ -58,4 +60,4 @@ Aurora 主题和配置插件使用 [Aurora 项目的签名 APK](https://github.c
 
 ## 构建与发布
 
-每隔3天自动构建（每月 1 日重新起算），也可手动运行 [Actions](https://github.com/yahuisme/mx4200-immortalwrt/actions/workflows/MX4200.yml)。每次构建四个机型，分两组发布，每组保留最新正式版。
+每天香港时间 00:00 自动构建，也可手动运行 [Actions](https://github.com/yahuisme/mx4200-immortalwrt/actions/workflows/MX4200.yml)。每次构建四个机型，按 MX4200、MX4300 两组发布，每组保留最近一期构建。

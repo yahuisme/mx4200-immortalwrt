@@ -1,0 +1,97 @@
+From 0f512bbbb48ae436154f66123e722d89053390e5 Mon Sep 17 00:00:00 2001
+From: Julius Bairaktaris <julius@bairaktaris.de>
+Date: Sun, 15 Nov 2026 10:58:29 +0100
+Subject: [PATCH] qualcommax: qca_edma: drop the whole run of a frame spanning
+ several RX descriptors
+
+A frame longer than the fill buffer the engine was given is written over
+several receive descriptors, all but the last with EDMA_RXDESC_MORE set.
+edma_clean_rx() counts a descriptor with the bit in rx_split_frame and then
+carries on as for any other: the later descriptors are taken as frames of
+their own, their first bytes read as a preheader, and a descriptor whose
+data happens to carry the port-id source type (one in sixteen) goes on to
+be built into an skb and delivered with whatever source port the same
+bytes name.
+
+Today the fill buffer is the page order's size less headroom and shared
+info, 3712 bytes at MTU 1500, and the PPE sends frames to the CPU up to
+12288 bytes (a frame over a port's MTU is redirected to the CPU), so a
+jumbo frame from a LAN host reaches this path. The first descriptor of
+such a run is dropped as a length error by chance, and the rest are not.
+
+Drop the whole run: remember that the run is open from a descriptor with
+the bit set, drop every descriptor until the first without it, and count
+one rx_length_errors for the run.
+
+Fixes: bdb0b722b7f0 ("qualcommax: add EDMA driver")
+Signed-off-by: Julius Bairaktaris <julius@bairaktaris.de>
+
+Backport: Use the descriptor status even if its buffer cannot be found.
+Do not import RX byte accounting or cached descriptor rings.
+---
+--- a/target/linux/qualcommax/files/drivers/net/ethernet/qualcomm/qca_edma.c
++++ b/target/linux/qualcommax/files/drivers/net/ethernet/qualcomm/qca_edma.c
+@@ -733,6 +733,7 @@
+ 	while (cons != prod && done < budget) {
+ 		u16 next = cons + 1;
+ 		struct edma_rx_buf *buf;
++		bool drop;
+ 
+ 		if (ahead)
+ 			cur = nxt;
+@@ -745,6 +746,19 @@
+ 		if (ahead)
+ 			edma_rx_peek(q, next, (q->rx_slot + 1) &
+ 				     (q->rxfill_ring.count - 1), &nxt);
++
++		/* Continuations are not frames of their own. Carry the run across
++		 * polls, even if a descriptor does not name a tracked buffer.
++		 */
++		desc_status = cur.status;
++		drop = q->rx_more || (desc_status & EDMA_RXDESC_MORE);
++		if (unlikely(drop)) {
++			if (desc_status & EDMA_RXDESC_MORE)
++				q->stats.rx_split_frame++;
++			if (!q->rx_more)
++				DEV_STATS_INC(netdev, rx_length_errors);
++		}
++		q->rx_more = desc_status & EDMA_RXDESC_MORE;
+ 
+ 		/* The buffer of the next slot, unless the peek of this frame
+ 		 * was made for a slot an earlier out-of-order buffer moved
+@@ -771,11 +785,12 @@
+ 		buf->page = NULL;
+ 		rxph = page_address(page) + NET_SKB_PAD;
+ 
+-		desc_status = cur.status;
++		if (unlikely(drop)) {
++			page_pool_put_full_page(q->page_pool, page, true);
++			goto next;
++		}
++
+ 		pkt_len = desc_status & EDMA_RXDESC_PACKET_LEN_MASK;
+-
+-		if (unlikely(desc_status & EDMA_RXDESC_MORE))
+-			q->stats.rx_split_frame++;
+ 
+ 		if (unlikely(EDMA_RX_PREHDR_SIZE + pkt_len > priv->rx_frame_len)) {
+ 			page_pool_put_full_page(q->page_pool, page, true);
+@@ -1407,6 +1422,7 @@
+ 	q->rxfill_prod = edma_idx_read(priv, EDMA_REG_RXFILL_PROD_IDX(q->rxfill)) &
+ 			 EDMA_RXFILL_PROD_IDX_MASK & (rxfill_ring->count - 1);
+ 	q->rx_slot = q->rxfill_prod;
++	q->rx_more = false;
+ 	edma_rx_fill(q);
+ }
+ 
+--- a/target/linux/qualcommax/files/drivers/net/ethernet/qualcomm/qca_edma.h
++++ b/target/linux/qualcommax/files/drivers/net/ethernet/qualcomm/qca_edma.h
+@@ -379,6 +379,8 @@
+ 	/* The slot of the fill ring whose buffer the engine returns next. */
+ 	u16 rx_slot;
+ 	u16 rxdesc_cons;
++	/* Drop continuations of an overlong frame, including across polls. */
++	bool rx_more;
+ 	bool tx_kick;
+ 
+ 	spinlock_t tx_lock;

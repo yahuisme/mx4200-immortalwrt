@@ -11,6 +11,7 @@ import unittest
 from test_cache_workflow import ROOT, step
 
 GROUPS = {'mx4200': 'MX4200', 'mx4300-homewrk': 'MX4300'}
+TAG_SUFFIX = '-ImmortalWrt-r123-26.11.24_00.00.00'
 INITRAMFS = 'immortalwrt-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb'
 STUB = r'''#!/usr/bin/env python3
 import hashlib, json, os, sys
@@ -84,14 +85,19 @@ def profile_fixture(base):
 
 
 
-def official_record(data=b'fixture image'):
-    """Offline download evidence, not a built or boot-tested firmware image."""
-    source_name = INITRAMFS.replace('immortalwrt-', 'immortalwrt-25.12.2-', 1)
-    return dict(version='25.12.2',
-                url='https://downloads.immortalwrt.org/releases/25.12.2/targets/qualcommax/ipq807x/' + source_name,
-                source_name=source_name, name=INITRAMFS, size=len(data),
-                sha256=hashlib.sha256(data).hexdigest(), group='mx4300-homewrk',
-                target='qualcommax/ipq807x')
+def ramboot_records(record, data=b'fixture image', revision='r123-abcdef', sha='c'*40):
+    config = b'fixture LuCI RAM config'
+    (record/'ramboot.config').write_bytes(config)
+    (record/'source-sha.txt').write_text(sha + '\n')
+    (record/'source-revision.txt').write_text(revision + '\n')
+    (record/'ramboot.json').write_text(json.dumps(dict(
+        source_sha=sha, revision=revision, pristine=True, customization='Chinese LuCI only',
+        config_sha256=hashlib.sha256(config).hexdigest())))
+    proof = dict(name=INITRAMFS, size=len(data), sha256=hashlib.sha256(data).hexdigest(),
+                 source_sha=sha, revision=revision, language='zh_cn', complete_cpio=True,
+                 fit_config='config@oak03')
+    (record/'initramfs.json').write_text(json.dumps(proof))
+    return {k: proof[k] for k in ('name', 'size', 'sha256')} | dict(type='kernel', filesystem='initramfs')
 
 
 def staged_fixture(base):
@@ -105,26 +111,25 @@ def staged_fixture(base):
         for name in profile['release_groups'][group]['images']:
             (directory/name).write_bytes(b'fixture image')
 
-        tag = device+'-ImmortalWrt-current'
+        tag = device + TAG_SUFFIX
         (directory/'version.txt').write_text(tag)
         (directory/'title.txt').write_text(tag)
         (directory/'release-notes.md').write_text('fixture notes')
         rows.extend([row(tag), row(device+'-ImmortalWrt-old')])
-    # Bind the downloaded official bytes before any equal-size mutation.
     record = base/'build-record'
     record.mkdir()
-    (record/'source-sha.txt').write_text('c' * 40 + '\n')
-    (record/'source-revision.txt').write_text('r123-abcdef\n')
-    (record/'official-initramfs.json').write_text(json.dumps(official_record()))
+    ramboot_records(record)
     images = [dict(name=p.name, size=p.stat().st_size,
                    digest='sha256:' + hashlib.sha256(p.read_bytes()).hexdigest())
-              for p in (base/'firmware').glob('*/*') if p.suffix in ('.bin', '.ubi')]
+              for p in (base/'firmware').glob('*/*') if p.suffix in ('.bin', '.ubi', '.itb')]
     (record/'build.json').write_text(json.dumps(dict(images=images)))
     metadata = record/'targets/qualcommax/ipq807x/profiles.json'
     metadata.parent.mkdir(parents=True)
-    metadata.write_text(json.dumps(dict(profiles={
+    metadata.write_text(json.dumps(dict(target='qualcommax/ipq807x', version_number='SNAPSHOT', version_code='r123-abcdef', profiles={
         board: dict(images=[dict(name=row['name'], size=row['size'],
-                                 sha256=row['digest'].removeprefix('sha256:'))
+                                 sha256=row['digest'].removeprefix('sha256:'),
+                                 type='kernel' if row['name'] == INITRAMFS else 'unused',
+                                 filesystem='initramfs' if row['name'] == INITRAMFS else 'squashfs')
                             for row in images if '-' + board + '-' in row['name']])
         for group in profile['release_groups'].values() for board in group['profiles']
     })))
@@ -207,7 +212,7 @@ class DualPublicationTests(unittest.TestCase):
                 self.assertIn('Native image differs from profiles metadata', result.stderr)
                 self.assertFalse(any(a[0] == 'release' for a in calls))
 
-    def test_official_attachment_failure_blocks_both_publications(self):
+    def test_ramboot_attachment_failure_blocks_both_publications(self):
         for mode in ('missing', 'empty', 'same-size-corrupt', 'symlink', 'wrong-group'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
                 base = Path(tmp); pages = staged_fixture(base)
@@ -224,38 +229,31 @@ class DualPublicationTests(unittest.TestCase):
                 if mode == 'same-size-corrupt':
                     self.assertIn('SHA-256 mismatch', result.stderr)
 
-    def test_official_record_failure_blocks_both_publications(self):
+    def test_ramboot_record_failure_blocks_both_publications(self):
         for fault in ('missing', 'malformed', 'wrong-name', 'wrong-size', 'wrong-digest',
-                      'wrong-group', 'snapshot', 'wrong-host', 'wrong-source-name'):
+                      'wrong-language', 'wrong-revision', 'wrong-source', 'incomplete-cpio',
+                      'no-fit-proof', 'wrong-fit-config'):
             with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
                 base = Path(tmp); pages = staged_fixture(base)
-                evidence = base/'build-record/official-initramfs.json'
+                evidence = base/'build-record/initramfs.json'
                 data = json.loads(evidence.read_text())
                 if fault == 'wrong-name': data['name'] = 'other.itb'
                 if fault == 'wrong-size': data['size'] += 1
                 if fault == 'wrong-digest': data['sha256'] = '0'*64
-                if fault == 'wrong-group': data['group'] = 'mx4200'
-                if fault == 'snapshot': data['version'] = 'SNAPSHOT'
-                if fault == 'wrong-host': data['url'] = data['url'].replace('downloads.immortalwrt.org', 'example.invalid')
-                if fault == 'wrong-source-name': data['source_name'] = 'wrong.itb'
+                if fault == 'wrong-language': data['language'] = 'en'
+                if fault == 'wrong-revision': data['revision'] = 'r124-abcdef'
+                if fault == 'wrong-source': data['source_sha'] = '0'*40
+                if fault == 'incomplete-cpio': data['complete_cpio'] = False
+                if fault == 'no-fit-proof': data.pop('fit_config')
+                if fault == 'wrong-fit-config': data['fit_config'] = 'config@1'
                 evidence.write_text('{' if fault == 'malformed' else json.dumps(data))
                 if fault == 'missing': evidence.unlink()
                 result, calls = replay(base, pages)
                 self.assertNotEqual(result.returncode, 0, result.stderr)
                 self.assertFalse(any(a[0] == 'release' for a in calls))
+                if fault in ('no-fit-proof', 'wrong-fit-config'):
+                    self.assertIn('Invalid HomeWRK RAM build/inspection identity', result.stderr)
                 self.assertNotIn('ModuleNotFoundError', result.stderr)
-
-    def test_publication_uses_locked_record_without_resolving_or_downloading(self):
-        with tempfile.TemporaryDirectory() as directory:
-            base = Path(directory); pages = staged_fixture(base)
-            helper = base/'scripts/official_initramfs.py'
-            # Fail any download/resolve attempt, including imported urllib calls.
-            with helper.open('a') as stream:
-                stream.write("\nimport urllib.request\nurllib.request.urlopen = lambda *a, **k: (_ for _ in ()).throw(AssertionError('publication attempted network'))\n")
-            result, calls = replay(base, pages)
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertEqual(len([a for a in calls if a[:2] == ['release', 'create']]), 2)
-            self.assertEqual(json.loads((base/'build-record/official-initramfs.json').read_text()), official_record())
 
     def test_unexpected_initramfs_rejected_before_any_mutation(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -277,7 +275,7 @@ class DualPublicationTests(unittest.TestCase):
             profile = json.loads((ROOT/'user/default/build.json').read_text())
             for index, (group, device) in enumerate(GROUPS.items()):
                 call = creates[index]
-                self.assertEqual(call[2], device+'-ImmortalWrt-current')
+                self.assertEqual(call[2], device+'-ImmortalWrt-r123-26.11.24_00.00.00')
                 expected = set(profile['release_groups'][group]['images'])
 
                 self.assertEqual({Path(p).name for p in call[3:call.index('--target')]},
@@ -301,7 +299,7 @@ class DualPublicationTests(unittest.TestCase):
                   row('MX4300-HomeWRK-ImmortalWrt-draft', draft=True),
                   row('MX4300-HomeWRK-ImmortalWrt-preview', prerelease=True),
                   row('MX4300-ImmortalWrt-draft', draft=True)],
-                 [row('MX4200-ImmortalWrt-current'), row('MX4300-ImmortalWrt-current'),
+                 [row('MX4200-ImmortalWrt-r123-26.11.24_00.00.00'), row('MX4300-ImmortalWrt-r123-26.11.24_00.00.00'),
                   row('MX4300-ImmortalWrt-preview', prerelease=True)]]
         with tempfile.TemporaryDirectory() as tmp:
             base=Path(tmp); staged_fixture(base)
@@ -319,7 +317,7 @@ class DualPublicationTests(unittest.TestCase):
         for missing in GROUPS:
             with self.subTest(missing=missing), tempfile.TemporaryDirectory() as tmp:
                 base=Path(tmp); pages=staged_fixture(base)
-                pages[0]=[r for r in pages[0] if r['tag_name']!=GROUPS[missing]+'-ImmortalWrt-current']
+                pages[0]=[r for r in pages[0] if r['tag_name']!=GROUPS[missing]+'-ImmortalWrt-r123-26.11.24_00.00.00']
                 result,calls=replay(base,pages)
                 self.assertEqual(result.returncode,0,result.stderr)
                 other=next(device for group,device in GROUPS.items() if group!=missing)

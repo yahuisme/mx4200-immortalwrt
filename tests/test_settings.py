@@ -1,7 +1,7 @@
-"""Regression checks for settings and official stable version rendering.
+"""Regression checks for settings and native Snapshot version rendering.
 
-SETTINGS_PRISTINE_SOURCE supplies pristine stable files plus pinned LuCI.
-MX_VERSION_SOURCE supplies a stable Git tree and requested .config for version
+SETTINGS_PRISTINE_SOURCE supplies pristine upstream files plus pinned LuCI.
+MX_VERSION_SOURCE supplies a tracking Snapshot Git tree and .config for version
 rendering only; MX4200_PREPARED_SOURCE remains a final defconfig/package fixture.
 The render harness runs no firmware build targets or compilation.
 """
@@ -59,7 +59,7 @@ class SettingsScriptTests(unittest.TestCase):
         self.assert_wireless_zero_match_rejected('encryption', 'psk2+ccmp')
 
     def test_complete_settings_preserves_official_version_templates(self):
-        # Set SETTINGS_PRISTINE_SOURCE to pristine real stable files for integration
+        # Set SETTINGS_PRISTINE_SOURCE to pristine real upstream files for integration
         # coverage; the default fixture keeps the same full-script contract.
         import shutil
 
@@ -189,11 +189,14 @@ class SettingsScriptTests(unittest.TestCase):
         epoch = subprocess.check_output(['./scripts/get_source_date_epoch.sh'],
                                         cwd=source, text=True).strip()
         self.assertRegex(revision, r'^r[0-9]+-[0-9a-f]{7,40}$')
-        # Stable release metadata wins over tag HEAD SHA/commit date.
-        self.assertEqual(revision, subprocess.check_output(
-            ['git', 'show', 'HEAD:version'], cwd=source, text=True).strip())
-        self.assertEqual(epoch, subprocess.check_output(
-            ['git', 'show', 'HEAD:version.date'], cwd=source, text=True).strip())
+        # Snapshot uses a tracking branch and native Git revision/date, not release files.
+        from revision_fixture import git
+        head = git(source, 'rev-parse', 'HEAD')
+        self.assertEqual(git(source, 'rev-parse', '@{u}'), head)
+        self.assertFalse((source / 'version').exists())
+        self.assertFalse((source / 'version.date').exists())
+        self.assertTrue(head.startswith(revision.split('-', 1)[1]))
+        self.assertEqual(epoch, git(source, 'log', '-1', '--format=%ct'))
         self.assertRegex(epoch, r'^[0-9]+$')
         candidates = (
             source / 'target/linux/qualcommax/files/arch/arm64/boot/dts/qcom',
@@ -206,10 +209,8 @@ class SettingsScriptTests(unittest.TestCase):
             self.assertEqual(len(matches), 1, model)
             self.assertIn('model = "' + display + '";', matches[0].read_text())
         version_text = (source / 'include/version.mk').read_text()
-        match = re.search(r'^VERSION_NUMBER:=\$\(if \$\(VERSION_NUMBER\),\$\(VERSION_NUMBER\),([0-9]+\.[0-9]+\.[0-9]+)\)$', version_text, re.M)
-        self.assertIsNotNone(match)
-        assert match is not None
-        version = match[1]
+        version = 'SNAPSHOT'
+        self.assertIn('VERSION_NUMBER:=$(if $(VERSION_NUMBER),$(VERSION_NUMBER),SNAPSHOT)', version_text)
         # Execute the actual upstream VERSION_SED_SCRIPT, without any build targets.
         harness = '''empty:=
 space:=$(empty) $(empty)
@@ -244,7 +245,7 @@ render:
         self.assertIn('BUILD_ID="' + revision + '"', rendered['usr/lib/os-release'])
         self.assertIn('OPENWRT_BUILD_DATE="' + epoch + '"', rendered['usr/lib/os-release'])
         self.assertIn('VERSION="' + version + '"', rendered['usr/lib/os-release'])
-        self.assertIn('VERSION_ID="' + version + '"', rendered['usr/lib/os-release'])
+        self.assertIn('VERSION_ID="' + version.lower() + '"', rendered['usr/lib/os-release'])
         self.assertIn(' ImmortalWrt ' + version + ', ' + revision, rendered['etc/banner'])
         self.assertNotIn('CONFIG_VERSIONOPT=y', (source / '.config').read_text())
         # Exercise the pinned official overview renderer too, not just templates.
@@ -267,7 +268,7 @@ const component = new Function('baseclass', 'rpc', 'uci', 'L', '_', 'E',
 const rows = component.render([
     { hostname: 'fixture', model: payload.model, release: { description: payload.description } },
     {}, { cpubench: '' }, {}, {}, {},
-    { branch: 'LuCI stable fixture', revision: 'git-fixture' }, 0
+    { branch: 'LuCI upstream fixture', revision: 'git-fixture' }, 0
 ]).children;
 console.log(JSON.stringify(Object.fromEntries(rows.map(row =>
     [row.children[0].children[0], row.children[1].children[0]]))));
@@ -279,7 +280,7 @@ console.log(JSON.stringify(Object.fromEntries(rows.map(row =>
                 fields = json.loads(result.stdout)
                 self.assertEqual(fields['Model'], model)
                 self.assertEqual(fields['Firmware Version'],
-                                 display + ' / LuCI stable fixture git-fixture')
+                                 display + ' / LuCI upstream fixture git-fixture')
 
     def test_missing_fixture_fails(self):
         with tempfile.TemporaryDirectory() as d:

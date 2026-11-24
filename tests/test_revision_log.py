@@ -6,12 +6,11 @@ import tempfile
 import unittest
 from test_cache_workflow import render, step
 from revision_fixture import history, commit, git, revision
-from test_fetch_failure import resolver_boundary, stable_history, STABLE_REVISION
 
 class RevisionLogTests(unittest.TestCase):
     def test_nested_prepare_logs_and_failures(self):
         block = render(step('inputs')['run'], {})
-        for phase in ('', 'resolver', 'fetch', 'git-access', 'feed-revision', 'update', 'install', 'custom', 'go-floor', 'defconfig', 'defaults'):
+        for phase in ('', 'fetch', 'git-access', 'feed-revision', 'update', 'install', 'custom', 'edma', 'go-floor', 'defconfig', 'defaults'):
             with self.subTest(phase=phase), tempfile.TemporaryDirectory() as tmp:
                 base = Path(tmp)
                 source = base / 'source'
@@ -20,7 +19,7 @@ class RevisionLogTests(unittest.TestCase):
                 profile = base / 'profile'
                 (profile / 'tree').mkdir(parents=True)
                 (profile / 'files').mkdir()
-                stable_history(source)
+                history(source)
                 feed = base / 'official-feed'
                 history(feed)
                 (source / 'feeds.conf.default').write_text('# fixture\n')
@@ -31,20 +30,22 @@ class RevisionLogTests(unittest.TestCase):
                                  '[ "$1" != "$FAIL" ] || exit 19\n'
                                  'if [ "$1" = update ]; then mkdir -p feeds; command git clone -q "$FEED_REMOTE" feeds/luci; fi\n')
                 feeds.chmod(0o755)
-                commit(source, 'prepared stable source fixture')
-                git(source, 'tag', 'v25.12.2')
+                commit(source, 'prepared snapshot fixture')
                 remote = base / 'remote'
                 source.rename(remote)
-                (profile / 'settings.ini').write_text(f'REPO_URL={remote}\nREPO_REF=latest-release\n')
+                (profile / 'settings.ini').write_text('REPO_URL=https://github.com/immortalwrt/immortalwrt.git\nREPO_REF=master\n')
                 subprocess.run(['git', 'clone', '-q', str(remote), str(source)], check=True)
                 source_sha = git(source, 'rev-parse', 'HEAD')
                 feed_sha = git(feed, 'rev-parse', 'HEAD')
-                env = dict(resolver_boundary(base), GIT_CONFIG_GLOBAL=str(base / 'gitconfig'),
-                           RESOLVER_FAIL='1' if phase == 'resolver' else '',
+                env = dict(os.environ, GIT_CONFIG_GLOBAL=str(base / 'gitconfig'),
+                           GIT_CONFIG_NOSYSTEM='1',
                            FEED_REMOTE=str(feed), DK_OPENWRT=str(source), DK_BIN=str(base / 'bin'),
                            DK_PROFILE=str(profile), GITHUB_OUTPUT=str(base / 'output'),
                            BUILDER_FINGERPRINT='fixture-builder', LOG=str(base / 'calls'), FAIL=phase,
                            SOURCE_SHA=source_sha, FEED_SHA=feed_sha)
+                subprocess.run(['git', 'config', '--file', str(base / 'gitconfig'),
+                                'url.' + remote.as_uri() + '.insteadOf',
+                                'https://github.com/immortalwrt/immortalwrt.git'], check=True)
                 stub = '''
                 docker_exec() { shift; "$@"; }
                 git() {
@@ -62,7 +63,7 @@ class RevisionLogTests(unittest.TestCase):
                 make() { [ "$1" != "$FAIL" ] || return 19; }
                 python3() {
                   case "$1" in
-                    */official_release.py) command python3 "$@";;
+                    */edma_rx_memory.py) [ "$FAIL" != edma ] || return 19;;
                     */check_go.py) [ "$FAIL" != go-floor ] || return 19;;
                     */check_defaults.py) [ "$FAIL" != defaults ] || return 19;;
                     */cache.py) printf 'key\\n' >> "$LOG"; printf 'fixture-key\\n';;
@@ -74,7 +75,7 @@ class RevisionLogTests(unittest.TestCase):
                 phase_block = block.replace('/build-record/', str(base / 'build-record') + '/')
                 result = subprocess.run(['bash', '-eo', 'pipefail', '-c', stub + phase_block],
                                         cwd=base, env=env, text=True, capture_output=True)
-                expected = 23 if phase == 'resolver' else (1 if phase in ('update', 'install') else (19 if phase else 0))
+                expected = 1 if phase in ('update', 'install') else (19 if phase else 0)
                 self.assertEqual(result.returncode, expected, result.stderr)
                 calls = (base / 'calls').read_text()
                 if phase:
@@ -82,12 +83,11 @@ class RevisionLogTests(unittest.TestCase):
                     self.assertFalse((base / 'output').exists())
                 else:
                     self.assertIn(env['SOURCE_SHA'], result.stdout)
-                    self.assertEqual((base / 'build-record/source-revision.txt').read_text().strip(), STABLE_REVISION)
-                    self.assertEqual(revision(source), STABLE_REVISION)
-                    self.assertEqual((base / 'build-record/source-tag.txt').read_text().strip(), 'v25.12.2')
-                    self.assertEqual((base / 'build-record/source-ref.txt').read_text().strip(), 'refs/tags/v25.12.2')
+                    self.assertEqual((base / 'build-record/source-revision.txt').read_text().strip(), 'r2-' + git(source, 'rev-parse', '--short', 'HEAD'))
+                    self.assertEqual(revision(source), 'r2-' + git(source, 'rev-parse', '--short', 'HEAD'))
+                    self.assertEqual((base / 'build-record/source-ref.txt').read_text().strip(), 'refs/heads/master')
                     self.assertEqual((base / 'build-record/source-sha.txt').read_text().strip(), source_sha)
-                    self.assertEqual(git(source, 'rev-parse', '--abbrev-ref', 'HEAD'), 'HEAD')
+                    self.assertEqual(git(source, 'rev-parse', '--abbrev-ref', 'HEAD'), 'master')
                     self.assertRegex(revision(source), r'^r[1-9][0-9]*-[0-9a-f]+$')
                     self.assertIn('Feed luci: ' + env['FEED_SHA'], result.stdout)
                     self.assertEqual((source / '.config').read_text(), 'CONFIG_TEST=y\nCONFIG_CCACHE_DIR="/ghcache"\n')
@@ -113,11 +113,11 @@ class RevisionLogTests(unittest.TestCase):
                 expected[path] = git('rev-parse', 'HEAD')
             block = block.replace('/tmp/yahuisme-packages', str(root / 'tmp/yahuisme-packages'))
             result = subprocess.run(['bash', '-e', '-c', render(block, {})], cwd=root,
-                                    env=dict(os.environ, REPO_REF='latest-release', REPO_URL='fixture-url'), capture_output=True, text=True)
+                                    env=dict(os.environ, REPO_REF='master', REPO_URL='fixture-url'), capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             for sha in expected.values():
                 self.assertEqual(result.stdout.count(sha), 1, result.stdout)
-            self.assertIn('Source fixture-url/latest-release:', result.stdout)
+            self.assertIn('Source fixture-url/master:', result.stdout)
             self.assertNotIn('Donor ', result.stdout)
             self.assertEqual(len(result.stdout.splitlines()), len(paths))
             self.assertFalse((root / 'source-revisions.txt').exists())

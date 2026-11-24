@@ -25,10 +25,7 @@ def load(profile=None):
             raise ValueError('invalid release image name')
     if set(data['cache_prefix']) != {'tc', 'cc', 'dl'} or any(not v for v in data['cache_prefix'].values()):
         raise ValueError('incomplete cache namespaces')
-    external = data.get('external_images', [])
-    official_name = f"{data['system']}-{data['target'].replace('/', '-')}-linksys_homewrk-initramfs-uImage.itb"
-    if external and (external != [official_name] or official_name not in data['images']):
-        raise ValueError('invalid external firmware attachment')
+
     if 'release_groups' in data:
         names, boards = [], []
         for key, group in data['release_groups'].items():
@@ -39,7 +36,7 @@ def load(profile=None):
             profiles, images = group['profiles'], group['images']
             if not profiles or not images or any(not re.fullmatch(r'linksys_[a-z0-9]+', p) for p in profiles):
                 raise ValueError('invalid release profiles/images')
-            # Each native profile supplies exactly its own factory/sysupgrade pair.
+            # Each native profile supplies its factory/sysupgrade pair; HomeWRK also has a RAM FIT.
             expected = {f"{data['system']}-{data['target'].replace('/', '-')}-{board}-squashfs-{kind}.{extension}"
                         for board in profiles for kind, extension in
                         (('factory', 'ubi' if board == 'linksys_homewrk' else 'bin'), ('sysupgrade', 'bin'))}

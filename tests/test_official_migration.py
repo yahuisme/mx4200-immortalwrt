@@ -1,6 +1,5 @@
-"""Official stable-source defaults and intentional customization requirements."""
+"""Official Snapshot-source defaults and intentional customization requirements."""
 import os
-import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -13,33 +12,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class OfficialMigrationTests(unittest.TestCase):
-    def assert_native_dataplane(self, config, target):
-        flattened = target.replace('\\\n', ' ')
-        defaults = set()
-        for row in re.findall(r'^DEFAULT_PACKAGES\s*\+=\s*(.*)$', flattened, re.M):
-            defaults.update(row.split())
-        native = {package for package in defaults if package.startswith('kmod-qca-nss-')}
-        # Reviewed official target owns this driver; do not whitelist arbitrary new
-        # target symbols or conflate it with external acceleration integrations.
-        self.assertEqual(native, {'kmod-qca-nss-dp'})
-        selected = {line.split('=', 1)[0].removeprefix('CONFIG_PACKAGE_')
-                    for line in config if line.startswith('CONFIG_PACKAGE_kmod-qca-nss-')
-                    and line.rsplit('=', 1)[-1] in ('y', 'm')}
-        self.assertEqual(selected, native)
-        self.assertIn('CONFIG_PACKAGE_kmod-qca-nss-dp=y', config)
-
-    def test_official_dataplane_is_preserved_and_unexpected_symbols_rejected(self):
-        target = 'DEFAULT_PACKAGES += \\\n\tkmod-qca-nss-dp kmod-ath11k-ahb wpad-openssl\n'
-        config = ['CONFIG_PACKAGE_kmod-qca-nss-dp=y']
-        self.assert_native_dataplane(config, target)
-        for extra in ('kmod-qca-nss-ecm', 'kmod-qca-nss-drv', 'kmod-qca-nss-unknown'):
-            for value in ('y', 'm'):
-                with self.subTest(extra=extra, value=value), self.assertRaises(AssertionError):
-                    self.assert_native_dataplane(config + [f'CONFIG_PACKAGE_{extra}={value}'], target)
-        with self.assertRaises(AssertionError):
-            self.assert_native_dataplane([], target)
-        with self.assertRaises(AssertionError):
-            self.assert_native_dataplane(config, target.replace('kmod-qca-nss-dp', ''))
+    def assert_native_dataplane(self, config):
+        # Snapshot uses in-kernel EDMA; do not explicitly select the retired NSS driver.
+        self.assertNotRegex('\n'.join(config), r'(?m)^CONFIG_PACKAGE_kmod-qca-nss-.*=[ym]$')
 
     def test_signed_apk_package_selection_is_theme_only(self):
         self.assertEqual(set(REPOSITORIES), {'eamonxg'})
@@ -51,37 +26,24 @@ class OfficialMigrationTests(unittest.TestCase):
         workflow = yaml.safe_load((ROOT / '.github/workflows/MX4200.yml').read_text())
         settings = (ROOT / 'user/default/settings.ini').read_text()
         self.assertIn('REPO_URL="https://github.com/immortalwrt/immortalwrt.git"', settings)
-        self.assertIn('REPO_REF="latest-release"', settings)
+        self.assertIn('REPO_REF="master"', settings)
         self.assertNotIn('REPO_BRANCH=', settings)
-        self.assertIn('最新稳定 Release 源码', (ROOT / 'README.md').read_text())
+        self.assertIn('官方 Snapshot 源码', (ROOT / 'README.md').read_text())
         text = (ROOT / '.github/workflows/MX4200.yml').read_text()
-        self.assertNotIn('git ls-remote --tags', text)
-        self.assertIn('git fetch --depth=1 origin "$SOURCE_REF"', text)
-        self.assertIn('SOURCE_TAG=$(python3 /cache-scripts/official_release.py /build-record/official-release.json)', text)
-        self.assertIn('SOURCE_REF="refs/tags/$SOURCE_TAG"', text)
-        self.assertIn('git checkout -f --detach FETCH_HEAD', text)
-        self.assertIn('git reset --hard FETCH_HEAD', text)
+        self.assertNotIn('official_release.py', text)
+        self.assertIn('git branch --set-upstream-to=origin/master master', text)
         self.assertIn('git clean -ffdx', text)
-        self.assertIn('SOURCE_REF=', text)
         self.assertIn('SOURCE_SHA=$(git rev-parse --verify HEAD)', text)
-        self.assertIn('printf "%s\\n" "$SOURCE_SHA" > /build-record/source-sha.txt', text)
-        self.assertIn('SOURCE_VERSION="${SOURCE_TAG#v}"', text)
-        self.assertIn('[[ "$SOURCE_VERSION" = "$OFFICIAL_VERSION" ]]', text)
-        self.assertIn('[[ "$SOURCE_REF" = "refs/tags/$SOURCE_TAG" ]]', text)
-        self.assertIn('[[ "$(jq -er .version_number openwrt_bin/targets/qualcommax/ipq807x/profiles.json)" = "$SOURCE_VERSION" ]]', text)
-        self.assertIn('VERSION="${DEVICE}-ImmortalWrt-${SOURCE_VERSION}-r${WRT_REV}-${WRT_DATE/-/_}"', text)
+        self.assertIn('VERSION="${DEVICE}-ImmortalWrt-r${WRT_REV}-${WRT_DATE/-/_}"', text)
         self.assertIn('DEVICE=MX4200', text)
         self.assertIn('DEVICE=MX4300', text)
         self.assertIn('printf \'%s\\n\' "$VERSION" > "firmware/$GROUP/title.txt"', text)
         self.assertEqual(workflow['jobs']['build']['runs-on'], 'ubuntu-24.04-arm')
         triggers = workflow.get('on', workflow.get(True))
-        self.assertEqual(triggers['schedule'], [
-            {'cron': '0 0 1-31/3 * *', 'timezone': 'Asia/Hong_Kong'},
-        ])
         self.assertIn('workflow_dispatch', triggers)
         self.assertNotIn('集成 NSS', (ROOT / '.github/workflows/MX4200.yml').read_text())
 
-    def test_future_stable_titles_and_notes_use_the_resolved_version(self):
+    def test_snapshot_titles_and_notes_use_the_exact_build_revision(self):
         workflow = yaml.safe_load((ROOT / '.github/workflows/MX4200.yml').read_text())
         block = next(item['run'] for item in workflow['jobs']['build']['steps']
                      if item.get('id') == 'stage')
@@ -90,19 +52,19 @@ class OfficialMigrationTests(unittest.TestCase):
             root = Path(directory)
             for group in ('mx4200', 'mx4300-homewrk'):
                 (root / 'firmware' / group).mkdir(parents=True)
-            env = dict(os.environ, SOURCE_VERSION='27.02.10', SOURCE_TAG='v27.02.10',
+            env = dict(os.environ, SOURCE_SHA='c'*40,
                        WRT_REV='19780', WRT_DATE='26.11.10-12.34.56',
-                       BUILD_TIME='fixture time', OFFICIAL_VERSION='27.02.10')
+                       BUILD_TIME='fixture time')
             result = subprocess.run(['bash', '-e', '-c', loop], cwd=root, env=env,
                                     text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             for group, device in (('mx4200', 'MX4200'), ('mx4300-homewrk', 'MX4300')):
-                expected = f'{device}-ImmortalWrt-27.02.10-r19780-26.11.10_12.34.56\n'
+                expected = f'{device}-ImmortalWrt-r19780-26.11.10_12.34.56\n'
                 self.assertEqual((root / 'firmware' / group / 'version.txt').read_text(), expected)
                 self.assertEqual((root / 'firmware' / group / 'title.txt').read_text(), expected)
                 notes = (root / 'firmware' / group / 'release-notes.md').read_text()
-                self.assertIn('[ImmortalWrt 27.02.10]', notes)
-                self.assertIn('/tree/v27.02.10)', notes)
+                self.assertIn('[ImmortalWrt Snapshot]', notes)
+                self.assertIn('/tree/' + 'c'*40 + ')', notes)
                 self.assertNotIn('master', notes)
 
     def test_optional_donor_components_follow_official_defaults(self):
@@ -171,4 +133,4 @@ class OfficialMigrationTests(unittest.TestCase):
                         'luci-i18n-ttyd-zh-cn', 'ath11k-firmware-ipq8074',
                         'wpad-openssl', 'kmod-ath11k-ahb'):
             self.assertIn('CONFIG_PACKAGE_' + package + '=y', config)
-        self.assert_native_dataplane(config, (source / 'target/linux/qualcommax/Makefile').read_text())
+        self.assert_native_dataplane(config)

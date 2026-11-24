@@ -20,7 +20,7 @@ def image_paths(directory, recursive=False, names=()):
     paths = directory.rglob('*') if recursive else directory.iterdir()
     return [p for p in paths if (p.suffix in ('.bin', '.ubi')
             and ('factory' in p.name or 'sysupgrade' in p.name))
-            or p.name.endswith('sysupgrade.itb') or p.name in names]
+            or p.name.endswith(('sysupgrade.itb', 'initramfs-uImage.itb')) or p.name in names]
 
 
 def validate_images(directory, names):
@@ -36,24 +36,22 @@ def stage(targets, output, group=None):
     groups = all_groups
     if group is not None:
         groups = {group: all_groups[group]}
-    external = set(contract.get('external_images', []))
     # GROUP selects output only; input validation always covers every native image.
-    names = {name for item in all_groups.values() for name in item['images']} - external
+    names = {name for item in all_groups.values() for name in item['images']}
     boards = {board for item in all_groups.values() for board in item['profiles']}
     directory = targets / contract['target']
     selected = image_paths(targets, recursive=True, names=names)
     # Auxiliary binaries are allowed, but never another target's flash image.
     if len(selected) != len(names) or {p.name for p in selected} != names or any(
             p.parent != directory or p.is_symlink() or not p.is_file() or not p.stat().st_size for p in selected):
-        raise ValueError('expected exact nonempty native factory/sysupgrade images')
+        raise ValueError('expected exact nonempty native firmware images')
     data = json.loads((directory / 'profiles.json').read_text())
     if data['target'] != contract['target'] or set(data['profiles']) != boards:
         raise ValueError('unexpected target/profiles')
     if not re.fullmatch(r'r[0-9]+-[0-9a-f]+', data['version_code']):
         raise ValueError('unexpected version_code')
     for board, profile in data['profiles'].items():
-        images = [entry for entry in profile.get('images', [])
-                  if entry.get('filesystem') != 'initramfs' or entry.get('name') in names]
+        images = profile.get('images', [])
         expected = {name: 'kernel' if '-initramfs-' in name else
                     'factory' if '-factory.' in name else 'sysupgrade'
                     for name in names if '-' + board + '-' in name}
@@ -70,10 +68,9 @@ def stage(targets, output, group=None):
         destination = output if group is not None else output / key
         if destination != output:
             destination.mkdir()
-        native = [name for name in item['images'] if name not in external]
-        for name in native:
+        for name in item['images']:
             shutil.copyfile(directory / name, destination / name)
-        validate_images(destination, native)
+        validate_images(destination, item['images'])
 
 
 if __name__ == '__main__':

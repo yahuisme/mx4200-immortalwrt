@@ -27,10 +27,10 @@ class CustomScopeTests(unittest.TestCase):
         # Execute the complete production custom/packages scripts, with only the
         # container mount path relocated. Local real Git objects avoid network.
         cases = (
-            ('unsupported', 'VERSION_NUMBER:=SNAPSHOT\n', ''),
+            ('unsupported', 'VERSION_NUMBER:=26.01.0-rc1\n', ''),
             ('malformed', 'VERSION_NUMBER:=SNAPSHOTgarbage\n', ''),
             ('override', 'VERSION_NUMBER:=25.12.2\n', 'CONFIG_VERSION_NUMBER="26.01.0"\n'),
-            ('assembly', 'VERSION_NUMBER:=25.12.2\n', ''),
+            ('assembly', 'VERSION_NUMBER:=SNAPSHOT\n', ''),
         )
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -62,7 +62,7 @@ class CustomScopeTests(unittest.TestCase):
                         (root / name).mkdir(parents=True, exist_ok=True)
                     if label == 'assembly':
                         import shutil
-                        source = ROOT / 'tests/fixtures/stable-apk-source'
+                        source = ROOT / 'tests/fixtures/snapshot-source'
                         for name in ('package/Makefile', 'include/rootfs.mk', 'include/image.mk'):
                             shutil.copyfile(source / name, root / name)
                         dts = root / 'target/linux/qualcommax/dts/ipq8174-homewrk.dts'

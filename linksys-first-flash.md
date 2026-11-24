@@ -25,7 +25,7 @@
 
 进入 **MX4300** 发布组，下载文件名含 `linksys_homewrk` 的两个文件：
 
-- `initramfs-uImage.itb`：ImmortalWrt 官方临时系统，通过 U 盘启动，LuCI 地址为 `192.168.1.1`。
+- `initramfs-uImage.itb`：基于同一期 ImmortalWrt Snapshot 构建的临时系统，已加入中文 LuCI。通过 U 盘启动，后台地址为 `192.168.1.1`。
 - `squashfs-sysupgrade.bin`：安装正式固件。
 
 本教程不使用 `factory.ubi`，无需下载。
@@ -137,6 +137,8 @@ usb start && usbboot 44000000 0 && bootm 44000000
 登录后设置管理员密码和 Wi-Fi 密码，其他默认设置见 [README](README.md#默认设置)。
 
 以后升级：
+
+从此前的稳定版切换到 Snapshot 时，建议先备份，再取消勾选“保留配置”。
 
 1. 进入 **系统 → 备份 / 升级**。
 2. 上传对应机型的 `sysupgrade.bin`，建议不保留配置。

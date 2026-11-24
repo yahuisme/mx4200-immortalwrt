@@ -3,9 +3,9 @@ name: MX4200 ImmortalWrt Builds
 on:
   workflow_dispatch:
 
-  # Monthly days 1, 4, 7, 10... at 00:00 Hong Kong time.
+  # Daily at 00:00 Hong Kong time.
   schedule:
-    - cron: '0 0 1-31/3 * *'
+    - cron: '0 0 * * *'
       timezone: Asia/Hong_Kong
 concurrency:
   group: mx4200-build
@@ -74,23 +74,23 @@ jobs:
         docker_exec DK bash -e -c '
           . $DK_PROFILE/settings.ini
           [[ $REPO_URL && $REPO_REF ]] || { echo "::error::Missing REPO_URL or REPO_REF"; exit 1; }
-          [[ $REPO_REF = latest-release ]] || { echo "::error::REPO_REF must be latest-release"; exit 1; }
+          [[ $REPO_URL = https://github.com/immortalwrt/immortalwrt.git && $REPO_REF = master ]] || { echo "::error::Expected official ImmortalWrt master"; exit 1; }
           umask 022
           git config --global tar.umask 0022
           mkdir -p $DK_OPENWRT
           cd $DK_OPENWRT
           if [ ! -d .git ]; then git init; fi
           git remote set-url origin $REPO_URL 2>&- || git remote add origin $REPO_URL
-          SOURCE_TAG=$(python3 /cache-scripts/official_release.py /build-record/official-release.json)
-          [[ "$SOURCE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::No stable release tag found"; exit 1; }
-          SOURCE_REF="refs/tags/$SOURCE_TAG"
+          SOURCE_REF="refs/heads/$REPO_REF"
           echo "SOURCE_REF=$SOURCE_REF"
-          git fetch --depth=1 origin "$SOURCE_REF"
-          git checkout -f --detach FETCH_HEAD
-          git reset --hard FETCH_HEAD
+          # Native getver uses the full history and the branch upstream.
+          FETCH_ARGS=(--no-tags)
+          if [ "$(git rev-parse --is-shallow-repository)" = true ]; then FETCH_ARGS+=(--unshallow); fi
+          git fetch "${FETCH_ARGS[@]}" origin "+$SOURCE_REF:refs/remotes/origin/master"
+          git checkout -f -B master refs/remotes/origin/master
+          git branch --set-upstream-to=origin/master master
           SOURCE_SHA=$(git rev-parse --verify HEAD)
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          printf "%s\n" "$SOURCE_TAG" > /build-record/source-tag.txt
           printf "%s\n" "$SOURCE_REF" > /build-record/source-ref.txt
           printf "%s\n" "$SOURCE_SHA" > /build-record/source-sha.txt
           # Remove ALL builder-preseeded patches, feeds, overlays and ABI files.
@@ -108,6 +108,7 @@ jobs:
           cp -r "$DK_PROFILE/files/" .
           # Prepare signed external APKs and device defaults before defconfig.
           bash $DK_PROFILE/custom.sh
+          python3 /cache-scripts/edma_rx_memory.py "$DK_OPENWRT" > /build-record/edma-rx.json
           python3 /cache-scripts/check_go.py "$DK_OPENWRT" /usr/lib/go
           # Log actual source/feed revisions after customization; fail on broken Git access.
           revision=$(git rev-parse --verify HEAD)
@@ -219,6 +220,8 @@ jobs:
           exit "$status"
         '
 
+    - name: Build HomeWRK LuCI RAM system
+      run: docker_exec DK bash /cache-scripts/build_ramboot.sh
 
     - name: Validate and stage firmware
       id: stage
@@ -227,22 +230,16 @@ jobs:
         docker_exec DK cat "$DK_OPENWRT/.config" > final.config
         docker_exec DK cat "$DK_OPENWRT/tmp/.packageinfo" > final.packageinfo
         python3 scripts/check_defaults.py final.config final.packageinfo user/default/config.diff
-        python3 scripts/release_images.py stage openwrt_bin/targets firmware
-        python3 scripts/official_initramfs.py firmware/mx4300-homewrk --record build-record/official-initramfs.json --resolved build-record/official-release.json
-        OFFICIAL_VERSION=$(jq -er .version build-record/official-initramfs.json)
+        python3 scripts/stage_ramboot.py verify openwrt_bin/targets/qualcommax/ipq807x build-record
         WRT_DATE="$(TZ=Asia/Hong_Kong date +'%y.%m.%d-%H.%M.%S')"
         WRT_REV=$(jq -er '.version_code | capture("^r(?<revision>[0-9]+)-[0-9a-f]+$").revision' openwrt_bin/targets/qualcommax/ipq807x/profiles.json)
         [[ "$WRT_REV" =~ ^[1-9][0-9]*$ ]]
         [[ "$(jq -er .version_code openwrt_bin/targets/qualcommax/ipq807x/profiles.json)" = "$(cat build-record/source-revision.txt)" ]]
-        SOURCE_TAG="$(cat build-record/source-tag.txt)"
-        [[ "$SOURCE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-        SOURCE_VERSION="${SOURCE_TAG#v}"
-        [[ "$SOURCE_VERSION" = "$OFFICIAL_VERSION" ]]
-        [[ "$(jq -er .version_number openwrt_bin/targets/qualcommax/ipq807x/profiles.json)" = "$SOURCE_VERSION" ]]
         SOURCE_REF="$(cat build-record/source-ref.txt)"
-        [[ "$SOURCE_REF" = "refs/tags/$SOURCE_TAG" ]]
+        [[ "$SOURCE_REF" = refs/heads/master ]]
         SOURCE_SHA="$(cat build-record/source-sha.txt)"
         [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+        python3 scripts/release_images.py stage openwrt_bin/targets firmware
         BUILD_TIME="$(TZ=Asia/Hong_Kong date '+%Y-%m-%d %H:%M:%S %Z')"
         for GROUP in mx4200 mx4300-homewrk; do
           case "$GROUP" in
@@ -254,17 +251,17 @@ jobs:
             mx4300-homewrk)
               DEVICE=MX4300
               MODELS='Linksys MX4300 / HomeWRK'
-              INSTALL="MX4300 从原厂后台刷入 \`factory.bin\`，再用 \`sysupgrade.bin\` 升级；HomeWRK 拆机连接 TTL，通过 U 盘启动 \`initramfs-uImage.itb\`，再经 LuCI 后台升级 \`sysupgrade.bin\`。"
+              INSTALL="MX4300 从原厂后台刷入 \`factory.bin\`，再用 \`sysupgrade.bin\` 升级；HomeWRK 拆机连接 TTL，通过 U 盘启动 \`initramfs-uImage.itb\`，再访问 \`192.168.1.1\`，经 LuCI 升级 \`sysupgrade.bin\`。"
               ;;
           esac
-          VERSION="${DEVICE}-ImmortalWrt-${SOURCE_VERSION}-r${WRT_REV}-${WRT_DATE/-/_}"
+          VERSION="${DEVICE}-ImmortalWrt-r${WRT_REV}-${WRT_DATE/-/_}"
           printf '%s\n' "$VERSION" > "firmware/$GROUP/version.txt"
           printf '%s\n' "$VERSION" > "firmware/$GROUP/title.txt"
           RELEASE_NOTES="firmware/$GROUP/release-notes.md"
           cat > "$RELEASE_NOTES" <<EOF
         ## $MODELS ImmortalWrt
 
-        - 源码：[ImmortalWrt $SOURCE_VERSION](https://github.com/immortalwrt/immortalwrt/tree/$SOURCE_TAG)
+        - 源码：[ImmortalWrt Snapshot](https://github.com/immortalwrt/immortalwrt/tree/$SOURCE_SHA)
         - 构建时间：$BUILD_TIME
         - 首次安装：$INSTALL
         - 按机型和硬件版本选择镜像，不可混刷。
@@ -389,24 +386,25 @@ jobs:
         }
         current_main
         # Validate BOTH local groups before any Release mutation. Metadata stays
-        # in Actions artifacts; verify the original official attachment separately.
+        # in Actions artifacts; bind the separately built RAM FIT as well.
         python3 - <<'PY'
         import hashlib
         import json
         from pathlib import Path
-        from scripts.official_initramfs import load_record, verify
+        import re
+        from scripts.stage_ramboot import verify
         profile = json.loads(Path('user/default/build.json').read_text())
-        official = load_record('build-record/official-initramfs.json')
-        verify(Path('firmware') / official['group'] / official['name'], official)
         # Bind staged native bytes to the collector before either publication.
-        native = set(profile['images']) - set(profile.get('external_images', []))
+        native = set(profile['images'])
         entries = json.loads(Path('build-record/build.json').read_text())['images']
         if (not isinstance(entries, list) or len(entries) != len(native)
                 or any(not isinstance(row, dict) for row in entries)
                 or {row.get('name') for row in entries} != native):
             raise ValueError('Invalid native build-record image inventory')
         recorded = {row['name']: row for row in entries}
-        metadata = json.loads((Path('build-record/targets') / profile['target'] / 'profiles.json').read_text())
+        metadata_dir = Path('build-record/targets') / profile['target']
+        verify(metadata_dir, Path('build-record'), Path('firmware/mx4300-homewrk'))
+        metadata = json.loads((metadata_dir / 'profiles.json').read_text())
         native_rows = [row for device in metadata['profiles'].values()
                        for row in device['images'] if row.get('name') in native]
         if len(native_rows) != len(native) or {row['name'] for row in native_rows} != native:
@@ -418,6 +416,7 @@ jobs:
                     or 'sha256:' + row['sha256'] != accepted.get('digest')):
                 raise ValueError('Native image differs from profiles metadata: ' + row['name'])
         suffixes = []
+        revision = metadata['version_code'].split('-', 1)[0]
         for group, device in [('mx4200', 'MX4200'), ('mx4300-homewrk', 'MX4300')]:
             directory = Path('firmware') / group
             expected = set(profile['release_groups'][group]['images'])
@@ -434,11 +433,13 @@ jobs:
                     if type(row.get('size')) is not int or row['size'] != image.stat().st_size or row.get('digest') != digest:
                         raise ValueError('Staged image differs from build record: ' + image.name)
             tag = (directory / 'version.txt').read_text().strip()
-            if (not tag.startswith(device + '-ImmortalWrt-')
+            prefix = f'{device}-ImmortalWrt-{revision}-'
+            if (not tag.startswith(prefix)
+                    or not re.fullmatch(r'\d{2}\.\d{2}\.\d{2}_\d{2}\.\d{2}\.\d{2}', tag.removeprefix(prefix))
                     or (directory / 'title.txt').read_text().strip() != tag
                     or not (directory / 'release-notes.md').is_file()):
                 raise ValueError('Invalid staged release identity: ' + group)
-            suffixes.append(tag.removeprefix(device + '-ImmortalWrt-'))
+            suffixes.append(tag.removeprefix(prefix))
         if len(set(suffixes)) != 1:
             raise ValueError('Release groups must share revision and timestamp')
         PY

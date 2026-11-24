@@ -43,20 +43,22 @@ class HomeProxySourceTests(unittest.TestCase):
             script.write_text((ROOT / 'scripts/packages.sh').read_text().replace(
                 '/cache-scripts/external_packages.py', str(ROOT / 'scripts/external_packages.py')))
             # Positive first: actual source import and native preparation are reachable.
-            for fault in ('', 'snapshot', 'version-override', 'assembly'):
-                with self.subTest(fault=fault):
-                    build = base / ('build-' + (fault or 'valid'))
-                    shutil.copytree(ROOT / 'tests/fixtures/stable-apk-source', build)
+            for source, fault in (('stable-apk-source', ''), ('snapshot-source', ''),
+                                  ('snapshot-source', 'version'), ('snapshot-source', 'version-override'),
+                                  ('snapshot-source', 'assembly')):
+                with self.subTest(source=source, fault=fault):
+                    build = base / (source + '-' + (fault or 'valid'))
+                    shutil.copytree(ROOT / 'tests/fixtures' / source, build)
                     for name in ('feeds/luci', 'feeds/packages', 'tmp/info/empty'):
-                        (build / name).mkdir(parents=True)
+                        (build / name).mkdir(parents=True, exist_ok=True)
                     (build / '.custom-revisions.tsv').write_text('previous source provenance\n')
                     for name in ('luci-app-homeproxy', 'sing-box'):
                         path = build / 'package' / name / 'Makefile'
                         path.parent.mkdir()
                         path.write_text('previous recipe\n')
                         (build / 'feeds/luci' / name).symlink_to(path.parent)
-                    if fault == 'snapshot':
-                        (build / 'include/version.mk').write_text('VERSION_NUMBER:=SNAPSHOT\n')
+                    if fault == 'version':
+                        (build / 'include/version.mk').write_text('VERSION_NUMBER:=SNAPSHOTgarbage\n')
                     elif fault == 'version-override':
                         (build / '.config').write_text('CONFIG_VERSION_NUMBER="99.99.0"\n')
                     elif fault == 'assembly':
@@ -69,8 +71,10 @@ class HomeProxySourceTests(unittest.TestCase):
                         capture_output=True, text=True)
                     self.assertEqual(result.returncode == 0, not fault, result.stdout + result.stderr)
                     if fault:
-                        self.assertIn('Unsupported upstream assembly boundary' if fault == 'assembly'
-                                      else 'require numeric ImmortalWrt stable', result.stderr)
+                        expected = {'assembly': 'Unsupported upstream assembly boundary',
+                                    'version': 'reviewed ImmortalWrt Snapshot',
+                                    'version-override': 'without version override'}
+                        self.assertIn(expected[fault], result.stderr)
                         self.assertEqual(before, tree_contents(base), 'rejected direct caller changed its input tree')
                         self.assertNotIn('Cloning into', result.stderr)
                     else:

@@ -7,49 +7,15 @@ import subprocess
 import tempfile
 import unittest
 from test_cache_workflow import ROOT, step
-from test_dual_publish import INITRAMFS, profile_fixture, official_record
-
-OFFICIAL_DOWNLOAD_BOUNDARY = r'''
-# Replace only the downloader; publication verifies the real helper's record.
-python3() {
-    if [ "${1:-}" = scripts/official_initramfs.py ]; then
-        [ "${FAULT:-}" != official-download ] || return 31
-        command python3 - "$@" <<'PY'
-import hashlib,json,sys
-from pathlib import Path
-assert sys.argv[1:] == ['scripts/official_initramfs.py', 'firmware/mx4300-homewrk', '--record', 'build-record/official-initramfs.json', '--resolved', 'build-record/official-release.json']
-assert json.loads(Path(sys.argv[6]).read_text())['version'] == '25.12.2'
-destination=Path(sys.argv[2]); assert destination.is_dir()
-assert len(list(Path('firmware/mx4200').glob('*.bin'))) == 4
-assert len([p for p in destination.iterdir() if p.suffix in ('.bin', '.ubi')]) == 4
-name='immortalwrt-qualcommax-ipq807x-linksys_homewrk-initramfs-uImage.itb'
-source=name.replace('immortalwrt-', 'immortalwrt-25.12.2-', 1)
-image=destination/name; image.write_bytes(b'fixture image')
-Path(sys.argv[4]).write_text(json.dumps(dict(
-    version='25.12.2', source_name=source, name=name, target='qualcommax/ipq807x',
-    url='https://downloads.immortalwrt.org/releases/25.12.2/targets/qualcommax/ipq807x/'+source,
-    group='mx4300-homewrk', size=image.stat().st_size,
-    sha256=hashlib.sha256(image.read_bytes()).hexdigest())))
-with Path('official-download-calls').open('a') as stream: stream.write('download\n')
-PY
-    else
-        command python3 "$@"
-    fi
-}
-'''
-
-
+from test_dual_publish import INITRAMFS, profile_fixture, ramboot_records
 
 class ReleaseTests(unittest.TestCase):
-    def test_official_download_follows_native_stage_and_no_ram_compilation(self):
-        body=step('Validate and stage firmware')['run']
-        download='python3 scripts/official_initramfs.py firmware/mx4300-homewrk --record build-record/official-initramfs.json'
-        self.assertIn(download, body)
-        self.assertLess(body.index('python3 scripts/release_images.py stage'), body.index(download))
+    def test_ram_build_precedes_validation_and_stage(self):
         from test_cache_workflow import STEPS
-        workflow='\n'.join(item.get('run', '') for item in STEPS)
-        self.assertNotIn('build_ramboot.sh', workflow)
-        self.assertNotIn('check_initramfs.py', workflow)
+        self.assertLess(STEPS.index(step('Build HomeWRK LuCI RAM system')),
+                        STEPS.index(step('Validate and stage firmware')))
+        body = step('Validate and stage firmware')['run']
+        self.assertLess(body.index('stage_ramboot.py verify'), body.index('release_images.py stage'))
 
     def fixture(self, base):
         profile_fixture(base)
@@ -61,12 +27,8 @@ class ReleaseTests(unittest.TestCase):
         (base/'tmp').mkdir()
         (base/'tmp/.packageinfo').write_text('')
         (base/'build-record').mkdir()
-        (base/'build-record/source-ref.txt').write_text('refs/tags/v25.12.2\n')
-        (base/'build-record/source-tag.txt').write_text('v25.12.2\n')
-        (base/'build-record/official-release.json').write_text(json.dumps(official_record()))
-        (base/'build-record/source-revision.txt').write_text('r123-abcdef\n')
-        (base/'build-record/source-sha.txt').write_text('c'*40+'\n')
-        data={'target':'qualcommax/ipq807x','version_number':'25.12.2','version_code':'r123-abcdef', 'profiles': {}}
+        (base/'build-record/source-ref.txt').write_text('refs/heads/master\n')
+        data={'target':'qualcommax/ipq807x','version_number':'SNAPSHOT','version_code':'r123-abcdef', 'profiles': {}}
         for device in ('mx4200v1','mx4200v2','mx4300','homewrk'):
             images = []
             for kind in ('factory','sysupgrade'):
@@ -77,26 +39,19 @@ class ReleaseTests(unittest.TestCase):
                                    size=image.stat().st_size,
                                    sha256=hashlib.sha256(image.read_bytes()).hexdigest()))
             data['profiles']['linksys_'+device] = {'images': images}
+        payload = b'fixture image'
+        (output/INITRAMFS).write_bytes(payload)
+        data['profiles']['linksys_homewrk']['images'].append(ramboot_records(base/'build-record', payload))
         (output/'profiles.json').write_text(json.dumps(data))
         return output,data
 
     def stage(self,base,fault='none'):
-        prefix=OFFICIAL_DOWNLOAD_BOUNDARY+'''
+        prefix='''
 sudo() { "$@"; }
 docker_exec() { shift; "$@"; }
 '''
         return subprocess.run(['bash','-eo','pipefail','-c',prefix+step('Validate and stage firmware')['run']],
                               cwd=base,env=dict(os.environ,DK_OPENWRT=str(base),DK_BIN=str(base/'openwrt_bin'),FAULT=fault),text=True,capture_output=True)
-
-    def test_official_download_failure_blocks_stage_identity(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp); self.fixture(base)
-            result = self.stage(base, 'official-download')
-            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertFalse((base/'build-record/official-initramfs.json').exists())
-            self.assertFalse((base/'firmware/mx4300-homewrk'/INITRAMFS).exists())
-            self.assertFalse(list((base/'firmware').glob('*/version.txt')))
-            self.assertFalse(list((base/'firmware').glob('*/title.txt')))
 
     def test_complete_stage_and_bad_image_configuration_matrix(self):
         cases=('valid','missing','empty','extra','wrong-device','wrong-prefix','symlink',
@@ -135,34 +90,26 @@ docker_exec() { shift; "$@"; }
                                          set(profile['release_groups'][group]['images']))
                         tag=(directory/'version.txt').read_text().strip()
                         title=(directory/'title.txt').read_text().strip()
-                        self.assertRegex(tag,rf'^{device}-ImmortalWrt-25\.12\.2-r123-\d\d\.\d\d\.\d\d_\d\d\.\d\d\.\d\d$')
-                        self.assertNotIn('snapshot', title.lower())
+                        self.assertRegex(tag,rf'^{device}-ImmortalWrt-r123-\d\d\.\d\d\.\d\d_\d\d\.\d\d\.\d\d$')
                         self.assertEqual(title,tag)
                         suffixes.append(tag.removeprefix(device+'-ImmortalWrt-'))
                         notes=(directory/'release-notes.md').read_text()
                         for text in ('- 首次安装：','从原厂后台刷入 `factory.bin`，再用 `sysupgrade.bin` 升级',
                                      '构建时间：',
-                                     '[ImmortalWrt 25.12.2](https://github.com/immortalwrt/immortalwrt/tree/v25.12.2)',
+                                     '[ImmortalWrt Snapshot](https://github.com/immortalwrt/immortalwrt/tree/' + 'c'*40 + ')',
                                      '按机型和硬件版本选择镜像，不可混刷。',
                                      '[刷机教程与默认设置](https://github.com/yahuisme/mx4200-immortalwrt#固件下载)'):
                             self.assertIn(text,notes)
                         for text in ('UBI2','首次刷机教程','linksys-first-flash.md',
-                                     '- 机型：','- 定制：','官方 snapshot','c'*40):
+                                     '- 机型：','- 定制：','官方 snapshot'):
                             self.assertNotIn(text,notes)
                         self.assertEqual(sum(line.startswith('- ') for line in notes.splitlines()),4)
                     self.assertEqual(suffixes[0],suffixes[1])
                     notes=(base/'firmware/mx4300-homewrk/release-notes.md').read_text()
                     self.assertNotIn('`factory.ubi`',notes)
                     self.assertIn('LuCI',notes)
-                    self.assertIn('25.12.2',notes)
-                    self.assertNotIn(official_record()['url'],notes)
-                    self.assertIn('HomeWRK 拆机连接 TTL，通过 U 盘启动 `initramfs-uImage.itb`，再经 LuCI 后台升级 `sysupgrade.bin`。',notes)
-                    self.assertNotIn('HomeWRK 用官方',notes)
-                    self.assertTrue((base/'build-record/official-initramfs.json').is_file())
-                    self.assertTrue((base/'firmware/mx4300-homewrk'/INITRAMFS).is_file())
-                    self.assertEqual((base/'official-download-calls').read_text().splitlines(), ['download'])
-                    self.assertFalse((out/INITRAMFS).exists())
-                    self.assertEqual(json.loads((base/'build-record/official-initramfs.json').read_text()), official_record())
+                    self.assertIn('HomeWRK 拆机连接 TTL，通过 U 盘启动 `initramfs-uImage.itb`，再访问 `192.168.1.1`，经 LuCI 升级 `sysupgrade.bin`。',notes)
+                    self.assertEqual((base/'firmware/mx4300-homewrk'/INITRAMFS).read_bytes(), (out/INITRAMFS).read_bytes())
                     self.assertNotIn('`factory.ubi`',(base/'firmware/mx4200/release-notes.md').read_text())
                     self.assertNotIn('not found',result.stderr)
                 else:
@@ -187,7 +134,7 @@ docker_exec() { shift; "$@"; }
                 self.assertNotEqual(result.returncode,0,result.stderr)
                 self.assertFalse((base/'firmware').exists())
 
-    def test_stable_source_and_attachment_version_mismatch_block_identity(self):
+    def test_snapshot_source_and_attachment_version_mismatch_block_identity(self):
         for fault in ('profile-version', 'attachment-version', 'source-ref'):
             with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
                 base = Path(tmp)
@@ -196,9 +143,9 @@ docker_exec() { shift; "$@"; }
                     data['version_number'] = '26.01.0'
                     (output / 'profiles.json').write_text(json.dumps(data))
                 elif fault == 'attachment-version':
-                    (base / 'build-record/source-tag.txt').write_text('v26.01.0\n')
+                    (base / 'build-record/initramfs.json').unlink()
                 else:
-                    (base / 'build-record/source-ref.txt').write_text('refs/heads/master\n')
+                    (base / 'build-record/source-ref.txt').write_text('refs/tags/v26.01.0\n')
                 result = self.stage(base)
                 self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertFalse(list((base / 'firmware').glob('*/version.txt')))

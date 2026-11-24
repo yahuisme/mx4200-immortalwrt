@@ -76,13 +76,11 @@ elif a == ['api', '--paginate'""")
                        IMAGE_ID='sha256:'+'a'*64, BUILDER_FINGERPRINT='b'*64)
             # Real nested compile shell and stage; compiler, Docker and archive
             # compressor are external boundaries. No firmware build/network occurs.
-            prefix = release.OFFICIAL_DOWNLOAD_BOUNDARY.replace('python3() {', 'official_download_python3() {') + '''
+            prefix = '''
 make() { printf 'make %s\n' "$*" >> "$RUNNER_TEMP/bootstrap-calls"; if [ "$1" = download ]; then [ "$FAULT" != download ]; else [ "$FAULT" != compile ]; fi; }
 git() { [ "$*" = 'config --global tar.umask 0022' ]; }
 python3() {
-    if [ "$1" = scripts/official_initramfs.py ]; then
-        official_download_python3 "$@"
-    elif [ "$1" = /cache-scripts/bootstrap_cache.py ]; then
+    if [ "$1" = /cache-scripts/bootstrap_cache.py ]; then
         printf 'bootstrap pack\n' >> "$RUNNER_TEMP/bootstrap-calls"
         [ "$FAULT" != bootstrap_pack ] || return 29
         truncate -s 100 tbarchive/bootstrap.tar.gz
@@ -92,7 +90,9 @@ python3() {
 }
 docker_exec() {
     shift
-    if [ "$1" = python3 ] && [ "$2" = /cache-scripts/build_record.py ]; then
+    if [ "$*" = "bash /cache-scripts/build_ramboot.sh" ]; then
+        [ "$FAULT" != ramboot ]
+    elif [ "$1" = python3 ] && [ "$2" = /cache-scripts/build_record.py ]; then
         python3 scripts/build_record.py "$DK_OPENWRT" build-record
     elif [ "$1" = python3 ] && [ "$2" = /cache-scripts/cache.py ]; then
         [ "$FAULT" != package ] || return 17
@@ -106,7 +106,7 @@ sudo() {
     if [ "$FAULT" = fingerprint ] && [ "${2:-}" = scripts/dlcache.py ] && [ "${3:-}" = check ]; then return 17; fi
     "$@"
 }
-export -f make docker_exec sudo python3 official_download_python3 git
+export -f make docker_exec sudo python3 git
 '''
             subprocess.run(['python3', str(ROOT/'scripts/dlcache.py'), 'snapshot',
                             str(base/'dlcache'), str(base/'dlcache-before.json')], check=True,
@@ -233,10 +233,10 @@ export -f make docker_exec sudo python3 official_download_python3 git
         self.assertEqual(len([c for c in inventory['calls'] if c[:2] == ['release', 'create']]), 2)
 
     def test_full_compile_stage_cache_publish_failure_matrix(self):
-        for fault in ('none', 'download', 'compile', 'validation', 'official-download', 'cancel', 'package', 'save', 'readback', 'publish', 'metadata', 'upload', 'bootstrap_pack', 'bootstrap_save', 'bootstrap_readback'):
+        for fault in ('none', 'download', 'compile', 'validation', 'ramboot', 'cancel', 'package', 'save', 'readback', 'publish', 'metadata', 'upload', 'bootstrap_pack', 'bootstrap_save', 'bootstrap_readback'):
             with self.subTest(fault=fault):
                 outcomes, executed, inventory, log = self.replay(fault)
-                published = fault not in ('download', 'compile', 'validation', 'official-download', 'cancel', 'metadata', 'upload')
+                published = fault not in ('download', 'compile', 'validation', 'ramboot', 'cancel', 'metadata', 'upload')
                 if fault == 'download':
                     self.assertEqual(outcomes['Download sources'], 'failure', log)
                     self.assertEqual(outcomes['Compile firmware'], 'skipped', log)
@@ -248,9 +248,10 @@ export -f make docker_exec sudo python3 official_download_python3 git
                     self.assertEqual(outcomes['Upload build record'],'success',log)
                 self.assertEqual(outcomes['Publish firmware and prune releases'],
                                  'failure' if fault == 'publish' else 'success' if published else 'skipped', log)
-                if fault == 'official-download':
+                if fault == 'ramboot':
                     self.assertEqual(outcomes['Compile firmware'], 'success', log)
-                    self.assertEqual(outcomes['Validate and stage firmware'], 'failure', log)
+                    self.assertEqual(outcomes['Build HomeWRK LuCI RAM system'], 'failure', log)
+                    self.assertEqual(outcomes['Validate and stage firmware'], 'skipped', log)
                     self.assertFalse(any(c[:2] == ['release', 'delete'] for c in inventory['calls']), log)
                     self.assertNotIn('ModuleNotFoundError', log)
                 if fault in ('none', 'publish', 'metadata', 'upload'):
