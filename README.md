@@ -2,8 +2,6 @@
 
 每次构建跟随 [ImmortalWrt 官方 Snapshot 源码](https://github.com/immortalwrt/immortalwrt/tree/master)，支持 Linksys MX4200v1、MX4200v2、MX4300 和 HomeWRK。
 
-正式固件临时回移植 [qca_edma RX 缓冲优化](https://github.com/openwrt/openwrt/commit/1698cc246e28cf9f68e5ac4131a20b757728fe49)：保留四个收包队列，标准 MTU 下 RX 缓冲的理论占用从约 32 MiB 降至约 4 MiB。ImmortalWrt 合入等效实现后不再叠加本地补丁。
-
 ## 固件下载
 
 前往 [Releases](https://github.com/yahuisme/mx4200-immortalwrt/releases)，选择对应发布组：
