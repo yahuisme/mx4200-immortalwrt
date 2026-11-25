@@ -250,12 +250,12 @@ jobs:
             mx4200)
               DEVICE=MX4200
               MODELS='Linksys MX4200v1 / MX4200v2'
-              INSTALL="从原厂后台刷入 \`factory.bin\`，再经 LuCI 升级 \`sysupgrade.bin\`。"
+              INSTALL="原厂后台刷 \`factory.bin\`，再用 LuCI 刷 \`sysupgrade.bin\`。"
               ;;
             mx4300-homewrk)
               DEVICE=MX4300
               MODELS='Linksys MX4300 / HomeWRK'
-              INSTALL="MX4300 从原厂后台刷入 \`factory.bin\`，再经 LuCI 升级 \`sysupgrade.bin\`；HomeWRK 拆机连接 TTL，从 U 盘启动官方 ImmortalWrt ${OFFICIAL_VERSION} 的 \`initramfs-uImage.itb\`，再访问 \`192.168.1.1\`，经 LuCI 升级 \`sysupgrade.bin\`。"
+              INSTALL="MX4300 在原厂后台刷 \`factory.bin\`；HomeWRK 拆机接 TTL，从 U 盘启动官方 ImmortalWrt ${OFFICIAL_VERSION} 的 \`initramfs-uImage.itb\`。两者再用 LuCI 刷 \`sysupgrade.bin\`。"
               ;;
           esac
           VERSION="${DEVICE}-ImmortalWrt-r${WRT_REV}-${WRT_DATE/-/_}"
@@ -268,7 +268,7 @@ jobs:
         - 源码：[ImmortalWrt Snapshot](https://github.com/immortalwrt/immortalwrt/tree/$SOURCE_SHA)
         - 构建时间：$BUILD_TIME
         - 首次安装：$INSTALL
-        - 按机型和硬件版本选择镜像，不可混刷。
+        - 日常升级：在 LuCI 刷入对应机型和硬件版本的 \`sysupgrade.bin\`。
 
         [刷机教程与默认设置](https://github.com/yahuisme/mx4200-immortalwrt#固件下载)
         EOF

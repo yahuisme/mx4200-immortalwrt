@@ -121,10 +121,9 @@ python3() {
                         self.assertEqual(title,tag)
                         suffixes.append(tag.removeprefix(device+'-ImmortalWrt-'))
                         notes=(directory/'release-notes.md').read_text()
-                        for text in ('- 首次安装：','从原厂后台刷入 `factory.bin`，再经 LuCI 升级 `sysupgrade.bin`',
-                                     '构建时间：',
+                        for text in ('构建时间：',
                                      '[ImmortalWrt Snapshot](https://github.com/immortalwrt/immortalwrt/tree/' + 'c'*40 + ')',
-                                     '按机型和硬件版本选择镜像，不可混刷。',
+                                     '- 日常升级：在 LuCI 刷入对应机型和硬件版本的 `sysupgrade.bin`。',
                                      '[刷机教程与默认设置](https://github.com/yahuisme/mx4200-immortalwrt#固件下载)'):
                             self.assertIn(text,notes)
                         for text in ('UBI2','首次刷机教程','linksys-first-flash.md',
@@ -134,15 +133,18 @@ python3() {
                     self.assertEqual(suffixes[0],suffixes[1])
                     notes=(base/'firmware/mx4300-homewrk/release-notes.md').read_text()
                     self.assertNotIn('`factory.ubi`',notes)
-                    self.assertIn('LuCI',notes)
-                    self.assertIn('HomeWRK 拆机连接 TTL，从 U 盘启动官方 ImmortalWrt 25.12.2 的 `initramfs-uImage.itb`，再访问 `192.168.1.1`，经 LuCI 升级 `sysupgrade.bin`。',notes)
+                    self.assertIn('- 首次安装：MX4300 在原厂后台刷 `factory.bin`；HomeWRK 拆机接 TTL，'
+                                  '从 U 盘启动官方 ImmortalWrt 25.12.2 的 `initramfs-uImage.itb`。两者再用 LuCI 刷 `sysupgrade.bin`。',
+                                  notes.splitlines())
                     from scripts.official_initramfs import load_record, verify
                     record = load_record(base/'build-record/official-initramfs.json')
                     self.assertEqual(record, official_record())
                     verify(base/'firmware/mx4300-homewrk'/INITRAMFS, record)
                     self.assertFalse((out/INITRAMFS).exists())
                     self.assertEqual((base/'official-download-calls').read_text().splitlines(), ['download'])
-                    self.assertNotIn('`factory.ubi`',(base/'firmware/mx4200/release-notes.md').read_text())
+                    notes=(base/'firmware/mx4200/release-notes.md').read_text()
+                    self.assertIn('- 首次安装：原厂后台刷 `factory.bin`，再用 LuCI 刷 `sysupgrade.bin`。', notes.splitlines())
+                    self.assertNotIn('`factory.ubi`',notes)
                     self.assertNotIn('not found',result.stderr)
                 else:
                     self.assertFalse((base/'firmware').exists(),result.stdout+result.stderr)
