@@ -48,7 +48,7 @@ jobs:
       id: environment
       run: |
         mkdir -p build-record openwrt_bin ghcache dlcache tcarchive ccarchive dlarchive tbarchive
-        sudo python3 scripts/dlcache.py snapshot dlcache "$RUNNER_TEMP/dlcache-before.json"
+        sudo python3 scripts/dlcache.py prepare dlcache "$RUNNER_TEMP/dlcache-before.json"
         [ -f "user/default/config.diff" ] || { echo "::error::config.diff not found"; exit 1; }
 
         IMAGE=mx4200-builder:local

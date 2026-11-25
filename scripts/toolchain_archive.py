@@ -68,6 +68,20 @@ def allowed(path):
                  and len(parts[1]) > len('toolchain-')))
 
 
+def validate_roots(roots):
+    build = roots['build_dir']
+    staging = roots['staging_dir']
+    if any(not side.get('host') or len(side) < 2 or not all(side.values())
+           for side in (build, staging)):
+        raise ValueError('incomplete toolchain artifact set')
+    # Native rules.mk uses TOOLCHAIN_DIR_NAME for both build and staging.
+    # Compare every basename, not just one matching pair among extra roots.
+    if build.keys() != staging.keys():
+        raise ValueError('mismatched toolchain artifact roots: '
+                         f'build_dir={sorted(build.keys() - {"host"})}, '
+                         f'staging_dir={sorted(staging.keys() - {"host"})}')
+
+
 def _link_target(name, entry, root):
     target = Path(entry.linkname)
     if entry.islnk():
@@ -147,7 +161,11 @@ def validate_archive(archive, root):
             if entry.mode & 0o7000:
                 raise ValueError('privileged archive mode: ' + name)
             members[name] = entry
+    roots = {'build_dir': {}, 'staging_dir': {}}
     for name, entry in members.items():
+        base, basename, *_ = name.split('/', 2)
+        top = members.get(base + '/' + basename)
+        roots[base][basename] = top is not None and top.isdir()
         parent = Path(name).parent
         while str(parent) != '.':
             existing = members.get(parent.as_posix())
@@ -174,8 +192,4 @@ def validate_archive(archive, root):
             if entry.islnk() and (target.relative_to(root).as_posix() not in members
                                   or not members[target.relative_to(root).as_posix()].isfile()):
                 raise ValueError('invalid archive hardlink')
-    for base in ('build_dir', 'staging_dir'):
-        if (base + '/host' not in members or not members[base + '/host'].isdir()
-                or not any(name.startswith(base + '/toolchain-') and '/' not in name[len(base) + 1:]
-                           and entry.isdir() for name, entry in members.items())):
-            raise ValueError('incomplete toolchain artifact set')
+    validate_roots(roots)

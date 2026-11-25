@@ -241,6 +241,49 @@ class WorkflowTests(unittest.TestCase):
                                     capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
 
+    def test_environment_recovers_semantic_download_corruption_before_source(self):
+        import json
+        for corrupt in (False, True):
+            with self.subTest(corrupt=corrupt), tempfile.TemporaryDirectory() as tmp:
+                base = Path(tmp)
+                (base / 'scripts').symlink_to(ROOT / 'scripts', target_is_directory=True)
+                dl = base / 'dlcache'
+                dl.mkdir()
+                (dl / 'restored.tar').write_bytes(b'valid input')
+                if corrupt:
+                    (dl / 'linked').symlink_to('restored.tar')
+                env = dict(os.environ, RUNNER_TEMP=tmp, GITHUB_OUTPUT=str(base / 'output'))
+                # Native tar succeeds on semantic corruption; execute the real
+                # workflow restore before the environment's prepare boundary.
+                import tarfile
+                archive = base / 'dlarchive'
+                archive.mkdir()
+                with tarfile.open(archive / 'dl.tar.gz', 'w:gz') as tf:
+                    tf.add(dl, arcname='.')
+                extract = render(step('Extract download cache')['run'], {
+                    'steps.dl.outputs.cache-matched-key': 'dl-v1-mx4200-arm64.previous',
+                    'steps.dl.outcome': 'success'})
+                result = subprocess.run(['bash', '-eo', 'pipefail', '-c', extract], cwd=base,
+                                        env=dict(env, GITHUB_OUTPUT=str(base / 'restore-output')),
+                                        text=True, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('hit=true\n', (base / 'restore-output').read_text())
+                block = step('Prepare build environment')['run'].split('[ -f "user/default/config.diff" ]', 1)[0]
+                result = subprocess.run(['bash', '-eo', 'pipefail', '-c', 'sudo() { "$@"; };\n' + block],
+                                        cwd=base, env=env, text=True, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                before = json.loads((base / 'dlcache-before.json').read_text())
+                self.assertEqual(before['files'], 0 if corrupt else 1)
+                self.assertEqual(len(list(dl.iterdir())), 0 if corrupt else 1)
+                if corrupt:
+                    self.assertIn('unsupported linked download', result.stderr)
+                check = render(step('Check download cache changes')['run'], {
+                    'steps.dl_restore.outputs.matched-key': 'dl-v1-mx4200-arm64.previous'})
+                result = subprocess.run(['bash', '-eo', 'pipefail', '-c', 'sudo() { "$@"; };\n' + check],
+                                        cwd=base, env=env, text=True, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual((base / 'output').read_text(), 'save=false\n')
+
     def test_unpack_creates_download_snapshot(self):
         with tempfile.TemporaryDirectory() as tmp:
             block = render(step('Prepare build environment')['run'], {})
@@ -249,7 +292,7 @@ class WorkflowTests(unittest.TestCase):
             result = subprocess.run(['bash', '-e', '-c', stub + block], cwd=tmp,
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn('dlcache.py snapshot', result.stdout)
+            self.assertIn('dlcache.py prepare', result.stdout)
 
     def test_cache_save_cleanup_order_and_failure_gates(self):
         workflow = yaml.safe_load(WORKFLOW.read_text())

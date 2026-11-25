@@ -149,6 +149,16 @@ def validate_ccache(root):
         raise ValueError('missing nonempty executable host ccache')
 
 
+def validate_artifacts(root):
+    paths = artifacts(root)
+    roots = {'build_dir': {}, 'staging_dir': {}}
+    for path in paths:
+        roots[path.parent.name][path.name] = not path.is_symlink() and path.is_dir()
+    toolchain_archive.validate_roots(roots)
+    validate_ccache(root)
+    return paths
+
+
 def restore(root, cache, expected):
     # Never merge an image's staging or target objects with another generation.
     for name in ('build_dir', 'staging_dir'):
@@ -162,7 +172,7 @@ def restore(root, cache, expected):
         if (cache / 'key').read_text().strip() != expected:
             raise ValueError('toolchain key mismatch')
         toolchain_archive.extract(archive, root)
-        validate_ccache(root)
+        validate_artifacts(root)
         print('exact toolchain restored')
     else:
         print('cold toolchain')
@@ -175,12 +185,10 @@ def pack(root, cache, kind, expected):
     if kind == 'toolchain':
         (cache / toolchain_archive.LEGACY).unlink(missing_ok=True)
     keyfile = cache / 'key'
-    paths = artifacts(root) if kind == 'toolchain' else [root]
+    paths = [root]
     if kind == 'toolchain':
         keyfile.unlink(missing_ok=True)
-        if not (root / 'build_dir/host').is_dir() or not (root / 'staging_dir/host').is_dir() or not list(root.glob('build_dir/toolchain-*')) or not list(root.glob('staging_dir/toolchain-*')):
-            raise ValueError('incomplete toolchain artifact set')
-        validate_ccache(root)
+        paths = validate_artifacts(root)
         names = [str(p.relative_to(root)) for p in paths]
         base = root
     else:

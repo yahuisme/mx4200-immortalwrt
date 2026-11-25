@@ -60,6 +60,6 @@ Aurora 主题和配置插件使用 [Aurora 项目的签名 APK](https://github.c
 
 ## 构建与发布
 
-正式固件包含两项 [ath11k 回移补丁](scripts/ath11k-patches/README.md)，分别处理 RX 缓冲页滞留和 802.11s Mesh 互通。HomeWRK 临时启动镜像不受影响。
+正式固件包含三项 [ath11k 回移补丁](scripts/ath11k-patches/README.md)，分别处理 RX 缓冲页滞留、802.11s Mesh 互通和同一 radio 多 BSS 重复 peer 防护。HomeWRK 临时启动镜像不受影响。
 
 每天香港时间 00:00 自动构建，也可手动运行 [Actions](https://github.com/yahuisme/mx4200-immortalwrt/actions/workflows/MX4200.yml)。每次构建四个机型，按 MX4200、MX4300 两组发布，每组保留最近一期构建。

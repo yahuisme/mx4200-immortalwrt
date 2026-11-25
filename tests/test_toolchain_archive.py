@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from scripts import toolchain_archive
+from scripts import cache, cache_recovery, toolchain_archive
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/cache_recovery.py'
 
@@ -30,10 +30,10 @@ class ToolchainArchiveTests(unittest.TestCase):
                                '--restored', 'matched', '--outcome', 'success'],
                               text=True, capture_output=True)
 
-    def archive_entries(self, extra=()):
+    def archive_entries(self, extra=(), roots=None):
         with tarfile.open(self.archive / 'toolchain.tar.gz', 'w:gz') as tf:
-            for name in ('build_dir/host', 'staging_dir/host',
-                         'build_dir/toolchain-test', 'staging_dir/toolchain-test'):
+            for name in ('build_dir/host', 'staging_dir/host', *(roots if roots is not None else (
+                    'build_dir/toolchain-test', 'staging_dir/toolchain-test'))):
                 item = tarfile.TarInfo(name)
                 item.type = tarfile.DIRTYPE
                 tf.addfile(item)
@@ -44,6 +44,100 @@ class ToolchainArchiveTests(unittest.TestCase):
             for item in extra:
                 tf.addfile(item, io.BytesIO(b'x' * item.size) if item.isfile() else None)
         (self.archive / 'key').write_text('matched\n')
+
+    def test_complete_root_sets_are_checked_before_extract_and_recover_cold(self):
+        cases = (
+            ('build_dir/toolchain-a', 'staging_dir/toolchain-b'),
+            ('build_dir/toolchain-test', 'staging_dir/toolchain-test', 'build_dir/toolchain-extra'),
+            ('build_dir/toolchain-test', 'staging_dir/toolchain-test', 'staging_dir/toolchain-extra'),
+        )
+        for roots in cases:
+            with self.subTest(roots=roots):
+                self.archive_entries(roots=roots)
+                with patch.object(toolchain_archive.subprocess, 'run') as extract:
+                    with self.assertRaisesRegex(ValueError, 'mismatched toolchain artifact roots'):
+                        toolchain_archive.extract(self.archive / 'toolchain.tar.gz', self.root)
+                    extract.assert_not_called()
+                result = self.cli()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, 'hit=false\nmatched-key=\npoisoned=true\n')
+                self.assertIn('mismatched toolchain artifact roots', result.stderr)
+                self.assertEqual(list(self.root.iterdir()), [])
+                self.assertEqual(list(self.archive.iterdir()), [])
+
+    def test_implicit_extra_root_and_non_directory_root_are_rejected(self):
+        cases = [self.member('build_dir/toolchain-extra/payload'),
+                 self.member('build_dir/toolchain-extra'),
+                 self.member('staging_dir/toolchain-extra', tarfile.SYMTYPE, 'toolchain-test')]
+        for entry in cases:
+            with self.subTest(name=entry.name, type=entry.type):
+                self.archive_entries([entry])
+                result = self.cli()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, 'hit=false\nmatched-key=\npoisoned=true\n')
+                self.assertIn('incomplete toolchain artifact set', result.stderr)
+                self.assertEqual(list(self.root.iterdir()), [])
+                self.assertEqual(list(self.archive.iterdir()), [])
+
+    def test_matching_multiple_generations_pack_and_restore(self):
+        roots = tuple(f'{base}/toolchain-{generation}' for base in ('build_dir', 'staging_dir')
+                      for generation in ('a', 'b'))
+        self.archive_entries(roots=roots)
+        self.assertEqual(self.cli().stdout, 'hit=true\nmatched-key=matched\npoisoned=false\n')
+        cache.pack(self.root, self.archive, 'toolchain', 'matched')
+        result = self.cli()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, 'hit=true\nmatched-key=matched\npoisoned=false\n')
+        self.assertTrue(all((self.root / name).is_dir() for name in roots))
+
+    def test_pack_rejects_mismatched_extra_and_nondirectory_roots_before_tar(self):
+        self.archive_entries()
+        self.assertIn('hit=true\n', self.cli().stdout)
+        base = self.root / 'staging_dir'
+        for bad in ('mismatched', 'extra', 'file', 'symlink'):
+            with self.subTest(bad=bad):
+                path = base / 'toolchain-extra'
+                if bad == 'mismatched':
+                    (base / 'toolchain-test').rename(path)
+                elif bad == 'extra':
+                    path.mkdir()
+                elif bad == 'file':
+                    path.write_text('not a directory')
+                else:
+                    path.symlink_to('toolchain-test', target_is_directory=True)
+                try:
+                    with patch.object(cache.subprocess, 'run', wraps=subprocess.run) as tar:
+                        with self.assertRaisesRegex(ValueError, 'toolchain artifact'):
+                            cache.pack(self.root, self.archive, 'toolchain', 'matched')
+                        tar.assert_not_called()
+                    self.assertEqual(list(self.archive.iterdir()), [])
+                finally:
+                    if bad == 'mismatched':
+                        path.rename(base / 'toolchain-test')
+                    elif bad == 'extra':
+                        path.rmdir()
+                    else:
+                        path.unlink()
+
+    def test_recovery_rechecks_complete_restored_root_sets(self):
+        # Keep the post-extract health boundary independent of header validation.
+        self.archive_entries()
+        def incomplete_restore(root, archive, expected):
+            for name in ('build_dir/host', 'staging_dir/host',
+                         'build_dir/toolchain-a', 'staging_dir/toolchain-b'):
+                (root / name).mkdir(parents=True)
+            binary = root / 'staging_dir/host/bin/ccache'
+            binary.parent.mkdir()
+            binary.write_bytes(b'not executed')
+            binary.chmod(0o755)
+        with patch.object(cache, 'restore', side_effect=incomplete_restore):
+            import contextlib
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                cache_recovery.restore('toolchain', self.root, self.archive, 'matched', 'matched', 'success')
+        self.assertEqual(output.getvalue(), 'hit=false\nmatched-key=\npoisoned=true\n')
+        self.assertEqual(list(self.root.iterdir()), [])
+        self.assertEqual(list(self.archive.iterdir()), [])
 
     def test_restore_reports_distinct_archive_phases(self):
         self.archive_entries()

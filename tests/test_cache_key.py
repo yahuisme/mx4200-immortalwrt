@@ -182,6 +182,13 @@ class KeyTests(unittest.TestCase):
                         self.key()
                     self.put(name, 'input')
 
+    def test_archive_root_policy_bytes_invalidate_exact_key(self):
+        before = self.key()
+        policy = self.cache.toolchain_archive
+        with patch.object(policy, 'policy_bytes', return_value=policy.policy_bytes() + b'\n# changed root policy\n'):
+            self.assertNotEqual(before, self.key())
+        self.assertEqual(before, self.key())
+
     def test_policy_not_archive_code_participates(self):
         before = self.key()
         alternate = Path(self.tmp.name) / 'alternate.py'
