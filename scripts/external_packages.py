@@ -168,7 +168,10 @@ def snapshot_assembly_updates(root, texts):
             '\t$(call apk,$(mkfs_cur_target_dir),mx-external) --no-scripts \\\n'
             '\t\t--repositories-file /dev/null --repository file://$(PACKAGE_DIR_ALL)/packages.adb\n')
     replace(image, '\t$(call prepare_rootfs,$(mkfs_cur_target_dir),$(TOPDIR)/files)\n',
-            '\t$(call prepare_rootfs,$(mkfs_cur_target_dir),$(TOPDIR)/files,,mx-external)\n')
+            '\t$(call prepare_rootfs,$(mkfs_cur_target_dir),$(TOPDIR)/files,,mx-external)\n'
+            '\tpython3 /cache-scripts/external_packages.py verify-advanced-reboot $(mkfs_cur_target_dir) '
+            '$(if $(filter $*,$(ROOTFS_ID/linksys_homewrk)),homewrk,'
+            '$(if $(filter $*,$(foreach model,mx4200v1 mx4200v2 mx4300,$(ROOTFS_ID/linksys_$(model)))),other,unknown))\n')
     return texts
 
 
@@ -288,14 +291,46 @@ def snapshot(root, apk, repositories=None):
         (destination / 'provenance.json').write_text(json.dumps(record, indent=2) + '\n')
 
 
-def verify_root(root, provenance):
-    root = Path(root)
-    record = json.loads(Path(provenance).read_text())
+def installed_packages(root):
     installed = {}
     for block in (root / 'lib/apk/db/installed').read_text().split('\n\n'):
         fields = dict(line.split(':', 1) for line in block.splitlines() if ':' in line)
         if 'P' in fields:
             installed[fields['P']] = fields.get('V')
+    return installed
+
+
+def verify_advanced_reboot(root, device):
+    root = Path(root)
+    installed = installed_packages(root)
+    app = 'luci-app-advanced-reboot'
+    packages = {app, 'luci-i18n-advanced-reboot-zh-cn'}
+    if device == 'homewrk':
+        leftovers = sorted(packages & installed.keys())
+        leftovers += sorted(str(path.relative_to(root)) for path in root.rglob('*advanced-reboot*'))
+        if leftovers:
+            raise ValueError('HomeWRK Advanced Reboot residue: ' + ', '.join(leftovers))
+        for path in (root / 'usr/share/luci/menu.d').glob('*.json'):
+            if any(route == 'admin/system/advanced-reboot' or route.startswith('admin/system/advanced-reboot/')
+                   for route in json.loads(path.read_text())):
+                raise ValueError('HomeWRK Advanced Reboot menu route: ' + str(path.relative_to(root)))
+    elif device == 'other':
+        if not all(installed.get(name) for name in packages):
+            raise ValueError('Supported model lost Advanced Reboot or its translation')
+        for name in (f'usr/share/luci/menu.d/{app}.json', f'usr/share/rpcd/acl.d/{app}.json',
+                     'www/luci-static/resources/view/system/advanced-reboot.js',
+                     'usr/lib/lua/luci/i18n/advanced-reboot.zh-cn.lmo'):
+            path = root / name
+            if not path.is_file() or not path.stat().st_size:
+                raise ValueError('Supported model lost Advanced Reboot file: ' + name)
+    else:
+        raise ValueError('Unknown Advanced Reboot device scope: ' + device)
+
+
+def verify_root(root, provenance):
+    root = Path(root)
+    record = json.loads(Path(provenance).read_text())
+    installed = installed_packages(root)
     world = (root / 'etc/apk/world').read_text().splitlines()
     for name in ('luci-app-homeproxy', 'luci-i18n-homeproxy-zh-cn', 'sing-box'):
         if not installed.get(name):
@@ -341,5 +376,7 @@ if __name__ == '__main__':
         snapshot(*sys.argv[2:])
     elif sys.argv[1] == 'verify-root':
         verify_root(*sys.argv[2:])
+    elif sys.argv[1] == 'verify-advanced-reboot':
+        verify_advanced_reboot(*sys.argv[2:])
     else:
         sys.exit('Unknown external package operation')

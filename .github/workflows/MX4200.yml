@@ -99,7 +99,8 @@ jobs:
           [[ "$SOURCE_REV" =~ ^r[1-9][0-9]*-[0-9a-f]+$ ]] || { echo "::error::Invalid official revision: $SOURCE_REV"; exit 1; }
           printf "%s\n" "$SOURCE_REV" > /build-record/source-revision.txt
           mountpoint $DK_BIN || { echo "::error::not mounted" >&2; exit 1; }
-          ln -s $DK_BIN bin && ln -s /dlcache dl
+          ln -sT "$DK_BIN" bin
+          ln -sT /dlcache dl
           cp -f feeds.conf.default feeds.conf
           ./scripts/feeds update -a >/dev/null || { echo "::error::feeds update failed"; exit 1; }
           ./scripts/feeds install -a >/dev/null || { echo "::error::feeds install failed"; exit 1; }

@@ -10,7 +10,7 @@ from revision_fixture import history, commit, git, revision
 class RevisionLogTests(unittest.TestCase):
     def test_nested_prepare_logs_and_failures(self):
         block = render(step('inputs')['run'], {})
-        for phase in ('', 'fetch', 'git-access', 'feed-revision', 'update', 'install', 'custom', 'edma', 'go-floor', 'defconfig', 'defaults'):
+        for phase in ('', 'fetch', 'git-access', 'feed-revision', 'link-bin', 'link-dl', 'update', 'install', 'custom', 'edma', 'go-floor', 'defconfig', 'defaults'):
             with self.subTest(phase=phase), tempfile.TemporaryDirectory() as tmp:
                 base = Path(tmp)
                 source = base / 'source'
@@ -60,6 +60,11 @@ class RevisionLogTests(unittest.TestCase):
                   command git "$@"
                 }
                 mountpoint() { :; }
+                ln() {
+                  printf 'link-%s\\n' "$3" >> "$LOG"
+                  [ "link-$3" != "$FAIL" ] || return 19
+                  command ln "$@"
+                }
                 make() { [ "$1" != "$FAIL" ] || return 19; }
                 python3() {
                   case "$1" in
@@ -70,7 +75,7 @@ class RevisionLogTests(unittest.TestCase):
                     *) return 99;;
                   esac
                 }
-                export -f git mountpoint make python3
+                export -f git mountpoint ln make python3
                 '''
                 phase_block = block.replace('/build-record/', str(base / 'build-record') + '/')
                 result = subprocess.run(['bash', '-eo', 'pipefail', '-c', stub + phase_block],
@@ -78,6 +83,9 @@ class RevisionLogTests(unittest.TestCase):
                 expected = 1 if phase in ('update', 'install') else (19 if phase else 0)
                 self.assertEqual(result.returncode, expected, result.stderr)
                 calls = (base / 'calls').read_text()
+                if phase.startswith('link-'):
+                    self.assertNotIn('feeds update', calls)
+                    self.assertEqual('link-dl' in calls, phase == 'link-dl')
                 if phase:
                     self.assertNotIn('\nkey\n', '\n' + calls)
                     self.assertFalse((base / 'output').exists())

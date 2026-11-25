@@ -170,7 +170,7 @@ def download(destination, record_path, record=None):
                         output.write(chunk)
                     # A bounded HTTPResponse.read() can return early EOF
                     # without raising IncompleteRead on a dropped connection.
-                    if length is not None and count < record['size']:
+                    if count < record['size']:
                         raise http.client.IncompleteRead(b'', record['size'] - count)
                 output.flush()
                 os.fsync(output.fileno())

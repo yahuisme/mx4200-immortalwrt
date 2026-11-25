@@ -4,12 +4,15 @@
 # Retained sysupgrade settings always take precedence over project defaults.
 [ ! -f /sysupgrade.tgz ] && [ ! -f /tmp/sysupgrade.tar ] || exit 0
 
-# Do not create or reset an unknown schema; retry once Aurora is initialized.
-[ "$(uci -q get aurora.theme)" = 'aurora' ] || exit 1
+. /lib/functions/mx4200-defaults.sh || exit 1
+mx_defaults_begin aurora aurora
+
+# Do not create or reset an unknown schema, or apply presets on a later boot.
+[ "$(mx_uci get aurora.theme)" = 'aurora' ] || exit 1
+mx_uci get aurora.theme.nav_type >/dev/null || exit 1
+mx_uci get aurora.theme.struct_radius_base >/dev/null || exit 1
 
 # Only these two first-install preferences differ from the official template.
-# Native boot commits the changes and removes this script after success.
-uci -q set aurora.theme.nav_type='sidebar' || exit 1
-uci -q set aurora.theme.struct_radius_base='0.125rem' || exit 1
-
-exit 0
+mx_uci set aurora.theme.nav_type='sidebar' || exit 1
+mx_uci set aurora.theme.struct_radius_base='0.125rem' || exit 1
+mx_defaults_commit aurora || exit 1

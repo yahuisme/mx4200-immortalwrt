@@ -1,5 +1,4 @@
 """HomeWRK excludes Advanced Reboot through native per-device packaging."""
-import json
 import os
 from pathlib import Path
 import re
@@ -146,11 +145,3 @@ class HomewrkPackagesTests(unittest.TestCase):
 
     def test_shared_overlay_cannot_reintroduce_removed_menu(self):
         self.assertFalse((ROOT / ('user/default/files/usr/share/luci/menu.d/' + APP + '.json')).exists())
-
-    def test_native_menu_order_template_preserves_every_other_field(self):
-        row = json.loads((ROOT / 'tests/fixtures/services-menu-contract.json').read_text())['menus'][APP + '.json']
-        source = json.loads(row['text'])
-        template = json.loads((ROOT / 'user/default/menus' / (APP + '.json')).read_text())
-        self.assertEqual(template['admin/system/advanced-reboot']['order'], 91)
-        template['admin/system/advanced-reboot']['order'] = source['admin/system/advanced-reboot']['order']
-        self.assertEqual(template, source)

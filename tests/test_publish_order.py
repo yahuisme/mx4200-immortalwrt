@@ -62,7 +62,9 @@ elif a[0] == 'api' and '/git/ref/tags/' in a[1]:
 elif a[:2] == ['release', 'create']:
     p.write_text(json.dumps(s)); sys.exit(19 if os.environ['FAULT']=='publish' else 0)
 elif a == ['api', '--paginate', '--slurp', 'repos/fixture/repo/releases?per_page=100']:
-    p.write_text(json.dumps(s)); print('[[]]'); sys.exit(0)
+    tags=[c[c.index('create')+1] for c in s['calls'] if c[:2] == ['release', 'create']]
+    rows=[dict(id=i, tag_name=tag, draft=False, prerelease=False, published_at='2026-01-01T00:00:00Z') for i, tag in enumerate(tags, 1)]
+    p.write_text(json.dumps(s)); print(json.dumps([rows])); sys.exit(0)
 elif a[:2] == ['release', 'delete']:
     p.write_text(json.dumps(s)); sys.exit(0)
 elif a == ['api', '--paginate'""")
@@ -97,7 +99,12 @@ docker_exec() {
     elif [ "$1" = python3 ] && [ "$2" = /cache-scripts/cache.py ]; then
         [ "$FAULT" != package ] || return 17
         mkdir -p "${5#/}"
-        truncate -s 100 "${5#/}/$3.tar.gz"
+        case "$3" in
+            toolchain) truncate -s 100 "${5#/}/toolchain.tar.zst";;
+            ccache) truncate -s 100 "${5#/}/ccache.tar.gz";;
+            dl) truncate -s 100 "${5#/}/dl.tar.gz";;
+            *) return 99;;
+        esac
     else
         "$@"
     fi
@@ -282,6 +289,9 @@ export -f make docker_exec sudo python3 git official_download
                     self.assertEqual(outcomes['Check bootstrap cache budget'], 'success', log)
                     self.assertEqual(outcomes['Save compiler bootstrap'], 'skipped', log)
                 elif fault in ('bootstrap_save', 'bootstrap_readback'):
+                    self.assertEqual(outcomes['Save toolchain cache'], 'success', log)
+                    self.assertEqual(outcomes['Save compiler bootstrap'], 'failure' if fault == 'bootstrap_save' else 'success', log)
+                    self.assertEqual(outcomes['Prune old bootstrap caches'], 'skipped' if fault == 'bootstrap_save' else 'failure', log)
                     self.assertEqual(outcomes['Check download cache budget'], 'skipped', log)
                     self.assertIn(3, {item['id'] for item in inventory['entries']}, log)
                     self.assertEqual(outcomes['Publish firmware and prune releases'], 'success', log)

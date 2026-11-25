@@ -19,35 +19,28 @@ WIFI = '&wifi {\n\tstatus = "okay";\n\n\tqcom,ath11k-calibration-variant = "Link
 
 
 class SettingsScriptTests(unittest.TestCase):
-    def run_wireless_settings(self, wireless):
+    fixture = ROOT / 'tests/fixtures/snapshot-source'
+    wifi_path = Path('package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc')
+
+    def run_wireless_settings(self, option, comment):
+        import shutil
         with tempfile.TemporaryDirectory() as d:
-            fixtures = {
-                'feeds/luci/applications/luci-app-advanced-reboot/root/usr/share/luci/menu.d/luci-app-advanced-reboot.json': '{}',
-                'feeds/luci/collections/luci/Makefile': 'LUCI_DEPENDS:=+luci-light\n',
-                'feeds/luci/modules/luci-mod-system/htdocs/flash.js': "const ip = '192.168.1.1';\n",
-                'package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc': wireless,
-                'package/base-files/files/bin/config_generate': "ipaddr='192.168.1.1'\n",
-            }
-            for relative, text in fixtures.items():
-                path = Path(d, relative)
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(text)
-            env = os.environ | {'WRT_IP': '192.168.10.1', 'WRT_SSID': 'MX4200',
-                                'WRT_WORD': '12345678'}
-            result = subprocess.run(['bash', str(ROOT / 'scripts/settings.sh')],
-                                    cwd=d, env=env, capture_output=True, text=True)
-            return result, Path(d, 'package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc').read_text()
+            shutil.copytree(self.fixture, d, dirs_exist_ok=True)
+            path = Path(d) / self.wifi_path
+            text = path.read_text()
+            text = re.sub(r'^set \$\{si\}\.' + option + r'=.*\n', '', text, flags=re.M)
+            path.write_text(text + comment)
+            return subprocess.run(['bash', str(ROOT / 'scripts/settings.sh')], cwd=d,
+                                  env=self.env, capture_output=True, text=True)
+
+    env = os.environ | {'WRT_IP': '192.168.10.1', 'WRT_SSID': 'MX4200', 'WRT_WORD': '12345678'}
 
     def assert_wireless_zero_match_rejected(self, option, requested):
-        defaults = {'ssid': 'ImmortalWrt', 'key': 'password', 'encryption': 'none'}
-        wireless = ''.join(f"set ${{si}}.{name}='{value}'\n"
-                           for name, value in defaults.items() if name != option)
-        for comment in ('', f"// set ${{si}}.{option}='{requested}'\n"):
+        for comment in ('', f"/*\nset ${{si}}.{option}='{requested}'\n*/\n"):
             with self.subTest(option=option, misleading_comment=bool(comment)):
-                result, _ = self.run_wireless_settings(wireless + comment)
+                result = self.run_wireless_settings(option, comment)
                 self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertIn(f'failed to set default wireless {option}', result.stderr)
-                self.assertNotIn('wifi default ssid/key has been set!', result.stdout)
 
     def test_wireless_ssid_zero_match_rejected(self):
         self.assert_wireless_zero_match_rejected('ssid', 'MX4200')
@@ -64,45 +57,24 @@ class SettingsScriptTests(unittest.TestCase):
         import shutil
 
         menu_path = 'feeds/luci/applications/luci-app-advanced-reboot/root/usr/share/luci/menu.d/luci-app-advanced-reboot.json'
-        source_menu = json.loads((ROOT / 'tests/fixtures/services-menu-contract.json').read_text())['menus']['luci-app-advanced-reboot.json']['text']
-        fixtures = {
-            menu_path: source_menu,
-            DTS: WIFI,
-            DTS.replace('v2.dts', 'v1.dts'): '#include "ipq8074-512m.dtsi"\n',
-            "feeds/luci/collections/luci/Makefile":
-                "LUCI_DEPENDS:=+luci-light +luci-app-package-manager\n# attendedsysupgrade\n",
-            "feeds/luci/collections/luci-light/Makefile":
-                "LUCI_DEPENDS:=+luci-mod-admin-full +luci-theme-bootstrap\n",
-            "feeds/luci/modules/luci-mod-admin-full/Makefile":
-                "LUCI_DEPENDS:=+luci-base +luci-mod-status +luci-mod-system +luci-mod-network\n",
-            "feeds/luci/modules/luci-mod-system/htdocs/flash.js":
-                "const ip = '192.168.1.1';\n",
-            "package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc":
-                "set ${si}.ssid='ImmortalWrt'\nset ${si}.key='password'\nset ${si}.encryption='none'\n",
-            "package/base-files/files/bin/config_generate":
-                "ipaddr='192.168.1.1'\n",
-            "package/base-files/files/etc/openwrt_release":
-                "DISTRIB_DESCRIPTION='%D %V %C'\nDISTRIB_RELEASE='%V'\n",
-            "package/base-files/files/usr/lib/os-release":
-                'PRETTY_NAME="%D %V"\nOPENWRT_RELEASE="%D %V %C"\n'
-                'VERSION="%V"\nVERSION_ID="%v"\n',
-            "package/base-files/files/etc/banner": "%D %V, %C\n",
-            "include/version.mk": "VERSION_DIST:=ImmortalWRT\n",
-        }
         version_files = (
             "package/base-files/files/etc/openwrt_release",
             "package/base-files/files/usr/lib/os-release",
             "package/base-files/files/etc/banner",
         )
         with tempfile.TemporaryDirectory() as d:
-            upstream = os.environ.get("SETTINGS_PRISTINE_SOURCE", str(ROOT / "tests/fixtures/snapshot-source"))
-            if upstream:
-                shutil.copytree(upstream, d, dirs_exist_ok=True)
-            else:
-                for relative, text in fixtures.items():
-                    path = Path(d, relative)
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_text(text)
+            upstream = os.environ.get('SETTINGS_PRISTINE_SOURCE', str(self.fixture))
+            shutil.copytree(upstream, d, dirs_exist_ok=True)
+            menu = Path(d, menu_path)
+            expected_menu = json.loads(menu.read_text())
+            expected_menu['admin/system/advanced-reboot']['new-upstream-metadata'] = {'preserve': True}
+            menu.write_text(json.dumps(expected_menu))
+            expected_menu['admin/system/advanced-reboot']['order'] = 91
+            flash = Path(d, 'feeds/luci/modules/luci-mod-system/htdocs/luci-static/resources/view/system/flash.js')
+            unrelated = "// Keep 192.168.1.1 and 192.168.50.1\n"
+            flash.write_text(flash.read_text() + unrelated)
+            cfg = Path(d, 'package/base-files/files/bin/config_generate')
+            cfg.write_text(cfg.read_text() + '\n# Keep 192.168.1.1\n')
             candidates = (DTS, 'target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8174-mx4200v2.dts')
             matches = [name for name in candidates if Path(d, name).is_file()]
             self.assertEqual(len(matches), 1, 'missing or ambiguous MX4200v2 DTS')
@@ -122,13 +94,14 @@ class SettingsScriptTests(unittest.TestCase):
             self.assertIn('PRETTY_NAME="%D %V"',
                           before["package/base-files/files/usr/lib/os-release"])
             version_before = Path(d, "include/version.mk").read_text()
-            env = os.environ | {"WRT_IP": "192.168.10.1", "WRT_THEME": "aurora",
-                                "WRT_SSID": "MX4200", "WRT_WORD": "12345678"}
+            env = self.env
             result = subprocess.run(["bash", str(ROOT / "scripts/settings.sh")],
                                     cwd=d, env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertEqual(Path(d, menu_path).read_bytes(),
-                             (ROOT / 'user/default/menus/luci-app-advanced-reboot.json').read_bytes())
+            self.assertEqual(json.loads(menu.read_text()), expected_menu)
+            self.assertTrue(flash.read_text().endswith(unrelated))
+            self.assertEqual(flash.read_text().count("'192.168.10.1', 'immortalwrt.lan'"), 3)
+            self.assertTrue(cfg.read_text().endswith('# Keep 192.168.1.1\n'))
             graph = {}
             for makefile in Path(d, 'feeds/luci').glob('*/*/Makefile'):
                 text = makefile.read_text().replace('\\\n', ' ')
@@ -290,7 +263,7 @@ console.log(JSON.stringify(Object.fromEntries(rows.map(row =>
             for p in ("feeds/luci/collections", "feeds/luci/modules/luci-mod-system",
                       "package/network/config/wifi-scripts/files/lib/wifi"):
                 Path(d, p).mkdir(parents=True)
-            env = os.environ | {"WRT_IP": "192.168.1.1", "WRT_THEME": "aurora",
+            env = os.environ | {"WRT_IP": "192.168.1.1",
                                 "WRT_SSID": "x", "WRT_WORD": "y"}
             r = subprocess.run(["bash", str(ROOT / "scripts/settings.sh")], cwd=d,
                                env=env, capture_output=True, text=True)

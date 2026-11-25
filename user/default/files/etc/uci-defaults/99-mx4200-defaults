@@ -10,10 +10,31 @@ if [ -f /sysupgrade.tgz ] || [ -f /tmp/sysupgrade.tar ]; then
     exit 0
 fi
 
-# 无线配置尚未生成时保留此脚本，避免部分设置后仍被 boot 删除。
-for radio in radio0 radio1 radio2; do
-    [ "$(uci -q get wireless.$radio)" = 'wifi-device' ] || exit 1
+. /lib/functions/mx4200-defaults.sh || exit 1
+mx_defaults_begin device system wireless
+
+# The native detector numbers the three ath11k PHYs on one platform device.
+# Check its actual band/path mapping; don't guess on an unrecognized layout.
+[ "$(mx_uci show wireless | grep -c '=wifi-device$')" = 3 ] || exit 1
+for entry in radio0:5g radio1:2g radio2:5g; do
+    radio=${entry%:*}
+    [ "$(mx_uci get "wireless.$radio")" = 'wifi-device' ] &&
+        [ "$(mx_uci get "wireless.$radio.type")" = mac80211 ] &&
+        [ "$(mx_uci get "wireless.$radio.band")" = "${entry#*:}" ] || exit 1
+    path="$(mx_uci get "wireless.$radio.path")" || exit 1
+    case "$radio:$path" in
+        radio0:*/c000000.wifi) base_path=$path ;;
+        radio1:"$base_path+1"|radio2:"$base_path+2") ;;
+        *) exit 1 ;;
+    esac
 done
+
+# The native generator records the first enabled channel of each PHY.
+# Do not infer the low/high 5 GHz split from enumeration alone.
+low="$(mx_uci get wireless.radio0.channel)" || exit 1
+high="$(mx_uci get wireless.radio2.channel)" || exit 1
+[ "$low" -ge 36 ] && [ "$low" -le 64 ] &&
+    [ "$high" -ge 100 ] && [ "$high" -le 177 ] || exit 1
 
 # ------------------------------------------------------------
 # 按机型设置默认主机名
@@ -30,47 +51,48 @@ esac
 case "$HOSTNAME" in
     MX4300|HomeWRK)
         for radio in radio0 radio1 radio2; do
-            [ "$(uci -q get wireless.default_$radio)" = 'wifi-iface' ] || exit 1
+            [ "$(mx_uci get wireless.default_$radio)" = 'wifi-iface' ] &&
+                [ "$(mx_uci get wireless.default_$radio.device)" = "$radio" ] || exit 1
         done
         for radio in radio0 radio1 radio2; do
-            uci -q set wireless.default_$radio.ssid='MX4300' || exit 1
+            mx_uci set wireless.default_$radio.ssid='MX4300' || exit 1
         done
         ;;
 esac
-uci -q set system.@system[0].hostname="$HOSTNAME" || exit 1
+mx_uci set "system.@system[0].hostname=$HOSTNAME" || exit 1
 
 
 # ------------------------------------------------------------
 # 默认时区：香港
 # ------------------------------------------------------------
-uci -q set system.@system[0].zonename='Asia/Hong_Kong' || exit 1
-uci -q set system.@system[0].timezone='HKT-8' || exit 1
+mx_uci set 'system.@system[0].zonename=Asia/Hong_Kong' || exit 1
+mx_uci set 'system.@system[0].timezone=HKT-8' || exit 1
 
 
 # ------------------------------------------------------------
 # 三频 Wi-Fi 默认（radio0=5G低段, radio1=2.4G, radio2=5G高段）
 # ------------------------------------------------------------
 # 5G 高段沿用 5G 低段的 htmode，保持两个 5G 频段模式一致
-MODE5G="$(uci -q get wireless.radio0.htmode || echo 'HE80')"
+MODE5G="$(mx_uci get wireless.radio0.htmode || echo 'HE80')"
 
 # radio0 = 5G 低段：信道 48（htmode 保持默认 80MHz），默认禁用，需要时手动开启
-uci -q set wireless.radio0.disabled='1' || exit 1
-uci -q set wireless.radio0.country='US' || exit 1
-uci -q set wireless.radio0.channel='48' || exit 1
-uci -q set wireless.radio0.txpower='25' || exit 1
+mx_uci set wireless.radio0.disabled='1' || exit 1
+mx_uci set wireless.radio0.country='US' || exit 1
+mx_uci set wireless.radio0.channel='48' || exit 1
+mx_uci set wireless.radio0.txpower='25' || exit 1
 
 # radio1 = 2.4G：信道 11（htmode 保持默认 20MHz）
-uci -q set wireless.radio1.disabled='0' || exit 1
-uci -q set wireless.radio1.country='US' || exit 1
-uci -q set wireless.radio1.channel='11' || exit 1
-uci -q set wireless.radio1.txpower='23' || exit 1
+mx_uci set wireless.radio1.disabled='0' || exit 1
+mx_uci set wireless.radio1.country='US' || exit 1
+mx_uci set wireless.radio1.channel='11' || exit 1
+mx_uci set wireless.radio1.txpower='23' || exit 1
 
 # radio2 = 5G 高段：信道 149，开启
-uci -q set wireless.radio2.disabled='0' || exit 1
-uci -q set wireless.radio2.country='US' || exit 1
-uci -q set wireless.radio2.channel='149' || exit 1
-uci -q set wireless.radio2.htmode="$MODE5G" || exit 1
-uci -q set wireless.radio2.txpower='25' || exit 1
+mx_uci set wireless.radio2.disabled='0' || exit 1
+mx_uci set wireless.radio2.country='US' || exit 1
+mx_uci set wireless.radio2.channel='149' || exit 1
+mx_uci set wireless.radio2.htmode="$MODE5G" || exit 1
+mx_uci set wireless.radio2.txpower='25' || exit 1
 
 
-exit 0
+mx_defaults_commit system wireless || exit 1

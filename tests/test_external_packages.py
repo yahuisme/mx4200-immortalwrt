@@ -312,7 +312,10 @@ class ExternalPackageTests(unittest.TestCase):
             for name in ('base-files', 'libc', 'kernel'):
                 (root / (name + '.version')).write_text('1-rc2\n')
             for name, body in (
-                ('bin/apk', 'printf "<%s>\\n" "$@" >> args; echo apk >> events'),
+                ('bin/apk', 'printf "<%s>\\n" "$@" >> args; echo apk >> events; '
+                            'case " $* " in *" del "*) [ "${FAIL_DEL:-no}" = yes ] && exit 9; '
+                            'rm -f device/lib/apk/db/installed; cp homewrk-db device/lib/apk/db/installed; '
+                            'find device -name "*advanced-reboot*" -type f -delete;; esac'),
                 ('hash', 'sha256sum | cut -d " " -f1'),
             ):
                 path = root / name
@@ -327,9 +330,11 @@ class ExternalPackageTests(unittest.TestCase):
                               '    Path(".external-packages/files/etc/apk/keys/eamonxg.pem").touch()\n'
                               '    with open("events", "a") as f: f.write("refresh\\n")\n'
                               'else:\n'
+                              '    if sys.argv[1] == "verify-advanced-reboot":\n'
+                              f'        sys.exit(__import__("subprocess").call([sys.executable, {str(ROOT / "scripts/external_packages.py")!r}, *sys.argv[1:]]))\n'
                               '    assert Path(sys.argv[2], "etc/apk/keys/eamonxg.pem").is_file()\n'
                               '    with open("events", "a") as f: f.write("verify\\n")\n')
-            for relative in ('package/Makefile', 'include/rootfs.mk'):
+            for relative in ('package/Makefile', 'include/rootfs.mk', 'include/image.mk'):
                 path = root / relative
                 text = path.read_text().replace('/cache-scripts/external_packages.py', str(script))
                 if relative == 'include/rootfs.mk':
@@ -349,6 +354,8 @@ class ExternalPackageTests(unittest.TestCase):
                 'CP:=cp -a\nXARGS:=xargs -r\nfile_copy = cp -a $(1) $(2)\n'
                 'include package/Makefile\n'
                 'mkfs_cur_target_dir:=device\nmkfs_packages_add:=native-extra\n'
+                'ROOTFS_ID/linksys_mx4200v1:=test\nROOTFS_ID/linksys_homewrk:=homewrk-test\n'
+                'mkfs_packages_remove = $(if $(filter homewrk-test,$*),luci-app-advanced-reboot luci-i18n-advanced-reboot-zh-cn)\n'
                 + device + '\nFORCE:\n'
                 'ramboot:\n\tmkdir -p ram\n\t$(call apk,ram) add luci\n\t$(call prepare_rootfs,ram)\n'
                 # All tool/index inputs are prebuilt for this make test.
@@ -375,6 +382,20 @@ class ExternalPackageTests(unittest.TestCase):
             self.assertFalse((root / 'events').exists())
             self.assertTrue((root / 'common').is_dir(), 'failed prerequisite ran native rm')
 
+            app = 'luci-app-advanced-reboot'
+            advanced = (f'usr/share/luci/menu.d/{app}.json', f'usr/share/rpcd/acl.d/{app}.json',
+                        'www/luci-static/resources/view/system/advanced-reboot.js',
+                        'usr/lib/lua/luci/i18n/advanced-reboot.zh-cn.lmo')
+            common = root / 'root.orig-test'
+            db = common / 'lib/apk/db/installed'
+            db.parent.mkdir(parents=True)
+            (root / 'homewrk-db').write_text('P:base-files\nV:1\n')
+            db.write_text((root / 'homewrk-db').read_text() + '\n' +
+                          ''.join(f'P:{p}\nV:1\n\n' for p in (app, 'luci-i18n-advanced-reboot-zh-cn')))
+            for name in advanced:
+                path = common / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('native fixture\n')
             for target in ('target-dir-test', 'ramboot'):
                 (root / 'args').unlink()
                 (root / 'events').unlink(missing_ok=True)
@@ -389,6 +410,25 @@ class ExternalPackageTests(unittest.TestCase):
                 target_root = root / ('device' if formal else 'ram')
                 self.assertEqual((target_root / helper().RUNTIME_FEEDS).is_file(), formal)
                 self.assertEqual((target_root / 'etc/apk/keys/eamonxg.pem').is_file(), formal)
+
+            self.assertEqual(run('target-dir-homewrk-test').returncode, 0)
+            result = run('target-dir-homewrk-test', FAIL_DEL='yes')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('HomeWRK Advanced Reboot residue', result.stderr)
+            orphan = root / 'files' / advanced[0]
+            orphan.parent.mkdir(parents=True)
+            orphan.write_text('orphan menu from common overlay')
+            result = run('target-dir-homewrk-test')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(advanced[0], result.stderr)
+            orphan.unlink()
+            orphan.with_name('renamed.json').write_text('{"admin/system/advanced-reboot": {"order": 91}}')
+            result = run('target-dir-homewrk-test')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('HomeWRK Advanced Reboot menu route', result.stderr)
+            result = run('target-dir-unknown')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('Unknown Advanced Reboot device scope', result.stderr)
 
     def test_native_stable_recipe_stops_before_add_when_signed_refresh_fails(self):
         """Execute native add lines with a harmless APK boundary, no compilation."""

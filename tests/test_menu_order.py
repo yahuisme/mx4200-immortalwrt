@@ -96,7 +96,9 @@ class MenuOrderTests(unittest.TestCase):
         self.source = source_menus(STABLE_LUCI)
         self.overlay = menu_files(MENUS)
         # Advanced Reboot's order is installed by its own package, not shared files/.
-        self.overlay.update(menu_files(ROOT / 'user/default/menus'))
+        reboot = 'luci-app-advanced-reboot.json'
+        self.overlay[reboot] = copy.deepcopy(self.source[reboot])
+        self.overlay[reboot]['admin/system/advanced-reboot']['order'] = 91
 
     def assert_contract(self, overlay, installed, device='mx4200v1', installed_root=False):
         # HomeProxy already supplies order 10. A same-name overlay would replace

@@ -38,6 +38,7 @@ HomeWRK 临时镜像跟随 ImmortalWrt 最新官方稳定版，原样随 Release
 HomeProxy 和 sing-box 从 [yahuisme/packages](https://github.com/yahuisme/packages) 的 `main` 分支构建。HomeProxy 默认未配置节点，使用前需添加节点或导入订阅，并选用节点。
 
 Aurora 主题和配置插件使用 [Aurora 项目的签名 APK](https://github.com/eamonxg/luci-theme-aurora)，可在 **系统 → 软件包** 刷新列表并更新。
+保留配置升级时，本项目不会重写 Aurora 偏好；若新版 Aurora 自行迁移配置格式，可能按其上游模板重置主题设置，建议升级前保存自定义配置。
 
 ## 默认设置
 
@@ -55,6 +56,7 @@ Aurora 主题和配置插件使用 [Aurora 项目的签名 APK](https://github.c
 | 配置功率 | 23 dBm | 25 dBm | 25 dBm |
 
 三个频段均使用 `US` 区域和 WPA2-PSK（CCMP）。
+若首次启动未能识别预期的三频布局，系统会保留原生配置；之后请在 LuCI 手动调整，不会在后续重启时覆盖已保存的设置。
 
 ## 构建与发布
 

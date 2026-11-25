@@ -144,7 +144,7 @@ class DownloadTests(unittest.TestCase):
                 official.verify(dest / official.NAME, record)
 
     def test_bad_download_preserves_existing_bytes_and_record_without_retry(self):
-        for label, data in [('hash', b'X' * len(DATA)), ('short', DATA[:-1]),
+        for label, data in [('hash', b'X' * len(DATA)),
                             ('oversized', DATA + b'X')]:
             with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
                 dest = Path(directory)
@@ -171,17 +171,34 @@ class DownloadTests(unittest.TestCase):
                              [record_for()['url']] * 2)
 
     def test_truncated_http_image_retries_same_version(self):
-        class TruncatedResponse(io.BytesIO):
-            headers = {'Content-Length': str(len(DATA))}
+        class Response(io.BytesIO):
+            def __init__(self, headers):
+                super().__init__(DATA[:-1])
+                self.headers = headers
 
-        with tempfile.TemporaryDirectory() as directory, \
-                patch.object(official, 'resolve', return_value=record_for()) as resolve, \
-                patch('urllib.request.urlopen', side_effect=[TruncatedResponse(DATA[:-1]), io.BytesIO(DATA)]) as request, \
-                patch('time.sleep'):
-            official.download(directory, Path(directory) / 'record.json')
-            self.assertEqual(resolve.call_count, 1)
-            self.assertEqual([call.args[0] for call in request.call_args_list], [record_for()['url']] * 2)
-            self.assertEqual((Path(directory) / official.NAME).read_bytes(), DATA)
+        for headers in ({}, {'Content-Length': str(len(DATA))}):
+            with self.subTest(headers=headers), tempfile.TemporaryDirectory() as directory, \
+                    patch.object(official, 'resolve', return_value=record_for()) as resolve, \
+                    patch('urllib.request.urlopen', side_effect=[Response(headers), io.BytesIO(DATA)]) as request, \
+                    patch('time.sleep'):
+                official.download(directory, Path(directory) / 'record.json')
+                self.assertEqual(resolve.call_count, 1)
+                self.assertEqual([call.args[0] for call in request.call_args_list], [record_for()['url']] * 2)
+                self.assertEqual((Path(directory) / official.NAME).read_bytes(), DATA)
+
+    def test_persistent_short_read_has_bounded_retries_and_preserves_previous_outputs(self):
+        import http.client
+        record = record_for()
+        with tempfile.TemporaryDirectory() as directory, patch('time.sleep'), \
+                patch('urllib.request.urlopen', side_effect=lambda *a, **kw: io.BytesIO(DATA[:-1])) as request:
+            image, proof = Path(directory) / official.NAME, Path(directory) / 'record.json'
+            image.write_bytes(b'previous image')
+            proof.write_text('previous proof')
+            with self.assertRaises(http.client.IncompleteRead):
+                official.download(directory, proof, record)
+            self.assertEqual([c.args[0] for c in request.call_args_list], [record['url']] * 3)
+            self.assertEqual((image.read_bytes(), proof.read_text()), (b'previous image', 'previous proof'))
+            self.assertEqual(set(Path(directory).iterdir()), {image, proof})
 
     def test_content_length_mismatch_rejected_before_read(self):
         response = io.BytesIO(DATA)
