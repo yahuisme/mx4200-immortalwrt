@@ -167,6 +167,11 @@ bash() {
     esac
 }
 python3() {
+    if [ "$1" = /cache-scripts/ath11k_backports.py ]; then
+        [ "$#" = 2 ] && [ "$2" = "$DK_OPENWRT" ] || return 99
+        printf 'ath11k\\n' >> "$LOG"
+        return 0
+    fi
     if [ "$1" = /cache-scripts/homewrk_dts.py ]; then
         printf 'homewrk\\n' >> "$LOG"
         shift
@@ -188,7 +193,7 @@ python3() {
                                     cwd=root, env=env, text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual((root / 'calls').read_text().splitlines(),
-                             ['preflight', 'homewrk', 'ttyd', 'packages', 'settings'])
+                             ['preflight', 'homewrk', 'ttyd', 'ath11k', 'packages', 'settings'])
             selector = r'qcom,(?:ath11k-)?calibration-variant\s*=\s*"[^"]+";'
             self.assertEqual(re.findall(selector, dts.read_text()),
                              re.findall(selector, original_dts))

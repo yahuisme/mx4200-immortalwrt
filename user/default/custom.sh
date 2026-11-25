@@ -5,6 +5,7 @@ export WRT_SSID=MX4200 WRT_WORD=12345678 WRT_IP=192.168.10.1
 python3 /cache-scripts/external_packages.py preflight "$DK_OPENWRT"
 python3 /cache-scripts/homewrk_dts.py "$DK_OPENWRT"
 bash /cache-scripts/ttyd_compat.sh "$DK_OPENWRT"
+python3 /cache-scripts/ath11k_backports.py "$DK_OPENWRT"
 # Keep regulatory reads and writes on the same extracted caldata file.
 python3 - "$DK_OPENWRT" <<'PY'
 from pathlib import Path

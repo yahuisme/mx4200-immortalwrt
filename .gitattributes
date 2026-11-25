@@ -3,3 +3,4 @@
 *.defaults text eol=lf
 # Preserve exact upstream patch bytes, including whitespace in diff context.
 scripts/ttyd-patches/*.patch text eol=lf whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+scripts/ath11k-patches/*.patch text eol=lf whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
