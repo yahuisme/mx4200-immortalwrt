@@ -109,7 +109,6 @@ jobs:
           cp -r "$DK_PROFILE/files/" .
           # Prepare signed external APKs and device defaults before defconfig.
           bash $DK_PROFILE/custom.sh
-          python3 /cache-scripts/edma_rx_memory.py "$DK_OPENWRT" > /build-record/edma-rx.json
           python3 /cache-scripts/check_go.py "$DK_OPENWRT" /usr/lib/go
           # Log actual source/feed revisions after customization; fail on broken Git access.
           revision=$(git rev-parse --verify HEAD)

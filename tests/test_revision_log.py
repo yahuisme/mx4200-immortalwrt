@@ -10,7 +10,7 @@ from revision_fixture import history, commit, git, revision
 class RevisionLogTests(unittest.TestCase):
     def test_nested_prepare_logs_and_failures(self):
         block = render(step('inputs')['run'], {})
-        for phase in ('', 'fetch', 'git-access', 'feed-revision', 'link-bin', 'link-dl', 'update', 'install', 'custom', 'edma', 'go-floor', 'defconfig', 'defaults'):
+        for phase in ('', 'fetch', 'git-access', 'feed-revision', 'link-bin', 'link-dl', 'update', 'install', 'custom', 'go-floor', 'defconfig', 'defaults'):
             with self.subTest(phase=phase), tempfile.TemporaryDirectory() as tmp:
                 base = Path(tmp)
                 source = base / 'source'
@@ -22,6 +22,12 @@ class RevisionLogTests(unittest.TestCase):
                 history(source)
                 feed = base / 'official-feed'
                 history(feed)
+                driver = Path('target/linux/qualcommax/files/drivers/net/ethernet/qualcomm')
+                (source / driver).mkdir(parents=True)
+                native_edma = {'qca_edma.c': b'/* native driver fixture */\n',
+                               'qca_edma.h': b'#define EDMA_RX_RING_SIZE\t2048\n'}
+                for name, content in native_edma.items():
+                    (source / driver / name).write_bytes(content)
                 (source / 'feeds.conf.default').write_text('# fixture\n')
                 (profile / 'config.diff').write_text('CONFIG_TEST=y\n')
                 (profile / 'custom.sh').write_text('[ "$FAIL" != custom ] || exit 19\n')
@@ -68,11 +74,10 @@ class RevisionLogTests(unittest.TestCase):
                 make() { [ "$1" != "$FAIL" ] || return 19; }
                 python3() {
                   case "$1" in
-                    */edma_rx_memory.py) [ "$FAIL" != edma ] || return 19;;
                     */check_go.py) [ "$FAIL" != go-floor ] || return 19;;
                     */check_defaults.py) [ "$FAIL" != defaults ] || return 19;;
                     */cache.py) printf 'key\\n' >> "$LOG"; printf 'fixture-key\\n';;
-                    *) return 99;;
+                    *) printf 'Unexpected Python helper: %s\\n' "$1" >&2; return 99;;
                   esac
                 }
                 export -f git mountpoint ln make python3
@@ -91,6 +96,8 @@ class RevisionLogTests(unittest.TestCase):
                     self.assertFalse((base / 'output').exists())
                 else:
                     self.assertIn(env['SOURCE_SHA'], result.stdout)
+                    for name, content in native_edma.items():
+                        self.assertEqual((source / driver / name).read_bytes(), content)
                     self.assertEqual((base / 'build-record/source-revision.txt').read_text().strip(), 'r2-' + git(source, 'rev-parse', '--short', 'HEAD'))
                     self.assertEqual(revision(source), 'r2-' + git(source, 'rev-parse', '--short', 'HEAD'))
                     self.assertEqual((base / 'build-record/source-ref.txt').read_text().strip(), 'refs/heads/master')
