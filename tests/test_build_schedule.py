@@ -15,15 +15,15 @@ class BuildScheduleTests(unittest.TestCase):
     def setUpClass(cls):
         cls.workflow = yaml.safe_load(WORKFLOW.read_text())
 
-    def test_direct_daily_cron_at_hong_kong_midnight(self):
+    def test_direct_daily_cron_at_six_hong_kong_time(self):
         triggers = self.workflow.get('on', self.workflow.get(True))
         self.assertEqual(triggers['schedule'], [
-            {'cron': '0 0 * * *', 'timezone': 'Asia/Hong_Kong'}])
+            {'cron': '0 6 * * *', 'timezone': 'Asia/Hong_Kong'}])
         self.assertEqual(set(triggers), {'schedule', 'workflow_dispatch'})
-        local = datetime(2026, 12, 1, tzinfo=ZoneInfo('Asia/Hong_Kong'))
+        local = datetime(2026, 12, 1, 6, tzinfo=ZoneInfo('Asia/Hong_Kong'))
         utc = local.astimezone(ZoneInfo('UTC'))
-        self.assertEqual((utc.month, utc.day, utc.hour, utc.minute), (11, 30, 16, 0))
-        self.assertIn('每天香港时间 00:00 自动构建', (ROOT / 'README.md').read_text())
+        self.assertEqual((utc.month, utc.day, utc.hour, utc.minute), (11, 30, 22, 0))
+        self.assertIn('每天香港时间 06:00 自动构建', (ROOT / 'README.md').read_text())
 
     def test_build_has_no_daily_date_gate(self):
         self.assertEqual(set(self.workflow['jobs']), {'build'})
