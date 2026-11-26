@@ -37,7 +37,7 @@ def published_at(row):
     return datetime.fromisoformat(value)
 
 
-def select(pages, mx4200, mx4300):
+def select(pages, mx4200, mx4300, mx4200_id, mx4300_id):
     if not isinstance(pages, list) or not pages or any(not isinstance(page, list) for page in pages):
         raise ValueError('Invalid Release inventory pages')
     # Match per_page=100 in the workflow. A premature short or empty page
@@ -58,10 +58,12 @@ def select(pages, mx4200, mx4300):
             inventory[tag] = row
 
     current = {}
-    for series, tag in (('MX4200', mx4200), ('MX4300', mx4300)):
+    for series, tag, verified_id in (('MX4200', mx4200, mx4200_id), ('MX4300', mx4300, mx4300_id)):
         row, parsed = inventory.get(tag), production_tag(tag)
         if row is None or row['draft'] or row['prerelease'] or parsed is None or parsed[0] != series:
             raise ValueError('Current publication missing from inventory: ' + tag)
+        if row['id'] != verified_id:
+            raise ValueError('Current publication replaced in inventory: ' + tag)
         current[series] = (published_at(row), parsed[1])
 
     old = []
@@ -79,8 +81,9 @@ def select(pages, mx4200, mx4300):
 
 
 if __name__ == '__main__':
+    mx4200, mx4300, mx4200_id, mx4300_id = sys.argv[1:]
     try:
-        old_tags = select(json.load(sys.stdin), *sys.argv[1:])
+        old_tags = select(json.load(sys.stdin), mx4200, mx4300, int(mx4200_id), int(mx4300_id))
     except ValueError as error:
         sys.exit(str(error))
     print('\n'.join(old_tags))

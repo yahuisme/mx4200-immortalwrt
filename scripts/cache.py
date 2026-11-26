@@ -168,14 +168,15 @@ def restore(root, cache, expected):
         elif p.exists():
             shutil.rmtree(p)
     archive = toolchain_archive.candidate(cache)
-    if archive is not None:
-        if (cache / 'key').read_text().strip() != expected:
-            raise ValueError('toolchain key mismatch')
-        toolchain_archive.extract(archive, root)
-        validate_artifacts(root)
-        print('exact toolchain restored')
-    else:
+    if archive is None:
         print('cold toolchain')
+        return False
+    if (cache / 'key').read_text().strip() != expected:
+        raise ValueError('toolchain key mismatch')
+    toolchain_archive.extract(archive, root)
+    validate_artifacts(root)
+    print('exact toolchain restored')
+    return True
 
 
 def pack(root, cache, kind, expected):

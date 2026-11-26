@@ -122,7 +122,7 @@ class ToolchainArchiveTests(unittest.TestCase):
     def test_recovery_rechecks_complete_restored_root_sets(self):
         # Keep the post-extract health boundary independent of header validation.
         self.archive_entries()
-        def incomplete_restore(root, archive, expected):
+        def incomplete_extract(archive, root):
             for name in ('build_dir/host', 'staging_dir/host',
                          'build_dir/toolchain-a', 'staging_dir/toolchain-b'):
                 (root / name).mkdir(parents=True)
@@ -130,11 +130,12 @@ class ToolchainArchiveTests(unittest.TestCase):
             binary.parent.mkdir()
             binary.write_bytes(b'not executed')
             binary.chmod(0o755)
-        with patch.object(cache, 'restore', side_effect=incomplete_restore):
+        with patch.object(cache.toolchain_archive, 'extract', side_effect=incomplete_extract) as extract:
             import contextlib
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
                 cache_recovery.restore('toolchain', self.root, self.archive, 'matched', 'matched', 'success')
+            extract.assert_called_once()
         self.assertEqual(output.getvalue(), 'hit=false\nmatched-key=\npoisoned=true\n')
         self.assertEqual(list(self.root.iterdir()), [])
         self.assertEqual(list(self.archive.iterdir()), [])
@@ -144,6 +145,27 @@ class ToolchainArchiveTests(unittest.TestCase):
         result = self.cli()
         self.assertEqual(result.stdout, 'hit=true\nmatched-key=matched\npoisoned=false\n', result.stderr)
         self.assertRegex(result.stderr, r'Toolchain archive timing: format=gzip validate=\d+\.\d+s extract=\d+\.\d+s')
+
+    def test_missing_snapshot_at_restore_is_not_an_effective_hit(self):
+        from contextlib import redirect_stderr, redirect_stdout
+
+        self.archive_entries()
+        snapshot = self.archive / 'toolchain.tar.gz'
+        restore = cache.restore
+
+        def archive_disappeared(*args):
+            snapshot.unlink()
+            return restore(*args)
+
+        outputs, diagnostics = io.StringIO(), io.StringIO()
+        with patch.object(cache, 'restore', side_effect=archive_disappeared) as owner, \
+                redirect_stdout(outputs), redirect_stderr(diagnostics):
+            cache_recovery.restore('toolchain', self.root, self.archive, 'matched', 'matched', 'success')
+        owner.assert_called_once()
+        self.assertEqual(outputs.getvalue(), 'hit=false\nmatched-key=\npoisoned=true\n')
+        self.assertIn('Cache restore rejected; cold toolchain', diagnostics.getvalue())
+        self.assertEqual(list(self.root.iterdir()), [])
+        self.assertEqual(list(self.archive.iterdir()), [])
 
     def test_gzip_trailer_rejected_before_native_extraction(self):
         archive = self.archive / 'toolchain.tar.gz'

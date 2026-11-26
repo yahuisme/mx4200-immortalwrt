@@ -11,6 +11,7 @@ import unittest
 from test_cache_workflow import ROOT, step
 
 GROUPS = {'mx4200': 'MX4200', 'mx4300-homewrk': 'MX4300'}
+RELEASE_IDS = {'mx4200': 100001, 'mx4300-homewrk': 100002}
 TAG_SUFFIX = '-ImmortalWrt-r123-26.11.24_00.00.00'
 OLD_MX4200 = 'MX4200-ImmortalWrt-r100-26.11.22_00.00.00'
 OLD_MX4300 = 'MX4300-ImmortalWrt-r100-26.11.22_00.00.00'
@@ -55,7 +56,8 @@ if a[0] == 'api' and '/releases/tags/' in a[1]:
     if mode == 'digest': assets[0]['digest'] = 'sha256:wrong'
     if mode in ('no-digest', 'download-corrupt', 'download-failed'):
         for asset in assets: asset.pop('digest')
-    print(json.dumps(dict(tag_name='wrong' if mode == 'tag' else tag,
+    release_id = json.loads(os.environ['FIXTURE_RELEASE_IDS'])[group]
+    print(json.dumps(dict(id=release_id, tag_name='wrong' if mode == 'tag' else tag,
                           name='wrong' if mode in ('title','title-error') else tag,
                           target_commitish=os.environ['GITHUB_SHA'], draft=mode == 'draft',
                           prerelease=mode == 'prerelease', assets=assets))); sys.exit(0)
@@ -79,6 +81,10 @@ raise SystemExit('unexpected gh invocation: '+repr(a))
 
 
 def row(tag, id, **kwargs):
+    for group, device in GROUPS.items():
+        if tag == device + TAG_SUFFIX:
+            id = RELEASE_IDS[group]
+            break
     return dict(tag_name=tag, id=id, draft=False, prerelease=False,
                 published_at='2026-11-24T00:01:00Z' if tag.endswith(TAG_SUFFIX)
                 else '2026-11-23T00:00:00Z') | kwargs
@@ -148,7 +154,8 @@ def replay(base, pages, mode='fresh'):
     (base/'rows').write_text(json.dumps(pages))
     result = subprocess.run(['bash','-eo','pipefail','-c',step('Publish firmware and prune releases')['run']],
         cwd=base, env=dict(os.environ, PATH=str(base)+':'+os.environ['PATH'], STUB_ROOT=str(base),
-                          CASE=mode, GITHUB_SHA='a'*40, GITHUB_REPOSITORY='fixture/repo'),
+                          CASE=mode, GITHUB_SHA='a'*40, GITHUB_REPOSITORY='fixture/repo',
+                          FIXTURE_RELEASE_IDS=json.dumps(RELEASE_IDS)),
         text=True, capture_output=True)
     calls = [json.loads(line) for line in (base/'calls').read_text().splitlines()]
     return result, calls

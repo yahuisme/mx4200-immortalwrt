@@ -1,7 +1,7 @@
 # shellcheck shell=ash
 # Private UCI work for MX4200 first-boot scripts. They run in boot's subshell.
 mx_defaults_finish() {
-    rm -rf "$mx_stage"
+    [ "$mx_keep_stage" = 1 ] || rm -rf "$mx_stage"
     [ "$1" -eq 0 ] || echo 'MX4200 defaults: presets not applied' >&2
 }
 
@@ -18,6 +18,7 @@ mx_defaults_begin() {
     fi
 
     mx_stage="$(mktemp -d /etc/config/.mx4200-XXXXXX)" || exit 1
+    mx_keep_stage=0
     trap 'mx_defaults_finish "$?"' EXIT
     mkdir "$mx_stage/delta" "$mx_stage/next" || exit 1
     for name in "$@"; do
@@ -55,8 +56,10 @@ mx_defaults_commit() {
         if ! mv -f "$mx_stage/next/$name" "/etc/config/$name"; then
             for rollback in "$@"; do
                 [ "$rollback" != "$name" ] || break
-                mv -f "$mx_stage/$rollback" "/etc/config/$rollback" ||
-                    echo "MX4200 defaults: failed to restore $rollback" >&2
+                if ! mv -f "$mx_stage/$rollback" "/etc/config/$rollback"; then
+                    mx_keep_stage=1
+                    echo "MX4200 defaults: failed to restore $rollback; original retained at $mx_stage/$rollback" >&2
+                fi
             done
             return 1
         fi

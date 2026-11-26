@@ -61,8 +61,8 @@ def restore(kind, root, archive, expected, restored, outcome):
                 keyfile.read_text()
                 with redirect_stdout(sys.stderr):
                     if kind == 'toolchain':
-                        toolchain.restore(root, archive, expected)
-                        toolchain.validate_artifacts(root)
+                        if not toolchain.restore(root, archive, expected):
+                            raise ValueError('toolchain archive disappeared before restore')
                     else:
                         bootstrap.restore(root, archive, expected)
             else:

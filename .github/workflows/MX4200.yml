@@ -448,6 +448,7 @@ jobs:
         shopt -s nullglob
         # A single build supplies two independent releases. Keep MX4200 as the
         # repository's latest download; the second group has its own tag.
+        declare -A tags release_ids
         for GROUP in mx4200 mx4300-homewrk; do
           current_main
           VERSION="$(cat "firmware/$GROUP/version.txt")"
@@ -456,14 +457,14 @@ jobs:
           LATEST=false
           [ "$GROUP" != mx4200 ] || LATEST=true
           gh release create "$VERSION" "${IMAGES[@]}" --target "$GITHUB_SHA" --title "$RELEASE_TITLE" --notes-file "firmware/$GROUP/release-notes.md" --latest="$LATEST" --prerelease=false --draft=false
-          python3 scripts/verify_release.py --group "$GROUP" "$VERSION" "${IMAGES[@]}"
+          release_ids[$GROUP]=$(python3 scripts/verify_release.py --group "$GROUP" "$VERSION" "${IMAGES[@]}")
+          tags[$GROUP]=$VERSION
         done
         # Plan retention for both verified groups from the same inventory.
         current_main
-        MX4200_TAG="$(cat firmware/mx4200/version.txt)"
-        MX4300_TAG="$(cat firmware/mx4300-homewrk/version.txt)"
         if releases=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100") &&
-          old_tags=$(python3 scripts/release_retention.py "$MX4200_TAG" "$MX4300_TAG" <<< "$releases"); then
+          old_tags=$(python3 scripts/release_retention.py "${tags[mx4200]}" "${tags[mx4300-homewrk]}" \
+            "${release_ids[mx4200]}" "${release_ids[mx4300-homewrk]}" <<< "$releases"); then
           while IFS= read -r tag; do
             [ -n "$tag" ] || continue
             current_main

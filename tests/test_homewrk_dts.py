@@ -297,6 +297,34 @@ class HomewrkDtsTests(unittest.TestCase):
                             prepare(tmp)
                         self.assertEqual(path.read_text(), changed)
 
+    def test_port_is_not_reopened_after_the_reviewed_mac_mapping(self):
+        from scripts.homewrk_dts import prepare
+        for layout in ('stable', 'newer'):
+            with self.subTest(layout=layout), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                stable = layout == 'stable'
+                relative = ('target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8174-homewrk.dts'
+                            if stable else DTS)
+                path = root / relative
+                path.parent.mkdir(parents=True)
+                fixture = FIXTURE.with_name('stable-homewrk.dts') if stable else FIXTURE
+                path.write_text(fixture.read_text())
+                prepare(root)
+                original = path.read_text()
+                prefix = 'dp' if stable else 'swport'
+                # A reference in a quoted diagnostic string is not a node.
+                quoted = original + f'\n/ {{ model = "fixture: &{prefix}2 {{"; }};\n'
+                path.write_text(quoted)
+                prepare(root)
+                self.assertEqual(path.read_text(), quoted)
+                for separator in ('\n', ' '):
+                    with self.subTest(separator=separator):
+                        changed = original.rstrip() + separator + f'&{prefix}2\n{{\n\tstatus = "okay";\n}};\n'
+                        path.write_text(changed)
+                        with self.assertRaisesRegex(ValueError, 'Ethernet MAC mapping changed'):
+                            prepare(root)
+                        self.assertEqual(path.read_text(), changed)
+
     def test_commented_mac_and_nand_contracts_fail_before_writes(self):
         from scripts.homewrk_dts import ANCHOR, GUARD, prepare
         for layout in ('stable', 'newer'):

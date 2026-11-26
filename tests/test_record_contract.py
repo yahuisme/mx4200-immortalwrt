@@ -143,7 +143,7 @@ class RecordContract(unittest.TestCase):
     def test_readback_contract(self):
         helper = module('verify_release')
         for fault in ('ok', 'missing', 'extra', 'duplicate', 'name', 'size', 'state', 'digest',
-                      'tag', 'title', 'missing-title', 'draft', 'prerelease',
+                      'tag', 'title', 'missing-title', 'missing-id', 'invalid-id', 'draft', 'prerelease',
                       'download', 'download-wrong', 'download-failure'):
             with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
                 base = Path(tmp)
@@ -151,7 +151,7 @@ class RecordContract(unittest.TestCase):
                 digest = 'sha256:' + hashlib.sha256(b'fixture image').hexdigest()
                 assets = [dict(id=i, name=p.name, size=p.stat().st_size, state='uploaded', digest=digest)
                           for i, p in enumerate(paths, 1)]
-                release = dict(tag_name='tag/a', name='tag/a', draft=False, prerelease=False, assets=assets)
+                release = dict(id=41, tag_name='tag/a', name='tag/a', draft=False, prerelease=False, assets=assets)
                 if fault == 'missing': assets.pop()
                 if fault == 'extra': assets.append(dict(assets[0], name='extra'))
                 if fault == 'duplicate': assets.append(dict(assets[0]))
@@ -162,6 +162,8 @@ class RecordContract(unittest.TestCase):
                 if fault == 'tag': release['tag_name'] = 'wrong'
                 if fault == 'title': release['name'] = 'wrong'
                 if fault == 'missing-title': release.pop('name')
+                if fault == 'missing-id': release.pop('id')
+                if fault == 'invalid-id': release['id'] = True
                 if fault in ('draft', 'prerelease'): release[fault] = True
                 if fault.startswith('download'):
                     for asset in assets: asset.pop('digest')
@@ -184,7 +186,7 @@ class RecordContract(unittest.TestCase):
                      patch.object(helper.subprocess, 'Popen', side_effect=lambda *a, **k: Download()) as download, \
                      contextlib.redirect_stdout(io.StringIO()):
                     if fault in ('ok', 'download'):
-                        helper.verify('tag/a', paths)
+                        self.assertEqual(helper.verify('tag/a', paths), 41)
                         self.assertIn('repos/fixture/repo/releases/tags/tag%2Fa',
                                       [call.args[0][-1] for call in api.call_args_list])
                         self.assertEqual(download.call_count, len(paths) if fault == 'download' else 0)
@@ -195,7 +197,7 @@ class RecordContract(unittest.TestCase):
         helper = module('verify_release')
         with tempfile.TemporaryDirectory() as tmp:
             _, paths = self.fixture(Path(tmp), include_external=True)
-            release = dict(tag_name='tag/a', name='tag/a', target_commitish='a' * 40,
+            release = dict(id=41, tag_name='tag/a', name='tag/a', target_commitish='a' * 40,
                            draft=False, prerelease=False, assets=[
                                dict(name=p.name, size=p.stat().st_size, state='uploaded',
                                     digest='sha256:' + hashlib.sha256(p.read_bytes()).hexdigest())
@@ -222,7 +224,7 @@ class RecordContract(unittest.TestCase):
         helper = module('verify_release')
         with tempfile.TemporaryDirectory() as tmp:
             _, paths = self.fixture(Path(tmp), include_external=True)
-            release = dict(tag_name='tag/a', name='tag/a', target_commitish='main',
+            release = dict(id=41, tag_name='tag/a', name='tag/a', target_commitish='main',
                            draft=False, prerelease=False, assets=[
                                dict(name=p.name, size=p.stat().st_size, state='uploaded',
                                     digest='sha256:' + hashlib.sha256(p.read_bytes()).hexdigest())

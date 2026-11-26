@@ -8,8 +8,21 @@ import sys
 FORBIDDEN_PACKAGES = ('usteer', 'luci-app-usteer', 'luci-i18n-usteer-zh-cn')
 
 
+def config_values(text, source):
+    values = {}
+    for match in re.finditer(r'^CONFIG_([^=\s]+)=(.*)$|^# CONFIG_(\S+) is not set$', text, re.M):
+        symbol, value, unset = match.groups()
+        if unset:
+            symbol, value = unset, 'n'
+        if symbol in values:
+            raise ValueError(f'duplicate {source} config symbol: {symbol}')
+        values[symbol] = value
+    return values
+
+
 def check(config, packageinfo, requested=""):
-    values = dict(re.findall(r'^CONFIG_([^=]+)=(.*)$', config, re.M))
+    values = config_values(config, 'final')
+    selections = config_values(requested, 'requested')
     forbidden = [package for package in FORBIDDEN_PACKAGES
                  if values.get('PACKAGE_' + package) in ('y', 'm')]
     if forbidden:
@@ -29,9 +42,7 @@ def check(config, packageinfo, requested=""):
     missing = [package for package in defaults if package not in available]
     if missing:
         raise ValueError('unavailable device default packages: ' + ', '.join(missing))
-    selections = dict(re.findall(r'^CONFIG_([^=\s]+)=(.*)$', requested, re.M))
-    selections.update((symbol, 'n') for symbol in re.findall(
-        r'^# CONFIG_(\S+) is not set$', requested, re.M))
+
     for symbol, wanted in selections.items():
         # Kconfig represents false both as an unset comment and as absence.
         actual = values.get(symbol, 'n' if wanted == 'n' else '<unset>')

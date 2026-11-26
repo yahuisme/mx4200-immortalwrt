@@ -330,6 +330,11 @@ def verify_advanced_reboot(root, device):
 def verify_root(root, provenance):
     root = Path(root)
     record = json.loads(Path(provenance).read_text())
+    packages = [(row['repository'], row['name']) for row in record['packages']]
+    tags = [row['name'] for row in record['repositories']]
+    if (sorted(packages) != sorted((tag, name) for tag, repo in REPOSITORIES.items() for name in repo['packages'])
+            or sorted(tags) != sorted(REPOSITORIES)):
+        raise ValueError('Incomplete or ambiguous external APK provenance')
     installed = installed_packages(root)
     world = (root / 'etc/apk/world').read_text().splitlines()
     for name in ('luci-app-homeproxy', 'luci-i18n-homeproxy-zh-cn', 'sing-box'):
@@ -356,14 +361,16 @@ def verify_root(root, provenance):
             raise ValueError('Missing or wrong official APK version: ' + row['name'])
         if row['name'] + '@' + row['repository'] not in world:
             raise ValueError('Missing updatable tagged world constraint: ' + row['name'])
-    feeds = (root / 'etc/apk/repositories.d/customfeeds.list').read_text()
+    feeds = (root / RUNTIME_FEEDS).read_text()
     if 'file://' in feeds:
         raise ValueError('Build-only repository leaked into firmware')
+    feed_lines = {tuple(line.split()) for line in feeds.splitlines()}
     for feed in record['repositories']:
-        if f'@{feed["name"]} {REPOSITORIES[feed["name"]]["url"]}/packages.adb' not in feeds:
-            raise ValueError('Missing runtime repository: ' + feed['name'])
-        if digest(root / 'etc/apk/keys' / (feed['name'] + '.pem')) != feed['key_sha256']:
-            raise ValueError('Missing or wrong runtime signing key: ' + feed['name'])
+        tag = feed['name']
+        if ('@' + tag, REPOSITORIES[tag]['url'] + '/packages.adb') not in feed_lines:
+            raise ValueError('Missing runtime repository: ' + tag)
+        if digest(root / 'etc/apk/keys' / (tag + '.pem')) != feed['key_sha256']:
+            raise ValueError('Missing or wrong runtime signing key: ' + tag)
     return installed
 
 

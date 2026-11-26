@@ -170,6 +170,53 @@ class DownloadTests(unittest.TestCase):
             self.assertEqual([call.args[0] for call in request.call_args_list],
                              [record_for()['url']] * 2)
 
+    def test_failed_record_rename_preserves_previous_pair_or_absence(self):
+        real_replace = official.os.replace
+        for existing in (False, True):
+            with self.subTest(existing=existing), tempfile.TemporaryDirectory() as tmp:
+                directory = Path(tmp)
+                image, proof = directory / official.NAME, directory / 'record.json'
+                if existing:
+                    old = b'previous official bytes'
+                    record = dict(record_for('25.12.2'), size=len(old), sha256=hashlib.sha256(old).hexdigest())
+                    image.write_bytes(old)
+                    proof.write_text(json.dumps(record))
+                    official.verify(image, official.load_record(proof))
+                before = {p.name: p.read_bytes() for p in directory.iterdir()}
+
+                def replace(source, target):
+                    if target == proof:
+                        raise OSError('injected record publish failure')
+                    return real_replace(source, target)
+
+                with patch('urllib.request.urlopen', return_value=io.BytesIO(DATA)), \
+                        patch.object(official.os, 'replace', side_effect=replace):
+                    with self.assertRaisesRegex(OSError, 'injected record publish failure'):
+                        official.download(directory, proof, record_for())
+                self.assertEqual({p.name: p.read_bytes() for p in directory.iterdir()}, before)
+
+    def test_failed_image_rollback_retains_original_bytes(self):
+        real_replace = official.os.replace
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            image, proof = directory / official.NAME, directory / 'record.json'
+            image.write_bytes(b'previous official bytes')
+            proof.write_text('previous record')
+
+            def replace(source, target):
+                if target == proof or source.parent.name.startswith('.official-rollback-'):
+                    raise OSError('injected rename failure')
+                return real_replace(source, target)
+
+            with patch('urllib.request.urlopen', return_value=io.BytesIO(DATA)), \
+                    patch.object(official.os, 'replace', side_effect=replace):
+                with self.assertRaisesRegex(OSError, 'cannot roll back official image') as error:
+                    official.download(directory, proof, record_for())
+            backups = list(directory.glob('.official-rollback-*/' + official.NAME))
+            self.assertEqual([p.read_bytes() for p in backups], [b'previous official bytes'])
+            self.assertIn(str(backups[0]), str(error.exception))
+            self.assertEqual(proof.read_text(), 'previous record')
+
     def test_truncated_http_image_retries_same_version(self):
         class Response(io.BytesIO):
             def __init__(self, headers):

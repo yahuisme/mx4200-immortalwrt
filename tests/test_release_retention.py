@@ -4,6 +4,7 @@ import tempfile
 import unittest
 
 from test_dual_publish import GROUPS, TAG_SUFFIX, full_page, replay as replay_publish, staged_fixture
+from test_dual_publish import row as api_row
 
 CURRENT = [device + TAG_SUFFIX for device in GROUPS.values()]
 PREVIOUS = 'MX4200-ImmortalWrt-r122-26.11.23_00.00.00'
@@ -11,8 +12,7 @@ OLD = 'MX4200-ImmortalWrt-25.12.2-r100-26.11.01_00.00.00'
 
 
 def row(tag, rank, **kwargs):
-    return dict(tag_name=tag, id=rank, published_at=f'2026-10-{rank:02}T00:00:00Z',
-                draft=False, prerelease=False) | kwargs
+    return api_row(tag, rank, published_at=f'2026-10-{rank:02}T00:00:00Z') | kwargs
 
 
 class ReleaseRetention(unittest.TestCase):
@@ -70,6 +70,22 @@ class ReleaseRetention(unittest.TestCase):
         result, deleted = self.replay(pages, 'no-digest')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(deleted, [PREVIOUS, OLD])
+
+    def test_same_tag_replacement_in_either_group_protects_both_histories(self):
+        current = [row(tag, rank) for rank, tag in enumerate(CURRENT, 10)]
+        old = row(OLD, 8)
+        result, deleted = self.replay([[*current, old]])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(deleted, [OLD])
+        for index in range(len(current)):
+            with self.subTest(tag=CURRENT[index]):
+                rows = current.copy()
+                rows[index] = dict(rows[index], id=50 + index)
+                result, deleted = self.replay([[*rows, old]])
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(deleted, [])
+                self.assertIn('Current publication replaced in inventory', result.stderr)
+                self.assertIn('retaining both groups', result.stdout)
 
     def test_zero_one_two_three(self):
         for count in range(4):

@@ -119,13 +119,18 @@ def prepare(root):
     if (not re.match(cell_pattern, nand[partition.end():]) or
             active.count('mac_address: mac_address {') != 1):
         raise ValueError('HomeWRK factory MAC cell changed; review MAC protection')
-    prefix = 'dp' if re.search(r'^&dp2 \{', active, re.M) else 'swport'
+    # DTS may reopen a labeled node on the same line as a previous statement.
+    # Skip quoted strings; their literal text is not a node reference.
+    references = [m for m in re.finditer(r'"(?:\\.|[^"\\])*"|&(dp|swport)([2-5])\s*\{', active)
+                  if m[1] is not None]
+    prefix = 'dp' if any(m[1] == 'dp' and m[2] == '2' for m in references) else 'swport'
     for port, label, offset in ((2, 'wan', 0), (3, 'lan3', 1), (4, 'lan2', 1), (5, 'lan1', 1)):
-        blocks = re.findall(r'^&' + prefix + str(port) + r' \{([^{}]*)\};', active, re.M)
-        if (len(blocks) != 1 or
-                blocks[0].count(f'label = "{label}";') != 1 or
-                re.findall(r'nvmem-cells\s*=([^;]*);', blocks[0]) != [f' <&mac_address {offset}>'] or
-                re.findall(r'nvmem-cell-names\s*=([^;]*);', blocks[0]) != [' "mac-address"']):
+        openings = [m for m in references if m[2] == str(port)]
+        block = (re.compile(r'([^{}]*)\}\s*;').match(active, openings[0].end())
+                 if len(openings) == 1 and openings[0][1] == prefix else None)
+        if (block is None or block[1].count(f'label = "{label}";') != 1 or
+                re.findall(r'nvmem-cells\s*=([^;]*);', block[1]) != [f' <&mac_address {offset}>'] or
+                re.findall(r'nvmem-cell-names\s*=([^;]*);', block[1]) != [' "mac-address"']):
             raise ValueError('HomeWRK Ethernet MAC mapping changed; review MAC protection')
     if not guard:
         source = source[:anchor_end] + GUARD + source[anchor_end:]

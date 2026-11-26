@@ -706,6 +706,9 @@ class ExternalPackageTests(unittest.TestCase):
             for path, replacement, error in ((world, b'', 'tagged world'),
                     (feeds, b'file:///build-only/packages.adb\n', 'Build-only repository'),
                     (feeds, b'', 'Missing runtime repository'),
+                    (feeds, b'# ' + feeds.read_bytes(), 'Missing runtime repository'),
+                    (feeds, feeds.read_bytes().rstrip() + b'.other\n', 'Missing runtime repository'),
+                    (feeds, feeds.read_bytes().rstrip() + b'#other\n', 'Missing runtime repository'),
                     (root / 'etc/apk/keys/eamonxg.pem', b'changed key', 'runtime signing key')):
                 with self.subTest(error=error):
                     saved = path.read_bytes()
@@ -713,6 +716,15 @@ class ExternalPackageTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, error):
                         module.verify_root(root, provenance)
                     path.write_bytes(saved)
+            saved = provenance.read_bytes()
+            for invalid in (dict(packages=[], repositories=keys),
+                            dict(packages=packages[1:] + [packages[-1]], repositories=keys),
+                            dict(packages=packages, repositories=[])):
+                with self.subTest(provenance=invalid):
+                    provenance.write_text(json.dumps(invalid))
+                    with self.assertRaisesRegex(ValueError, 'Incomplete or ambiguous external APK provenance'):
+                        module.verify_root(root, provenance)
+            provenance.write_bytes(saved)
             self.assertEqual(module.verify_root(root, provenance), installed)
 
 

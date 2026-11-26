@@ -71,6 +71,17 @@ class DefaultPackageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'excluded'):
             check(config + 'CONFIG_PACKAGE_excluded=m\n', '', requested)
 
+    def test_duplicate_assignments_do_not_mask_the_effective_config(self):
+        defaults = 'CONFIG_MODULE_DEFAULT_driver=y\nCONFIG_PACKAGE_driver=m\n'
+        requested = 'CONFIG_PACKAGE_curl=y\n'
+        check(defaults + requested, '', requested)
+        for fragment in ('CONFIG_PACKAGE_curl=y\n', '# CONFIG_PACKAGE_curl is not set\n'):
+            with self.subTest(fragment=fragment):
+                with self.assertRaisesRegex(ValueError, 'duplicate final config symbol: PACKAGE_curl'):
+                    check(defaults + requested + fragment, '', requested)
+                with self.assertRaisesRegex(ValueError, 'duplicate requested config symbol: PACKAGE_curl'):
+                    check(defaults + requested, '', requested + fragment)
+
     def test_usteer_is_rejected_without_recipe_exclusions(self):
         # Package policy is checked on the resolved config, not on optional
         # historical '=n' lines in config.diff. Both built-in and module fail.

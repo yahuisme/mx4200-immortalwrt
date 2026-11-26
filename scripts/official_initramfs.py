@@ -154,6 +154,8 @@ def download(destination, record_path, record=None):
     destination.mkdir(parents=True, exist_ok=True)
     record_path.parent.mkdir(parents=True, exist_ok=True)
     image_temp = record_temp = None
+    backup_dir = None
+
     try:
         def fetch():
             assert image_temp is not None
@@ -185,13 +187,33 @@ def download(destination, record_path, record=None):
             output.write('\n')
             output.flush()
             os.fsync(output.fileno())
-        os.replace(image_temp, destination / NAME)
-        os.replace(record_temp, record_path)
+        if image_path.exists():
+            backup_dir = Path(tempfile.mkdtemp(prefix='.official-rollback-', dir=destination))
+            os.link(image_path, backup_dir / NAME)
+        os.replace(image_temp, image_path)
+        try:
+            os.replace(record_temp, record_path)
+        except OSError as error:
+            try:
+                if backup_dir is None:
+                    image_path.unlink()
+                else:
+                    os.replace(backup_dir / NAME, image_path)
+            except OSError as rollback_error:
+                recovery = ''
+                if backup_dir is not None:
+                    recovery = f'; original retained at {backup_dir / NAME}'
+                    backup_dir = None  # Do not clean up recovery material.
+                raise OSError(f'{error}; cannot roll back official image: {rollback_error}{recovery}') from error
+            raise
         return record
     finally:
         for path in (image_temp, record_temp):
             if path is not None:
                 path.unlink(missing_ok=True)
+        if backup_dir is not None:
+            (backup_dir / NAME).unlink(missing_ok=True)
+            backup_dir.rmdir()
 
 
 def main():

@@ -23,6 +23,14 @@ class TtydCompatTests(unittest.TestCase):
                 ('repeated assignment', original + 'PKG_RELEASE:=3\n', None, 'unreviewed package release'),
                 ('unknown source', original.replace('1.7.7', '1.7.8'), None, 'unreviewed source'),
                 ('unknown hash', original.replace(SOURCE_HASH, '0' * 64), None, 'unreviewed source'),
+                ('missing source fields', 'PKG_RELEASE:=1\n', None, 'unreviewed source'),
+                ('duplicate version', original + 'PKG_VERSION = 1.7.8\n', None, 'unreviewed source'),
+                ('duplicate hash', original + 'PKG_HASH := ' + '0' * 64 + '\n', None, 'unreviewed source'),
+                ('qualified version', original + 'override export PKG_VERSION := 1.7.7\n', None, 'unreviewed source'),
+                ('qualified hash', original + f'override PKG_HASH := {SOURCE_HASH}\n', None, 'unreviewed source'),
+                ('unexported hash', original + f'unexport PKG_HASH := {SOURCE_HASH}\n', None, 'unreviewed source'),
+                ('qualified release', original + 'override PKG_RELEASE := 1\n', None, 'unreviewed package release'),
+                ('unexported override', original + 'override unexport PKG_RELEASE := 1\n', None, 'unreviewed package release'),
                 ('conflict', original, b'foreign patch', 'conflicting compatibility patch')):
             with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
                 recipe = Path(tmp) / 'feeds/packages/utils/ttyd'

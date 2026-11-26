@@ -38,8 +38,10 @@ def verify(tag, files, group=None):
     repository = os.environ['GITHUB_REPOSITORY']
     release = json.loads(subprocess.check_output([
         'gh', 'api', f'repos/{repository}/releases/tags/{quote(tag, safe="")}']))
-    if (release['tag_name'] != tag or release.get('name') != tag
-            or release['draft'] or release['prerelease']):
+    release_id = release.get('id')
+    if (release.get('tag_name') != tag or release.get('name') != tag
+            or type(release_id) is not int or release_id <= 0
+            or release.get('draft') is not False or release.get('prerelease') is not False):
         raise ValueError('Unexpected release identity/state')
     target = json.loads(subprocess.check_output([
         'gh', 'api', f'repos/{repository}/git/ref/tags/{quote(tag, safe="")}'])).get('object')
@@ -87,7 +89,8 @@ def verify(tag, files, group=None):
                 actual = 'sha256:' + downloaded.hexdigest()
                 if proc.wait() or actual != digest:
                     raise ValueError('Release asset download mismatch: ' + path.name)
-    print('Verified release title, tag commit, image names, count, sizes, uploaded state and SHA-256')
+    print('Verified release title, tag commit, image names, count, sizes, uploaded state and SHA-256', file=sys.stderr)
+    return release_id
 
 
 if __name__ == '__main__':
@@ -97,4 +100,4 @@ if __name__ == '__main__':
     parser.add_argument('tag')
     parser.add_argument('files', nargs='+')
     args = parser.parse_args()
-    verify(args.tag, args.files, args.group)
+    print(verify(args.tag, args.files, args.group))

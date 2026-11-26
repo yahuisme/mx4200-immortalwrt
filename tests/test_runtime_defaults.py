@@ -75,7 +75,7 @@ config wifi-iface 'default_radio{i}'
     def snapshot(self):
         return {p.name: p.read_bytes() for p in self.cfg.iterdir() if p.is_file()}
 
-    def boot(self, fail='', fail_commit='', fail_publish='', corrupt_commit=''):
+    def boot(self, fail='', fail_commit='', fail_publish='', corrupt_commit='', fail_restore=''):
         # Wrapper intercepts only injected operations. Explicit -t/-c keeps
         # even native commit confined; no host changes or service calls.
         boundary = '''
@@ -92,8 +92,9 @@ uci() {
     esac
 }
 mv() {
-    case "$*" in
-        *"/next/$FAIL_PUBLISH "*) [ -z "$FAIL_PUBLISH" ] || return 74 ;;
+    case "$2" in
+        */next/*) [ "${2##*/}" != "$FAIL_PUBLISH" ] || return 74 ;;
+        *".mx4200-"*"/$FAIL_RESTORE") [ -z "$FAIL_RESTORE" ] || return 75 ;;
     esac
     command mv "$@"
 }
@@ -103,7 +104,7 @@ sync() { :; }
                               cwd=self.root, env=dict(os.environ, NATIVE_UCI=str(UCI), CONFIG_DIR=str(self.cfg),
                                                       DELTA_DIR=str(self.delta), LOG=str(self.root / 'calls'),
                                                       FAIL=fail, FAIL_COMMIT=fail_commit, FAIL_PUBLISH=fail_publish,
-                                                      CORRUPT_COMMIT=corrupt_commit),
+                                                      CORRUPT_COMMIT=corrupt_commit, FAIL_RESTORE=fail_restore),
                               capture_output=True, text=True, check=True)
 
 
@@ -159,6 +160,24 @@ class RuntimeDefaultsTests(unittest.TestCase):
                 fixture.boot()
                 self.assertEqual(fixture.snapshot(), previous)
                 self.assertFalse(fixture.script.exists())
+
+    def test_failed_restore_keeps_the_original_and_never_retries_the_presets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = DefaultsFixture(Path(tmp), '99-mx4200-defaults')
+            original = fixture.snapshot()
+            result = fixture.boot(fail_publish='wireless', fail_restore='system')
+            self.assertIn('failed to restore system', result.stderr)
+            self.assertTrue(fixture.script.exists())
+            self.assertNotEqual((fixture.cfg / 'system').read_bytes(), original['system'])
+            self.assertEqual((fixture.cfg / 'wireless').read_bytes(), original['wireless'])
+            backups = list(fixture.cfg.glob('.mx4200-*/system'))
+            self.assertEqual([p.read_bytes() for p in backups], [original['system']])
+            self.assertIn(str(backups[0]), result.stderr)
+            current = fixture.snapshot()
+            fixture.boot()
+            self.assertFalse(fixture.script.exists())
+            self.assertEqual(fixture.snapshot(), current)
+            self.assertEqual(backups[0].read_bytes(), original['system'])
 
     def test_system_retained_config(self):
         with tempfile.TemporaryDirectory() as tmp:
