@@ -707,6 +707,10 @@ class ExternalPackageTests(unittest.TestCase):
                     (feeds, b'file:///build-only/packages.adb\n', 'Build-only repository'),
                     (feeds, b'', 'Missing runtime repository'),
                     (feeds, b'# ' + feeds.read_bytes(), 'Missing runtime repository'),
+                    (feeds, b'  ' + feeds.read_bytes(), 'Missing runtime repository'),
+                    (feeds, b'  ' + feeds.read_bytes() * 2, 'Missing runtime repository'),
+                    (feeds, feeds.read_bytes() * 2, 'Missing runtime repository'),
+                    (feeds, feeds.read_bytes().replace(b'\n', b'\r\n'), 'Missing runtime repository'),
                     (feeds, feeds.read_bytes().rstrip() + b'.other\n', 'Missing runtime repository'),
                     (feeds, feeds.read_bytes().rstrip() + b'#other\n', 'Missing runtime repository'),
                     (root / 'etc/apk/keys/eamonxg.pem', b'changed key', 'runtime signing key')):

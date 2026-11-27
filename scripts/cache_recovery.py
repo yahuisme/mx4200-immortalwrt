@@ -3,6 +3,7 @@
 import argparse
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import tarfile
 import gzip
@@ -23,10 +24,14 @@ except ImportError:
 
 
 def clear(path):
-    if path.is_symlink() or path.is_file():
-        path.unlink()
-    elif path.exists():
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError:
+        return
+    if stat.S_ISDIR(mode):
         shutil.rmtree(path)
+    else:
+        path.unlink()
 
 
 def clear_restored(kind, root):
@@ -63,8 +68,8 @@ def restore(kind, root, archive, expected, restored, outcome):
                     if kind == 'toolchain':
                         if not toolchain.restore(root, archive, expected):
                             raise ValueError('toolchain archive disappeared before restore')
-                    else:
-                        bootstrap.restore(root, archive, expected)
+                    elif not bootstrap.restore(root, archive, expected):
+                        raise ValueError('bootstrap archive disappeared before restore')
             else:
                 subprocess.run(['tar', '--gzip', '-xf', str(candidate), '-C', str(root)],
                                check=True)
@@ -78,10 +83,7 @@ def restore(kind, root, archive, expected, restored, outcome):
         # Archive directories are Docker bind mounts: remove their contents,
         # never the mount point itself. Cleanup failures remain fatal.
         for path in archive.iterdir():
-            if path.is_symlink() or path.is_file():
-                path.unlink()
-            else:
-                clear(path)
+            clear(path)
     print('hit=' + str(hit).lower())
     print('matched-key=' + (restored if hit else ''))
     print('poisoned=' + str(exact and not hit and bool(restored or outcome != 'success')).lower())

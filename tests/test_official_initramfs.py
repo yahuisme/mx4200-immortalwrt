@@ -1,6 +1,7 @@
 """Official HomeWRK binary provenance, with no firmware compilation."""
 from email.message import Message
 import hashlib
+import http.client
 import io
 import json
 from pathlib import Path
@@ -9,7 +10,7 @@ import sys
 import tempfile
 import unittest
 import urllib.error
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import official_initramfs as official
@@ -61,6 +62,33 @@ class ResolveTests(unittest.TestCase):
         record, profile = metadata('26.01.0')
         self.assertEqual(self.resolve_pages(pages_for(record, profile,
                          index='<a href="25.12.2/">old</a><a href="26.01.0/">new</a>')), record)
+
+    def test_truncated_release_index_is_retried_before_version_selection(self):
+        record, profile = metadata()
+        pages = pages_for(record, profile, index='<a href="25.12.2/">old</a>'
+                          '<a href="27.02.10/">new</a>')
+        older, older_profile = metadata('25.12.2')
+        pages.update({url: data for url, data in pages_for(older, older_profile).items()
+                      if url != official.RELEASES})  # The old release is valid too.
+        body = pages[official.RELEASES]
+        requested = []
+
+        truncated = (f'HTTP/1.1 200 OK\r\nContent-Length: {len(body)}\r\n\r\n'.encode()
+                     + body[:body.index(b'<a href="27')])
+
+        def fetch(url, **kwargs):
+            requested.append(url)
+            if len(requested) == 1:
+                connection = Mock()
+                connection.makefile.return_value = io.BytesIO(truncated)
+                response = http.client.HTTPResponse(connection)
+                response.begin()
+                return response
+            return io.BytesIO(pages[url])
+
+        with patch('urllib.request.urlopen', side_effect=fetch), patch('time.sleep'):
+            self.assertEqual(official.resolve(), record)
+        self.assertEqual(requested[:2], [official.RELEASES] * 2)
 
     def test_no_stable_directory(self):
         with self.assertRaisesRegex(ValueError, 'stable'):

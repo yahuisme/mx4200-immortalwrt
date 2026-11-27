@@ -56,8 +56,12 @@ def _metadata(url):
     def fetch():
         with urllib.request.urlopen(url, timeout=30) as response:
             data = response.read(8 * 1024 * 1024 + 1)
-        if len(data) > 8 * 1024 * 1024:
-            raise ValueError('Official metadata exceeds size limit')
+            if len(data) > 8 * 1024 * 1024:
+                raise ValueError('Official metadata exceeds size limit')
+            # HTTPResponse.read(n) can return at EOF with bytes still owed.
+            # Never choose a stable version from a partially read index.
+            if isinstance(response, http.client.HTTPResponse) and response.length:
+                raise http.client.IncompleteRead(data, response.length)
         return data.decode('utf-8')
     return _retry(fetch)
 

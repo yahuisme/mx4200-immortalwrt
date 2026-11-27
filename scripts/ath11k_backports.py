@@ -12,6 +12,13 @@ SOURCE_HASH = '6ec76a4cb0988b5382b2fc5053610a56ada90b8ef6a5a4f2807cd433badb9454'
 CHAIN_HASH = 'e4abdec9a759a297021a8d17a9f7b46e92081481d9d263482c757db4b3cf4fc3'
 
 
+def assignments(text, key):
+    # Count qualified/reassigned fields as well, even though only the exact
+    # reviewed assignments below are allowed.
+    return re.findall(rf'^[ \t]*(?:(?:override|export|unexport|private)[ \t]+)*'
+                      rf'{key}[ \t]*(?:[:+?!]?=|::=|:::=)[^\n]*', text, re.M)
+
+
 def chain_hash(paths):
     digest = sha256()
     for path in sorted(paths):
@@ -24,9 +31,9 @@ def prepare(root):
     makefile = recipe / 'Makefile'
     text = makefile.read_text()
     for key, value in (('PKG_SOURCE_VERSION', '7.2'), ('PKG_HASH', SOURCE_HASH)):
-        if re.findall(rf'^{key}\s*:?=([^\n]*)$', text, re.M) != [value]:
+        if assignments(text, key) != [f'{key}:={value}']:
             raise ValueError('unreviewed ath11k source; review all backports')
-    release = re.findall(r'^PKG_RELEASE\s*:?=([^\n]*)$', text, re.M)
+    release = assignments(text, 'PKG_RELEASE')
     directory = recipe / 'patches/ath11k'
     upstream = []
     installed = set()
@@ -44,9 +51,9 @@ def prepare(root):
             upstream.append(path)
     if chain_hash(upstream) != CHAIN_HASH:
         raise ValueError('unreviewed ath11k patch chain; check upstream absorption and replay')
-    if release == ['17'] and installed == set(PAYLOAD):
+    if release == ['PKG_RELEASE:=17'] and installed == set(PAYLOAD):
         return
-    if release != ['15'] or installed or text.splitlines().count('PKG_RELEASE:=15') != 1:
+    if release != ['PKG_RELEASE:=15'] or installed:
         raise ValueError('unreviewed ath11k package release or partial backport')
     for name, content in payload.items():
         with (directory / name).open('xb') as dest:

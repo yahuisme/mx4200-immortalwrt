@@ -99,6 +99,10 @@ docker_exec() {
         python3 scripts/build_record.py "$DK_OPENWRT" build-record
     elif [ "$1" = python3 ] && [ "$2" = /cache-scripts/cache.py ]; then
         [ "$FAULT" != package ] || return 17
+        if [ "$FAULT" = download_pack ] && [ "$3" = dl ]; then
+            truncate -s 100 dlarchive/dl.tar.gz
+            return 17
+        fi
         mkdir -p "${5#/}"
         case "$3" in
             toolchain) truncate -s 100 "${5#/}/toolchain.tar.zst";;
@@ -253,6 +257,16 @@ export -f make docker_exec sudo python3 git official_download
         self.assertEqual(outcomes['Check download cache budget'], 'skipped', log)
         self.assertEqual(outcomes['Publish firmware and prune releases'], 'success', log)
         self.assertEqual(len([c for c in inventory['calls'] if c[:2] == ['release', 'create']]), 2)
+
+    def test_failed_download_pack_preserves_publication_and_old_seed(self):
+        outcomes, _, inventory, log = self.replay('download_pack')
+        self.assertEqual(outcomes['Check download cache changes'], 'success', log)
+        self.assertEqual(outcomes['Prepare build caches'], 'success', log)
+        self.assertEqual(outcomes['Publish firmware and prune releases'], 'success', log)
+        self.assertEqual(outcomes['Save download cache'], 'skipped', log)
+        self.assertEqual(outcomes['Prune old download caches'], 'skipped', log)
+        self.assertIn(3, {item['id'] for item in inventory['entries']}, log)
+        self.assertIn('Download cache archive unavailable', log)
 
     def test_full_compile_stage_cache_publish_failure_matrix(self):
         for fault in ('none', 'download', 'compile', 'validation', 'official-download', 'cancel', 'package', 'save', 'readback', 'publish', 'metadata', 'upload', 'bootstrap_pack', 'bootstrap_save', 'bootstrap_readback'):

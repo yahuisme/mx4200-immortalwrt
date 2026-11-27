@@ -312,7 +312,7 @@ def restore(root, cache, expected):
     if not archive.exists():
         clear_host(root)
         print('cold bootstrap')
-        return
+        return False
     if (archive.is_symlink() or (cache / 'key').is_symlink()
             or (cache / 'key').read_text() != expected + '\n'):
         raise ValueError('bootstrap key mismatch')
@@ -326,6 +326,7 @@ def restore(root, cache, expected):
         clear_host(root)
         raise
     print('exact bootstrap restored')
+    return True
 
 
 def pack(root, cache, expected):

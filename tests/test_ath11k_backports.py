@@ -47,6 +47,26 @@ class Ath11kBackports(unittest.TestCase):
             hook.prepare(self.root)
         self.assertEqual(before, {p: p.read_bytes() for p in self.recipe.rglob('*') if p.is_file()})
 
+    def test_qualified_recipe_assignments_rejected_before_writes_or_repeat_acceptance(self):
+        for field, statement in (
+                ('source', 'override PKG_SOURCE_VERSION := 7.3'),
+                ('source', 'export PKG_HASH = ' + '0' * 64),
+                ('package release', 'unexport PKG_RELEASE += 1')):
+            for installed in (False, True):
+                with self.subTest(installed=installed, field=field):
+                    if installed:
+                        hook.prepare(self.root)
+                    self.makefile.write_text(self.makefile.read_text() + statement + '\n')
+                    try:
+                        before = {p: p.read_bytes() for p in (self.makefile, *self.patches.iterdir())}
+                        with self.assertRaisesRegex(ValueError, 'unreviewed ath11k ' + field):
+                            hook.prepare(self.root)
+                        self.assertEqual(before, {p: p.read_bytes() for p in (self.makefile, *self.patches.iterdir())})
+                    finally:
+                        self.makefile.write_text(self.original)
+                        for name in hook.PAYLOAD:
+                            (self.patches / name).unlink(missing_ok=True)
+
     def test_each_partial_payload_and_installed_drift_rejects_without_writes(self):
         # Every proper subset, including the old 990/991 pair and 992 alone.
         from itertools import combinations

@@ -17,13 +17,14 @@ ssid, key = (os.environ[name] for name in ('WRT_SSID', 'WRT_WORD'))
 if any(not re.fullmatch(r"[^'`\\\r\n]+", v) or '${' in v for v in (ssid, key)):
     raise SystemExit('Invalid wireless default for ucode template')
 
-updates = {}
+originals, updates = {}, {}
 
 def read(name):
     path = Path(name)
     if not path.is_file():
         raise SystemExit(f'{path.name} not found: {path}')
-    return path, path.read_text()
+    originals[path] = path.read_text()
+    return path, originals[path]
 
 
 def replace_line(text, old, new, label, active=None):
@@ -48,9 +49,11 @@ def without_comments(text):
 
 
 path, text = read('feeds/luci/modules/luci-mod-system/htdocs/luci-static/resources/view/system/flash.js')
+active = without_comments(text)
 for indent, prefix in ((2, ''), (4, 'window.location.host, '), (3, 'window.location.host, ')):
     old = '\t' * indent + f"ui.awaitReconnect({prefix}'192.168.1.1', 'immortalwrt.lan');"
-    text = replace_line(text, old, old.replace('192.168.1.1', ip), 'flash.js reconnect', without_comments(text))
+    # The three anchors are distinct whole lines; replacing one cannot shift the others.
+    text = replace_line(text, old, old.replace('192.168.1.1', ip), 'flash.js reconnect', active)
 updates[path] = text
 
 # Keep the native menu package-owned and change only its intended field.
@@ -96,6 +99,6 @@ updates[path] = replace_line(text, old, old.replace('192.168.1.1', ip), 'config_
 
 # Validate every boundary before touching the tree.
 for path, text in updates.items():
-    if path.read_text() != text:
+    if originals[path] != text:
         path.write_text(text)
 PY

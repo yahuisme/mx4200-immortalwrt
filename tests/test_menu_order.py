@@ -26,9 +26,10 @@ SNAPSHOT_LUCI = '319f7c96e3530246cf91cfdd9bacb3fa44dc3a4e'
 # The menu blobs at this later pair match the existing Snapshot fixture exactly.
 SAME_SNAPSHOT_MENUS = ('6839c87b4da0e8274ab6c0948e688c26447c1547',
                        'ce90a8b0f85bbcaf62c0cebc8f8cb20bc8822007')
-# Both custom revisions retain HomeProxy menu blob 9892a9b979c1b4b638ef2fc78f0a77444500da0d.
+# These custom revisions retain HomeProxy menu blob 9892a9b979c1b4b638ef2fc78f0a77444500da0d.
 REVIEWED_SNAPSHOT_CUSTOMS = frozenset((SAME_SNAPSHOT_MENUS[1],
-                                      '20f87966042a8bd3706c9f9eb1c3061797b3f86c'))
+                                      '20f87966042a8bd3706c9f9eb1c3061797b3f86c',
+                                      '1d43ae8db0e7c96321bb5d5f6461f816f73c6884'))
 BASELINES = {
     STABLE_LUCI: ('services-menu-contract.json',
                   '1265f37428e8d8c100d57322f5b8199d67f7e2f1855f6275183d11e19f462e40'),
@@ -79,10 +80,10 @@ def installed_source(root, record=None):
     revision = luci[0].get('sha')
     baseline = revision
     if revision == SAME_SNAPSHOT_MENUS[0]:
-        custom = [row.get('sha') for row in record.get('custom_sources', [])
-                  if row.get('name') == 'custom/yahuisme/packages'
-                  and row.get('url') == 'https://github.com/yahuisme/packages.git']
-        assert len(custom) == 1 and custom[0] in REVIEWED_SNAPSHOT_CUSTOMS, (
+        custom = [row for row in record.get('custom_sources', [])
+                  if row.get('name') == 'custom/yahuisme/packages']
+        assert (len(custom) == 1 and custom[0].get('url') == 'https://github.com/yahuisme/packages.git'
+                and custom[0].get('sha') in REVIEWED_SNAPSHOT_CUSTOMS), (
             'Unreviewed HomeProxy menu source')
         baseline = SNAPSHOT_LUCI
     source = source_menus(baseline)
@@ -257,7 +258,7 @@ class MenuOrderTests(unittest.TestCase):
 
     def test_current_snapshot_menu_source_keeps_identity_checks(self):
         luci = '6839c87b4da0e8274ab6c0948e688c26447c1547'
-        custom = '20f87966042a8bd3706c9f9eb1c3061797b3f86c'
+        custom = '1d43ae8db0e7c96321bb5d5f6461f816f73c6884'
         record = {
             'feeds': [{'name': 'feed/luci', 'url': 'https://github.com/immortalwrt/luci.git', 'sha': luci}],
             'custom_sources': [{'name': 'custom/yahuisme/packages',
@@ -269,7 +270,12 @@ class MenuOrderTests(unittest.TestCase):
             db.parent.mkdir(parents=True)
             db.write_text(f'P:luci-base\nV:26.309.25350~{luci[:7]}\n\n')
             self.assertEqual(installed_source(root, record), source_menus(SNAPSHOT_LUCI))
+            older = dict(record, custom_sources=[dict(record['custom_sources'][0],
+                         sha='20f87966042a8bd3706c9f9eb1c3061797b3f86c')])
+            self.assertEqual(installed_source(root, older), source_menus(SNAPSHOT_LUCI))
             for sources in ([], record['custom_sources'] * 2,
+                            [record['custom_sources'][0], dict(record['custom_sources'][0],
+                                                              url='https://example.org/packages.git')],
                             [dict(record['custom_sources'][0], sha='0' * 40)],
                             [dict(record['custom_sources'][0], sha=custom[:7])],
                             [dict(record['custom_sources'][0], url='https://example.org/packages.git')]):

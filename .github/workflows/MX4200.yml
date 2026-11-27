@@ -292,7 +292,10 @@ jobs:
           docker_exec DK python3 /cache-scripts/cache.py toolchain "$DK_OPENWRT" /tcarchive '${{ steps.inputs.outputs.key }}'
         fi
         if [ '${{ steps.dl_changed.outputs.save }}' = true ]; then
-          docker_exec DK python3 /cache-scripts/cache.py dl /dlcache /dlarchive unused
+          if ! docker_exec DK python3 /cache-scripts/cache.py dl /dlcache /dlarchive unused; then
+            sudo rm -f -- dlarchive/dl.tar.gz
+            echo '::warning::Download cache archive unavailable; skipping its save.'
+          fi
         fi
         sudo chown -R "$(id -u):$(id -g)" tcarchive ccarchive dlarchive
         # Retire confirmed rolling compiler generations before admitting toolchain.

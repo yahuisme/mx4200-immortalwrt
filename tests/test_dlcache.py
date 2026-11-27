@@ -40,6 +40,18 @@ class DownloadCacheTests(unittest.TestCase):
         self.run_helper('snapshot')
         self.assertEqual(self.run_helper('check', ''), 'save=true')
 
+    def test_cold_seed_checks_types_without_hashing_file_contents(self):
+        self.run_helper('prepare')
+        (self.dl / 'source.tar').write_bytes(b'new source')
+        with patch.object(dlcache.hashlib, 'file_digest', wraps=dlcache.hashlib.file_digest) as digest:
+            self.assertTrue(dlcache.changed(self.dl, self.state, ''))
+            digest.assert_not_called()
+            self.assertTrue(dlcache.changed(self.dl, self.state, 'dl-v3.previous'))
+            digest.assert_called_once()
+        os.mkfifo(self.dl / 'unexpected')
+        with self.assertRaisesRegex(ValueError, 'unsupported download item'):
+            dlcache.changed(self.dl, self.state, '')
+
     def test_empty_cold_and_hot(self):
         (self.dl / 'empty-directory').mkdir()
         self.run_helper('snapshot')
@@ -134,6 +146,11 @@ class DownloadCacheTests(unittest.TestCase):
         self.run_helper('prepare')
         self.assertFalse(self.dl.is_symlink())
         self.assertEqual((external / 'keep').read_text(), 'protected')
+        self.dl.rmdir()
+        os.mkfifo(self.dl)
+        self.run_helper('prepare')
+        self.assertTrue(self.dl.is_dir())
+        self.assertEqual(list(self.dl.iterdir()), [])
 
     def test_prepare_unrecordable_state_leaves_cold_input_and_no_save(self):
         source = self.dl / 'source.tar'

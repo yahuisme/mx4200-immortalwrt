@@ -51,6 +51,35 @@ class SettingsScriptTests(unittest.TestCase):
     def test_wireless_encryption_zero_match_rejected(self):
         self.assert_wireless_zero_match_rejected('encryption', 'psk2+ccmp')
 
+    def test_reconnect_edits_preserve_comment_and_reject_missing_active_anchor(self):
+        import shutil
+        from test_custom_scope import tree_contents
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(self.fixture, root, dirs_exist_ok=True)
+            flash = root / ('feeds/luci/modules/luci-mod-system/htdocs/'
+                            'luci-static/resources/view/system/flash.js')
+            original = flash.read_text()
+            anchor = "\t\tui.awaitReconnect('192.168.1.1', 'immortalwrt.lan');\n"
+            comment = '\n/*\n' + anchor + '*/\n'
+
+            def run():
+                return subprocess.run(['bash', str(ROOT / 'scripts/settings.sh')],
+                                      cwd=root, env=self.env, capture_output=True, text=True)
+
+            flash.write_text(original.replace(anchor, '', 1) + comment)
+            before = tree_contents(root)
+            result = run()
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('Unsupported source boundary: flash.js reconnect', result.stderr)
+            self.assertEqual(tree_contents(root), before)
+            flash.write_text(original + comment)
+            result = run()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(flash.read_text(), original.replace("'192.168.1.1', 'immortalwrt.lan'",
+                                                                  "'192.168.10.1', 'immortalwrt.lan'") + comment)
+
     def test_complete_settings_preserves_official_version_templates(self):
         # Set SETTINGS_PRISTINE_SOURCE to pristine real upstream files for integration
         # coverage; the default fixture keeps the same full-script contract.

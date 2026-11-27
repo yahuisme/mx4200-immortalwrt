@@ -193,6 +193,10 @@ def preflight(root):
     reviewed_assembly(Path(root).resolve())
 
 
+def runtime_feeds():
+    return ''.join(f'@{tag} {repo["url"]}/packages.adb\n' for tag, repo in REPOSITORIES.items())
+
+
 def prepare(root):
     root = Path(root).resolve()
     version, updates = reviewed_assembly(root)  # Check all boundaries before writing.
@@ -205,8 +209,7 @@ def prepare(root):
         'MX_EXTERNAL_REPOSITORIES:=' + repositories + '\n')
     # Runtime entries are editable by LuCI and contain no builder paths.
     overlay = '.external-packages/files' if version == 'SNAPSHOT' else 'files'
-    put(root / overlay, RUNTIME_FEEDS, ''.join(
-        f'@{tag} {repo["url"]}/packages.adb\n' for tag, repo in REPOSITORIES.items()))
+    put(root / overlay, RUNTIME_FEEDS, runtime_feeds())
 
 
 def download(url, path):
@@ -361,14 +364,14 @@ def verify_root(root, provenance):
             raise ValueError('Missing or wrong official APK version: ' + row['name'])
         if row['name'] + '@' + row['repository'] not in world:
             raise ValueError('Missing updatable tagged world constraint: ' + row['name'])
-    feeds = (root / RUNTIME_FEEDS).read_text()
-    if 'file://' in feeds:
+    feeds = (root / RUNTIME_FEEDS).read_bytes()
+    if b'file://' in feeds:
         raise ValueError('Build-only repository leaked into firmware')
-    feed_lines = {tuple(line.split()) for line in feeds.splitlines()}
+    # A malformed earlier line can prevent APK loading later valid entries.
+    if feeds != runtime_feeds().encode():
+        raise ValueError('Missing runtime repository or noncanonical generated feed')
     for feed in record['repositories']:
         tag = feed['name']
-        if ('@' + tag, REPOSITORIES[tag]['url'] + '/packages.adb') not in feed_lines:
-            raise ValueError('Missing runtime repository: ' + tag)
         if digest(root / 'etc/apk/keys' / (tag + '.pem')) != feed['key_sha256']:
             raise ValueError('Missing or wrong runtime signing key: ' + tag)
     return installed
