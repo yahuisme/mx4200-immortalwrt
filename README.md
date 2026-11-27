@@ -1,4 +1,4 @@
-# MX4200 ImmortalWrt
+# MX4200 / MX4300 / HomeWRK ImmortalWrt
 
 每次构建跟随 [ImmortalWrt 官方 Snapshot 源码](https://github.com/immortalwrt/immortalwrt/tree/master)，支持 Linksys MX4200v1、MX4200v2、MX4300 和 HomeWRK。
 
