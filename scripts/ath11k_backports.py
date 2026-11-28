@@ -7,7 +7,7 @@ import sys
 
 PATCH_DIR = Path(__file__).with_name('ath11k-patches')
 PAYLOAD = ('990-rxdma-page-frag-24254.patch', '991-mesh-amsdu-26866.patch',
-           '992-unique-sta-addr-25520.patch')
+           '992-unique-sta-addr-25520.patch', '993-ce-rx-kmalloc-24713.patch')
 SOURCE_HASH = '6ec76a4cb0988b5382b2fc5053610a56ada90b8ef6a5a4f2807cd433badb9454'
 CHAIN_HASH = 'e4abdec9a759a297021a8d17a9f7b46e92081481d9d263482c757db4b3cf4fc3'
 
@@ -51,14 +51,14 @@ def prepare(root):
             upstream.append(path)
     if chain_hash(upstream) != CHAIN_HASH:
         raise ValueError('unreviewed ath11k patch chain; check upstream absorption and replay')
-    if release == ['PKG_RELEASE:=17'] and installed == set(PAYLOAD):
+    if release == ['PKG_RELEASE:=18'] and installed == set(PAYLOAD):
         return
     if release != ['PKG_RELEASE:=15'] or installed:
         raise ValueError('unreviewed ath11k package release or partial backport')
     for name, content in payload.items():
         with (directory / name).open('xb') as dest:
             dest.write(content)
-    makefile.write_text(re.sub(r'^PKG_RELEASE:=15$', 'PKG_RELEASE:=17', text, count=1, flags=re.M))
+    makefile.write_text(re.sub(r'^PKG_RELEASE:=15$', 'PKG_RELEASE:=18', text, count=1, flags=re.M))
 
 
 if __name__ == '__main__':

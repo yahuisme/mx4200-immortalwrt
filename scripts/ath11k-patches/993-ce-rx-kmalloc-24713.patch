@@ -1,0 +1,81 @@
+Subject: wifi: ath11k: use kmalloc-backed skbs for CE RX
+
+Based on Michael Phan's OpenWrt PR #24713 (60e0075288e2), limited to
+Copy Engine RX. Leave the local per-ring RXDMA caches in place.
+
+Retain RX allocation reserves and NET_SKB_PAD. Use the CE ring's configured
+length on map, completion, enqueue failure and teardown, so kmalloc size
+rounding cannot change the DMA window or the accepted completion length.
+
+Link: https://github.com/openwrt/openwrt/pull/24713
+
+--- a/drivers/net/wireless/ath/ath11k/ce.c
++++ b/drivers/net/wireless/ath/ath11k/ce.c
+@@ -330,17 +330,20 @@
+ 
+ 	spin_lock_bh(&ab->ce.ce_lock);
+ 	while (pipe->rx_buf_needed) {
+-		skb = dev_alloc_skb(pipe->buf_sz);
++		/* Don't pin shared page fragments with long-lived CE buffers. */
++		skb = __alloc_skb(pipe->buf_sz + NET_SKB_PAD, GFP_ATOMIC,
++				  SKB_ALLOC_RX, NUMA_NO_NODE);
+ 		if (!skb) {
+ 			ret = -ENOMEM;
+ 			goto exit;
+ 		}
+ 
++		skb_reserve(skb, NET_SKB_PAD);
+ 		WARN_ON_ONCE(!IS_ALIGNED((unsigned long)skb->data, 4));
+ 
++		/* The CE ring's limit does not include kmalloc rounding. */
+ 		paddr = dma_map_single(ab->dev, skb->data,
+-				       skb->len + skb_tailroom(skb),
+-				       DMA_FROM_DEVICE);
++				       pipe->buf_sz, DMA_FROM_DEVICE);
+ 		if (unlikely(dma_mapping_error(ab->dev, paddr))) {
+ 			ath11k_warn(ab, "failed to dma map ce rx buf\n");
+ 			dev_kfree_skb_any(skb);
+@@ -356,8 +359,7 @@
+ 			ath11k_dbg(ab, ATH11K_DBG_CE, "failed to enqueue rx buf: %d\n",
+ 				   ret);
+ 			dma_unmap_single(ab->dev, paddr,
+-					 skb->len + skb_tailroom(skb),
+-					 DMA_FROM_DEVICE);
++					 pipe->buf_sz, DMA_FROM_DEVICE);
+ 			dev_kfree_skb_any(skb);
+ 			goto exit;
+ 		}
+@@ -419,18 +421,17 @@
+ 	struct ath11k_base *ab = pipe->ab;
+ 	struct sk_buff *skb;
+ 	struct sk_buff_head list;
+-	unsigned int nbytes, max_nbytes;
++	unsigned int nbytes;
+ 	int ret;
+ 
+ 	__skb_queue_head_init(&list);
+ 	while (ath11k_ce_completed_recv_next(pipe, &skb, &nbytes) == 0) {
+-		max_nbytes = skb->len + skb_tailroom(skb);
+ 		dma_unmap_single(ab->dev, ATH11K_SKB_RXCB(skb)->paddr,
+-				 max_nbytes, DMA_FROM_DEVICE);
+-
+-		if (unlikely(max_nbytes < nbytes || nbytes == 0)) {
+-			ath11k_warn(ab, "unexpected rx length (nbytes %d, max %d)",
+-				    nbytes, max_nbytes);
++				 pipe->buf_sz, DMA_FROM_DEVICE);
++
++		if (unlikely(pipe->buf_sz < nbytes || nbytes == 0)) {
++			ath11k_warn(ab, "unexpected rx length (nbytes %u, max %u)",
++				    nbytes, pipe->buf_sz);
+ 			dev_kfree_skb_any(skb);
+ 			continue;
+ 		}
+@@ -813,7 +814,7 @@
+ 
+ 		ring->skb[i] = NULL;
+ 		dma_unmap_single(ab->dev, ATH11K_SKB_RXCB(skb)->paddr,
+-				 skb->len + skb_tailroom(skb), DMA_FROM_DEVICE);
++				 pipe->buf_sz, DMA_FROM_DEVICE);
+ 		dev_kfree_skb_any(skb);
+ 	}
+ }

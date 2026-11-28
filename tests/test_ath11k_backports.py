@@ -26,13 +26,14 @@ class Ath11kBackports(unittest.TestCase):
         self.lock.start()
         self.addCleanup(self.lock.stop)
 
-    def test_installs_all_three_and_is_repeatable(self):
+    def test_installs_all_four_and_is_repeatable(self):
         self.assertEqual(hook.PAYLOAD, ('990-rxdma-page-frag-24254.patch',
                                       '991-mesh-amsdu-26866.patch',
-                                      '992-unique-sta-addr-25520.patch'))
+                                      '992-unique-sta-addr-25520.patch',
+                                      '993-ce-rx-kmalloc-24713.patch'))
         for _ in range(2):
             hook.prepare(self.root)
-            self.assertEqual(self.makefile.read_text(), self.original.replace(':=15', ':=17'))
+            self.assertEqual(self.makefile.read_text(), self.original.replace(':=15', ':=18'))
             self.assertEqual(self.native.read_text(), 'native input\n')
             self.assertEqual({p.name for p in self.patches.iterdir()}, {self.native.name, *hook.PAYLOAD})
             for name in hook.PAYLOAD:
@@ -68,11 +69,11 @@ class Ath11kBackports(unittest.TestCase):
                             (self.patches / name).unlink(missing_ok=True)
 
     def test_each_partial_payload_and_installed_drift_rejects_without_writes(self):
-        # Every proper subset, including the old 990/991 pair and 992 alone.
+        # Every proper subset, including old releases with two or three patches.
         from itertools import combinations
-        for length in (1, 2):
+        for length in range(1, len(hook.PAYLOAD)):
             for selected in combinations(hook.PAYLOAD, length):
-                for release in ('15', '16', '17'):
+                for release in ('15', '16', '17', '18'):
                     with self.subTest(selected=selected, release=release):
                         self.makefile.write_text(self.original.replace(':=15', ':=' + release))
                         for name in selected:
@@ -97,7 +98,7 @@ class Ath11kBackports(unittest.TestCase):
                         path.symlink_to(hook.PATCH_DIR / name)
                     with self.assertRaisesRegex(ValueError, 'ath11k'):
                         hook.prepare(self.root)
-                    self.assertIn('PKG_RELEASE:=17\n', self.makefile.read_text())
+                    self.assertIn('PKG_RELEASE:=18\n', self.makefile.read_text())
                     self.assertEqual(path.is_symlink(), kind == 'symlink')
                     path.unlink()
                     path.write_bytes(original)
@@ -110,8 +111,8 @@ class Ath11kBackports(unittest.TestCase):
         self.lock.stop()  # Exercise the production guard, not the synthetic lock.
         for _ in range(2):
             hook.prepare(self.root)
-            self.assertIn('PKG_RELEASE:=17\n', self.makefile.read_text())
-            self.assertEqual(len(list(self.patches.glob('*.patch'))), 50)
+            self.assertIn('PKG_RELEASE:=18\n', self.makefile.read_text())
+            self.assertEqual(len(list(self.patches.glob('*.patch'))), 51)
             for name in hook.PAYLOAD:
                 self.assertEqual((self.patches / name).read_bytes(), (hook.PATCH_DIR / name).read_bytes())
 
@@ -136,6 +137,29 @@ class Ath11kBackports(unittest.TestCase):
         self.assertLess(insert.index('sta_info_insert_check(sta)'), insert.index('sta_info_insert_finish(sta)'))
         self.assertRegex(insert, r'if \(err\) \{[\s\S]*return err;')
 
+    @unittest.skipUnless(os.environ.get('MX_BACKPORTS_SOURCE'), 'requires exact fully patched backports source')
+    def test_ce_rx_uses_kmalloc_and_one_configured_dma_length(self):
+        root = Path(os.environ['MX_BACKPORTS_SOURCE'])
+        ce = (root / 'drivers/net/wireless/ath/ath11k/ce.c').read_text()
+
+        def function(name):
+            start = ce.index(name + '(')
+            return ce[start:ce.index('\n}\n', start)]
+
+        post = function('ath11k_ce_rx_post_pipe')
+        done = function('ath11k_ce_recv_process_cb')
+        cleanup = function('ath11k_ce_rx_pipe_cleanup')
+        self.assertNotIn('dev_alloc_skb(', post)
+        self.assertRegex(post, r'__alloc_skb\(pipe->buf_sz \+ NET_SKB_PAD,\s*'
+                               r'GFP_ATOMIC,\s*SKB_ALLOC_RX, NUMA_NO_NODE\)')
+        self.assertLess(post.index('skb_reserve(skb, NET_SKB_PAD)'), post.index('dma_map_single('))
+        self.assertRegex(post, r'dma_map_single\(ab->dev, skb->data,\s*pipe->buf_sz, DMA_FROM_DEVICE\)')
+        for fn in (post, done, cleanup):
+            self.assertRegex(fn, r'dma_unmap_single\([^;]+,\s*pipe->buf_sz, DMA_FROM_DEVICE\)')
+            self.assertNotIn('skb_tailroom', fn)
+        self.assertIn('pipe->buf_sz < nbytes || nbytes == 0', done)
+        self.assertLess(done.index('pipe->buf_sz < nbytes'), done.index('skb_put(skb, nbytes)'))
+
     def test_rejects_drift_conflicts_and_partial_install_without_writes(self):
         for case in ('native', 'recipe', 'source', 'hash', 'series', 'payload', 'partial'):
             with self.subTest(case=case):
@@ -143,7 +167,7 @@ class Ath11kBackports(unittest.TestCase):
                 if case == 'native':
                     self.native.write_text('drift\n')
                 elif case == 'recipe':
-                    self.makefile.write_text(self.original.replace(':=15', ':=17'))
+                    self.makefile.write_text(self.original.replace(':=15', ':=18'))
                 elif case == 'source':
                     self.makefile.write_text(self.original.replace(':=7.2', ':=unknown'))
                 elif case == 'hash':
